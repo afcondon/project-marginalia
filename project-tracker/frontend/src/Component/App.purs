@@ -7,6 +7,7 @@ module Component.App where
 import Prelude
 
 import API as API
+import Control.Promise (Promise, toAffE)
 import Data.Array as Array
 import Data.Int (fromString) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
@@ -36,6 +37,12 @@ foreign import onHashChange_ :: (String -> Effect Unit) -> Effect (Effect Unit)
 foreign import focusSearch_ :: Effect Unit
 foreign import blurActive_ :: Effect Unit
 foreign import getGridColumns_ :: Effect Int
+foreign import focusNoteInput_ :: Effect Unit
+
+-- Audio recording
+foreign import startRecording_ :: Effect (Promise Boolean)
+foreign import stopAndTranscribe_ :: Effect (Promise String)
+foreign import isRecording_ :: Effect Boolean
 
 type KeyEvent =
   { key :: String
@@ -83,6 +90,11 @@ type State =
   , formStatusReason :: String
   -- Keyboard navigation
   , focusIndex :: Int  -- which card is focused (-1 = none)
+  -- Quick note
+  , notePanel :: Boolean       -- is note panel open?
+  , noteProjectId :: Maybe Int -- which project are we adding a note to?
+  , noteText :: String         -- note content being composed
+  , recording :: Boolean       -- currently recording audio?
   }
 
 data Action
@@ -116,6 +128,11 @@ data Action
   | HashChange String
   | AutoSave Int
   | KeyDown KeyEvent
+  | OpenNotePanel Int
+  | CloseNotePanel
+  | SetNoteText String
+  | SubmitNote
+  | ToggleRecording
 
 -- =============================================================================
 -- Component
@@ -152,6 +169,10 @@ initialState =
   , formSourcePath: ""
   , formStatusReason: ""
   , focusIndex: -1
+  , notePanel: false
+  , noteProjectId: Nothing
+  , noteText: ""
+  , recording: false
   }
 
 -- =============================================================================
@@ -173,7 +194,7 @@ render state =
     -- Keyboard shortcut hint (shown when no card is focused)
     , if state.view == ListView && state.focusIndex < 0
         then HH.div [ HP.class_ (H.ClassName "keyboard-hint") ]
-          [ HH.text "hjkl navigate  /search  enter open  1-7 status  e edit  esc close" ]
+          [ HH.text "hjkl navigate  /search  enter open  1-7 status  e edit  n note  esc close" ]
         else HH.text ""
     -- Slide-out detail panel (overlays the list)
     , case state.view of
@@ -181,6 +202,49 @@ render state =
           Nothing -> renderSlidePanel true renderLoading
           Just detail -> renderSlidePanel true (renderDetailPanel state detail)
         _ -> HH.text ""
+    -- Quick note panel (floating at bottom)
+    , if state.notePanel
+        then renderNotePanel state
+        else HH.text ""
+    ]
+
+renderNotePanel :: forall m. State -> H.ComponentHTML Action () m
+renderNotePanel state =
+  let projectName = case state.noteProjectId of
+        Nothing -> ""
+        Just pid -> case Array.find (\p -> p.id == pid) state.projects of
+          Nothing -> "Project #" <> show pid
+          Just p -> p.name
+  in HH.div [ HP.class_ (H.ClassName "note-panel") ]
+    [ HH.div [ HP.class_ (H.ClassName "note-panel-header") ]
+        [ HH.span [ HP.class_ (H.ClassName "note-panel-title") ]
+            [ HH.text ("Note on: " <> projectName) ]
+        , HH.button
+            [ HP.class_ (H.ClassName ("btn note-record-btn" <> if state.recording then " recording" else ""))
+            , HE.onClick \_ -> ToggleRecording
+            ]
+            [ HH.text (if state.recording then "Stop" else "Record") ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn btn-back")
+            , HE.onClick \_ -> CloseNotePanel
+            ]
+            [ HH.text "X" ]
+        ]
+    , HH.textarea
+        [ HP.class_ (H.ClassName "note-input-textarea")
+        , HP.value state.noteText
+        , HP.placeholder "Type or dictate a note..."
+        , HP.rows 3
+        , HE.onValueInput SetNoteText
+        ]
+    , HH.div [ HP.class_ (H.ClassName "note-panel-actions") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "btn btn-primary")
+            , HP.disabled (String.null state.noteText)
+            , HE.onClick \_ -> SubmitNote
+            ]
+            [ HH.text "Save note" ]
+        ]
     ]
 
 renderSlidePanel :: forall m. Boolean -> H.ComponentHTML Action () m -> H.ComponentHTML Action () m
@@ -675,6 +739,12 @@ renderForm state mDetail =
                 [ HH.text "Cancel" ]
             ]
         ]
+    , case mDetail of
+        Just detail ->
+          if not (Array.null detail.notes)
+            then renderNotes detail
+            else HH.text ""
+        Nothing -> HH.text ""
     ]
 
 domainFormOptions :: forall m. State -> Array (H.ComponentHTML Action () m)
@@ -931,6 +1001,46 @@ handleAction = case _ of
     _ <- liftAff $ API.updateProject projectId input
     pure unit
 
+  OpenNotePanel projectId -> do
+    H.modify_ \s -> s { notePanel = true, noteProjectId = Just projectId, noteText = "", recording = false }
+    liftEffect focusNoteInput_
+
+  CloseNotePanel -> do
+    H.modify_ \s -> s { notePanel = false, noteProjectId = Nothing, noteText = "", recording = false }
+
+  SetNoteText val ->
+    H.modify_ \s -> s { noteText = val }
+
+  SubmitNote -> do
+    state <- H.get
+    case state.noteProjectId of
+      Nothing -> pure unit
+      Just pid -> do
+        when (not (String.null state.noteText)) do
+          _ <- liftAff $ API.addNote pid state.noteText
+          H.modify_ \s -> s { notePanel = false, noteProjectId = Nothing, noteText = "" }
+          -- Refresh detail if open
+          case state.view of
+            DetailView dpid | dpid == pid -> do
+              mDetail <- liftAff $ API.fetchProject pid
+              H.modify_ \s -> s { selectedProject = mDetail }
+            _ -> pure unit
+
+  ToggleRecording -> do
+    state <- H.get
+    if state.recording
+      then do
+        -- Stop recording, transcribe, append to note
+        H.modify_ \s -> s { recording = false }
+        text <- liftAff $ toAffE stopAndTranscribe_
+        when (not (String.null text)) do
+          H.modify_ \s -> s { noteText = s.noteText <> (if String.null s.noteText then "" else " ") <> text }
+      else do
+        -- Start recording
+        started <- liftAff $ toAffE startRecording_
+        when started do
+          H.modify_ \s -> s { recording = true }
+
   KeyDown ke -> do
     state <- H.get
     -- Don't handle keys when typing in an input field (except Escape and Enter)
@@ -1045,10 +1155,18 @@ handleListViewKey ke state = case ke.key of
   "6" -> setFocusedStatus state Defunct
   "7" -> setFocusedStatus state Evolved
 
-  -- Escape: clear focus, blur search
+  -- Add note to focused card
+  "n" -> case focusedProject state of
+    Nothing -> pure unit
+    Just p -> handleAction (OpenNotePanel p.id)
+
+  -- Escape: close note panel, clear focus, blur search
   "Escape" -> do
-    liftEffect blurActive_
-    H.modify_ \s -> s { focusIndex = -1 }
+    if state.notePanel
+      then handleAction CloseNotePanel
+      else do
+        liftEffect blurActive_
+        H.modify_ \s -> s { focusIndex = -1 }
 
   _ -> pure unit
 
@@ -1057,6 +1175,11 @@ handleDetailViewKey :: forall o m. MonadAff m =>
 handleDetailViewKey ke = case ke.key of
   "Escape" -> handleAction CloseDetail
   "e" -> handleAction ShowEditForm
+  "n" -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> handleAction (OpenNotePanel detail.id)
   _ -> pure unit
 
 handleEditViewKey :: forall o m. MonadAff m =>

@@ -11,6 +11,7 @@ export const buildProjectListJson = (rows) => {
     subdomain: row.subdomain || null,
     status: row.status,
     description: row.description || null,
+    updatedAt: row.updated_at || null,
     tags: row.tags ? row.tags.split(', ').filter(t => t.trim()) : []
   }));
   return JSON.stringify({ projects, count: projects.length });

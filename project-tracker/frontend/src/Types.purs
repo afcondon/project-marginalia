@@ -93,6 +93,7 @@ type Project =
   , subdomain :: Maybe String
   , status :: Status
   , description :: Maybe String
+  , updatedAt :: Maybe String
   , tags :: Array String
   }
 
@@ -251,6 +252,7 @@ decodeProject json = case toObject json of
        , subdomain: optString "subdomain" obj
        , status
        , description: optString "description" obj
+       , updatedAt: optString "updatedAt" obj
        , tags: decodeStringArray "tags" obj
        }
 

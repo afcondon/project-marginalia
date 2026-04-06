@@ -8,6 +8,7 @@ module API
   , fetchStats
   , createProject
   , updateProject
+  , addNote
   ) where
 
 import Prelude
@@ -176,9 +177,18 @@ updateProject projectId input = do
           [] -> pure Nothing
           _  -> pure (Just (unsafeIndex projects 0))
 
+-- | Add a note to a project via the agent API.
+addNote :: Int -> String -> Aff Unit
+addNote projectId content = do
+  let url = baseUrl <> "/api/agent/projects/" <> show projectId <> "/notes"
+  let body = buildNoteBody content
+  _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  pure unit
+
 -- =============================================================================
 -- JSON Body Builders (FFI)
 -- =============================================================================
 
 foreign import buildCreateBody :: ProjectInput -> String
 foreign import buildUpdateBody :: ProjectInput -> String
+foreign import buildNoteBody :: String -> String

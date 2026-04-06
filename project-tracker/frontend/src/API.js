@@ -19,6 +19,10 @@ export const buildCreateBody = (input) => {
   return JSON.stringify(body);
 };
 
+// Build JSON body for POST /api/agent/projects/:id/notes
+export const buildNoteBody = (content) =>
+  JSON.stringify({ content, author: "human" });
+
 // Build JSON body for PUT /api/projects/:id
 // Only includes non-empty fields (partial update)
 export const buildUpdateBody = (input) => {

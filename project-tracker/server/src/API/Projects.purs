@@ -71,7 +71,7 @@ hasField key obj = case FO.lookup key obj of
 -- | List projects with optional filtering by domain, status, tag, and search text.
 listProjects :: Database -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff Response
 listProjects db mDomain mStatus mTag mSearch = do
-  let baseSql = "SELECT * FROM project_with_tags WHERE 1=1"
+  let baseSql = "SELECT p.id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id WHERE 1=1"
   let domainClause = case mDomain of
         Just _ -> " AND domain = ?"
         Nothing -> ""
@@ -84,8 +84,9 @@ listProjects db mDomain mStatus mTag mSearch = do
   let searchClause = case mSearch of
         Just _ -> " AND (LOWER(name) LIKE '%' || LOWER(?) || '%' OR LOWER(description) LIKE '%' || LOWER(?) || '%')"
         Nothing -> ""
-  let orderClause = " ORDER BY domain, subdomain, name"
-  let sql = baseSql <> domainClause <> statusClause <> tagClause <> searchClause <> orderClause
+  let groupClause = " GROUP BY p.id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"
+  let orderClause = " ORDER BY p.updated_at DESC NULLS LAST"
+  let sql = baseSql <> domainClause <> statusClause <> tagClause <> searchClause <> groupClause <> orderClause
   let params = buildFilterParams mDomain mStatus mTag mSearch
   rows <- queryAllParams db sql params
   ok' jsonHeaders (buildProjectListJson rows)

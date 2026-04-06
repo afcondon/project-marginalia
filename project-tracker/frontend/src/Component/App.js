@@ -51,3 +51,68 @@ export const getGridColumns_ = () => {
 export const blurActive_ = () => {
   if (document.activeElement) document.activeElement.blur();
 };
+
+// Focus the note textarea
+export const focusNoteInput_ = () => {
+  const el = document.querySelector(".note-input-textarea");
+  if (el) el.focus();
+};
+
+// ============================================================================
+// Audio recording + Whisper transcription
+// ============================================================================
+
+let _mediaRecorder = null;
+let _audioChunks = [];
+
+// Start recording audio. Returns true if started, false if failed.
+export const startRecording_ = () => {
+  return new Promise((resolve) => {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        _audioChunks = [];
+        _mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+        _mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) _audioChunks.push(e.data);
+        };
+        _mediaRecorder.start();
+        resolve(true);
+      })
+      .catch(() => resolve(false));
+  });
+};
+
+// Stop recording, send to Whisper, return transcribed text.
+export const stopAndTranscribe_ = () => {
+  return new Promise((resolve, reject) => {
+    if (!_mediaRecorder || _mediaRecorder.state !== "recording") {
+      reject(new Error("Not recording"));
+      return;
+    }
+    _mediaRecorder.onstop = async () => {
+      const blob = new Blob(_audioChunks, { type: "audio/webm" });
+      // Stop all tracks to release microphone
+      _mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      _mediaRecorder = null;
+      _audioChunks = [];
+
+      try {
+        const resp = await fetch("http://localhost:3200/transcribe", {
+          method: "POST",
+          body: blob,
+          headers: { "Content-Type": "audio/webm" },
+        });
+        const data = await resp.json();
+        resolve(data.text || "");
+      } catch (e) {
+        reject(e);
+      }
+    };
+    _mediaRecorder.stop();
+  });
+};
+
+// Check if currently recording
+export const isRecording_ = () => {
+  return _mediaRecorder !== null && _mediaRecorder.state === "recording";
+};
