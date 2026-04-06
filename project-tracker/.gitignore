@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.spago/
+
+# Build output
+output/
+frontend/public/bundle.js
+
+# Database files
+database/*.duckdb
+database/*.duckdb.wal
+
+# IDE
+.psc-ide-port
+.vscode/
+
+# OS
+.DS_Store
+
+# Lock files (regenerated)
+package-lock.json
+spago.lock

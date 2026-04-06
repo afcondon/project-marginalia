@@ -1,0 +1,184 @@
+-- | HTTP client for the Project Tracker API.
+-- |
+-- | Uses affjax-web to communicate with the HTTPurple server on port 3100.
+-- | All functions return Aff and handle JSON decoding via the decoders in Types.
+module API
+  ( fetchProjects
+  , fetchProject
+  , fetchStats
+  , createProject
+  , updateProject
+  ) where
+
+import Prelude
+
+import Affjax.Web as AX
+import Affjax.RequestBody as RequestBody
+import Affjax.ResponseFormat as ResponseFormat
+import Data.Argonaut.Parser (jsonParser)
+import Data.Either (Either(..))
+import Data.Maybe (Maybe(..))
+import Effect.Aff (Aff)
+import Effect.Class (liftEffect)
+import Effect.Console (log)
+import Types (Project, ProjectDetail, ProjectInput, Stats, decodeProjectList, decodeProjectDetail, decodeStats)
+
+-- =============================================================================
+-- Configuration
+-- =============================================================================
+
+baseUrl :: String
+baseUrl = "http://localhost:3100"
+
+-- =============================================================================
+-- Helpers
+-- =============================================================================
+
+-- | Build a query string from optional parameters.
+-- | Only includes parameters that have a value.
+buildQueryString :: Maybe String -> Maybe String -> Maybe String -> String
+buildQueryString mDomain mStatus mSearch =
+  let params = domainP <> statusP <> searchP
+      domainP = case mDomain of
+        Just d -> [ "domain=" <> d ]
+        Nothing -> []
+      statusP = case mStatus of
+        Just s -> [ "status=" <> s ]
+        Nothing -> []
+      searchP = case mSearch of
+        Just q -> [ "search=" <> q ]
+        Nothing -> []
+  in case params of
+    [] -> ""
+    _ -> "?" <> joinWith "&" params
+  where
+  joinWith sep arr = case arr of
+    [] -> ""
+    _ -> foldlWithSep sep arr
+
+-- Manual join since Data.String.joinWith needs an import
+foldlWithSep :: String -> Array String -> String
+foldlWithSep sep arr = case arr of
+  [] -> ""
+  _  -> go 0 ""
+  where
+  len = arrayLength arr
+  go i acc
+    | i >= len = acc
+    | i == 0 = go 1 (unsafeIndex arr 0)
+    | otherwise = go (i + 1) (acc <> sep <> unsafeIndex arr i)
+
+foreign import arrayLength :: forall a. Array a -> Int
+foreign import unsafeIndex :: forall a. Array a -> Int -> a
+
+-- =============================================================================
+-- API Functions
+-- =============================================================================
+
+-- | Fetch the project list, with optional filters for domain, status, and search text.
+fetchProjects :: Maybe String -> Maybe String -> Maybe String -> Aff (Array Project)
+fetchProjects mDomain mStatus mSearch = do
+  let url = baseUrl <> "/api/projects" <> buildQueryString mDomain mStatus mSearch
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left err -> do
+      liftEffect $ log $ "fetchProjects error: " <> AX.printError err
+      pure []
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "fetchProjects: failed to parse JSON"
+        pure []
+      Right json -> case decodeProjectList json of
+        Left decErr -> do
+          liftEffect $ log $ "fetchProjects: decode error: " <> show decErr
+          pure []
+        Right projects -> pure projects
+
+-- | Fetch a single project by ID, including notes, dependencies, and attachments.
+fetchProject :: Int -> Aff (Maybe ProjectDetail)
+fetchProject projectId = do
+  let url = baseUrl <> "/api/projects/" <> show projectId
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left err -> do
+      liftEffect $ log $ "fetchProject error: " <> AX.printError err
+      pure Nothing
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "fetchProject: failed to parse JSON"
+        pure Nothing
+      Right json -> case decodeProjectDetail json of
+        Left decErr -> do
+          liftEffect $ log $ "fetchProject: decode error: " <> show decErr
+          pure Nothing
+        Right detail -> pure (Just detail)
+
+-- | Fetch aggregate statistics (totals, domain/status breakdown).
+fetchStats :: Aff (Maybe Stats)
+fetchStats = do
+  let url = baseUrl <> "/api/stats"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left err -> do
+      liftEffect $ log $ "fetchStats error: " <> AX.printError err
+      pure Nothing
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "fetchStats: failed to parse JSON"
+        pure Nothing
+      Right json -> case decodeStats json of
+        Left decErr -> do
+          liftEffect $ log $ "fetchStats: decode error: " <> show decErr
+          pure Nothing
+        Right stats -> pure (Just stats)
+
+-- | Create a new project. Returns the created project on success.
+createProject :: ProjectInput -> Aff (Maybe Project)
+createProject input = do
+  let url = baseUrl <> "/api/projects"
+  let body = buildCreateBody input
+  result <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  case result of
+    Left err -> do
+      liftEffect $ log $ "createProject error: " <> AX.printError err
+      pure Nothing
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "createProject: failed to parse JSON"
+        pure Nothing
+      Right json -> case decodeProjectList json of
+        Left decErr -> do
+          liftEffect $ log $ "createProject: decode error: " <> show decErr
+          pure Nothing
+        Right projects -> case projects of
+          [] -> pure Nothing
+          _  -> pure (Just (unsafeIndex projects 0))
+
+-- | Update an existing project. Returns the updated project on success.
+updateProject :: Int -> ProjectInput -> Aff (Maybe Project)
+updateProject projectId input = do
+  let url = baseUrl <> "/api/projects/" <> show projectId
+  let body = buildUpdateBody input
+  result <- AX.put ResponseFormat.string url (Just (RequestBody.string body))
+  case result of
+    Left err -> do
+      liftEffect $ log $ "updateProject error: " <> AX.printError err
+      pure Nothing
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "updateProject: failed to parse JSON"
+        pure Nothing
+      Right json -> case decodeProjectList json of
+        Left decErr -> do
+          liftEffect $ log $ "updateProject: decode error: " <> show decErr
+          pure Nothing
+        Right projects -> case projects of
+          [] -> pure Nothing
+          _  -> pure (Just (unsafeIndex projects 0))
+
+-- =============================================================================
+-- JSON Body Builders (FFI)
+-- =============================================================================
+
+foreign import buildCreateBody :: ProjectInput -> String
+foreign import buildUpdateBody :: ProjectInput -> String

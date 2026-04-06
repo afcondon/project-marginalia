@@ -1,0 +1,20 @@
+{
+  "name": "project-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "spago build",
+    "build:server": "spago build -p project-tracker-server",
+    "build:frontend": "spago build -p project-tracker-frontend",
+    "bundle:frontend": "spago bundle -p project-tracker-frontend",
+    "serve:api": "node server/run.js",
+    "serve:frontend": "npx http-server frontend/public -p 3100"
+  },
+  "dependencies": {
+    "duckdb": "^1.4.4"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

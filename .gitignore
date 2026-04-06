@@ -1,0 +1,11 @@
+.DS_Store
+.psc-ide-port
+node_modules/
+.spago/
+output/
+project-tracker/database/tracker.duckdb
+project-tracker/database/tracker.duckdb.wal
+project-tracker/frontend/public/bundle.js
+package-lock.json
+spago.lock
+*.pdf

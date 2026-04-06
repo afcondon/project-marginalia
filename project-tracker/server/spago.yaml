@@ -1,0 +1,24 @@
+package:
+  name: project-tracker-server
+  description: "Project Tracker - REST API server over DuckDB"
+  dependencies:
+    - aff
+    - aff-promise
+    - argonaut-codecs
+    - argonaut-core
+    - arrays
+    - console
+    - effect
+    - either
+    - foldable-traversable
+    - foreign
+    - foreign-object
+    - httpurple
+    - maybe
+    - node-buffer
+    - node-fs
+    - nullable
+    - prelude
+    - strings
+    - transformers
+    - tuples
