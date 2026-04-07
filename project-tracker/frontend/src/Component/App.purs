@@ -103,6 +103,9 @@ type State =
   -- Add-child inline form
   , addChildOpen :: Maybe Int  -- project id we're adding a child to
   , addChildName :: String
+  -- Inline rename
+  , renameOpen :: Maybe Int  -- project id being renamed
+  , renameValue :: String
   }
 
 data Action
@@ -153,6 +156,10 @@ data Action
   | CloseAddChild
   | SetAddChildName String
   | SubmitAddChild Int
+  | StartRename Int String
+  | CancelRename
+  | SetRenameValue String
+  | SubmitRename Int
 
 -- =============================================================================
 -- Component
@@ -199,6 +206,8 @@ initialState =
   , recording: false
   , addChildOpen: Nothing
   , addChildName: ""
+  , renameOpen: Nothing
+  , renameValue: ""
   }
 
 -- =============================================================================
@@ -596,8 +605,7 @@ renderDetailPanel state detail =
         ]
     , HH.div [ HP.class_ (H.ClassName "detail-content") ]
         [ renderParentBreadcrumb state detail
-        , HH.h2 [ HP.class_ (H.ClassName "detail-title") ]
-            [ HH.text detail.name ]
+        , renderDetailTitle state detail
         , HH.div [ HP.class_ (H.ClassName "detail-meta") ]
             [ renderStatusBadge detail.status
             , renderDomainLabel detail.domain
@@ -627,6 +635,43 @@ renderDetailPanel state detail =
         , renderNotes detail
         ]
     ]
+
+-- | Detail title with inline rename.
+-- | Click the title to edit; Enter saves, Esc cancels.
+renderDetailTitle :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDetailTitle state detail = case state.renameOpen of
+  Just pid | pid == detail.id ->
+    HH.form
+      [ HP.class_ (H.ClassName "detail-rename-form")
+      , HE.onSubmit \_ -> SubmitRename detail.id
+      ]
+      [ HH.input
+          [ HP.class_ (H.ClassName "detail-rename-input")
+          , HP.type_ HP.InputText
+          , HP.value state.renameValue
+          , HP.autofocus true
+          , HE.onValueInput SetRenameValue
+          ]
+      , HH.button
+          [ HP.class_ (H.ClassName "btn btn-primary")
+          , HP.type_ HP.ButtonSubmit
+          , HP.disabled (String.null (String.trim state.renameValue))
+          ]
+          [ HH.text "Save" ]
+      , HH.button
+          [ HP.class_ (H.ClassName "btn btn-back")
+          , HP.type_ HP.ButtonButton
+          , HE.onClick \_ -> CancelRename
+          ]
+          [ HH.text "Cancel" ]
+      ]
+  _ ->
+    HH.h2
+      [ HP.class_ (H.ClassName "detail-title detail-title-editable")
+      , HE.onClick \_ -> StartRename detail.id detail.name
+      , HP.title "Click to rename"
+      ]
+      [ HH.text detail.name ]
 
 -- | Render image previews and links for attachments.
 renderAttachments :: forall m. ProjectDetail -> H.ComponentHTML Action () m
@@ -1359,6 +1404,32 @@ handleAction = case _ of
       case state.selectedProject of
         Just detail | detail.id == parentId -> do
           mDetail <- liftAff $ API.fetchProject parentId
+          H.modify_ \s -> s { selectedProject = mDetail }
+        _ -> pure unit
+
+  StartRename projectId currentName ->
+    H.modify_ \s -> s { renameOpen = Just projectId, renameValue = currentName }
+
+  CancelRename ->
+    H.modify_ \s -> s { renameOpen = Nothing, renameValue = "" }
+
+  SetRenameValue val ->
+    H.modify_ \s -> s { renameValue = val }
+
+  SubmitRename projectId -> do
+    state <- H.get
+    let trimmed = String.trim state.renameValue
+    when (not (String.null trimmed)) do
+      -- Use updateProject with just the name field set
+      let input = emptyProjectInput { name = trimmed }
+      _ <- liftAff $ API.updateProject projectId input
+      H.modify_ \s -> s { renameOpen = Nothing, renameValue = "" }
+      -- Refresh the detail panel + caches
+      handleAction LoadAllProjects
+      handleAction LoadProjects
+      case state.selectedProject of
+        Just detail | detail.id == projectId -> do
+          mDetail <- liftAff $ API.fetchProject projectId
           H.modify_ \s -> s { selectedProject = mDetail }
         _ -> pure unit
 

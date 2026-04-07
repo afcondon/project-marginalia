@@ -740,6 +740,41 @@ body {
   margin-bottom: var(--space-3);
 }
 
+.detail-title-editable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: -2px -6px var(--space-3);
+}
+
+.detail-title-editable:hover {
+  background: var(--color-bg);
+}
+
+.detail-rename-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.detail-rename-input {
+  flex: 1;
+  font-family: inherit;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  padding: 2px 6px;
+  border: 1px solid var(--color-text);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.detail-rename-input:focus {
+  outline: none;
+}
+
 .detail-meta {
   display: flex;
   align-items: center;
