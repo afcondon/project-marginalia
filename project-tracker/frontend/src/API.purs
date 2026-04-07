@@ -37,14 +37,17 @@ baseUrl = "http://localhost:3100"
 
 -- | Build a query string from optional parameters.
 -- | Only includes parameters that have a value.
-buildQueryString :: Maybe String -> Maybe String -> Maybe String -> String
-buildQueryString mDomain mStatus mSearch =
-  let params = domainP <> statusP <> searchP
+buildQueryString :: Maybe String -> Maybe String -> Maybe String -> Maybe String -> String
+buildQueryString mDomain mStatus mTag mSearch =
+  let params = domainP <> statusP <> tagP <> searchP
       domainP = case mDomain of
         Just d -> [ "domain=" <> d ]
         Nothing -> []
       statusP = case mStatus of
         Just s -> [ "status=" <> s ]
+        Nothing -> []
+      tagP = case mTag of
+        Just t -> [ "tag=" <> t ]
         Nothing -> []
       searchP = case mSearch of
         Just q -> [ "search=" <> q ]
@@ -76,10 +79,10 @@ foreign import unsafeIndex :: forall a. Array a -> Int -> a
 -- API Functions
 -- =============================================================================
 
--- | Fetch the project list, with optional filters for domain, status, and search text.
-fetchProjects :: Maybe String -> Maybe String -> Maybe String -> Aff (Array Project)
-fetchProjects mDomain mStatus mSearch = do
-  let url = baseUrl <> "/api/projects" <> buildQueryString mDomain mStatus mSearch
+-- | Fetch the project list, with optional filters for domain, status, tag, and search text.
+fetchProjects :: Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff (Array Project)
+fetchProjects mDomain mStatus mTag mSearch = do
+  let url = baseUrl <> "/api/projects" <> buildQueryString mDomain mStatus mTag mSearch
   result <- AX.get ResponseFormat.string url
   case result of
     Left err -> do

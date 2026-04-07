@@ -52,6 +52,9 @@ export const blurActive_ = () => {
   if (document.activeElement) document.activeElement.blur();
 };
 
+// Read altKey from a MouseEvent
+export const altKey_ = (event) => () => event.altKey === true;
+
 // Focus the note textarea
 export const focusNoteInput_ = () => {
   const el = document.querySelector(".note-input-textarea");

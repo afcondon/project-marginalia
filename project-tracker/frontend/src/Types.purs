@@ -88,6 +88,7 @@ nextStatuses = case _ of
 
 type Project =
   { id :: Int
+  , slug :: Maybe String
   , name :: String
   , domain :: String
   , subdomain :: Maybe String
@@ -247,6 +248,7 @@ decodeProject json = case toObject json of
     domain <- reqString "domain" obj
     status <- reqStatus "status" obj
     in { id
+       , slug: optString "slug" obj
        , name
        , domain
        , subdomain: optString "subdomain" obj

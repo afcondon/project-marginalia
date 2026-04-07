@@ -38,6 +38,7 @@ foreign import focusSearch_ :: Effect Unit
 foreign import blurActive_ :: Effect Unit
 foreign import getGridColumns_ :: Effect Int
 foreign import focusNoteInput_ :: Effect Unit
+foreign import altKey_ :: Event -> Effect Boolean
 
 -- Audio recording
 foreign import startRecording_ :: Effect (Promise Boolean)
@@ -75,6 +76,7 @@ type State =
   , view :: View
   , filterDomain :: Maybe String
   , filterStatus :: Maybe String
+  , filterTag :: Maybe String
   , searchText :: String
   , loading :: Boolean
   , error :: Maybe String
@@ -103,6 +105,8 @@ data Action
   | LoadStats
   | SetFilterDomain String
   | SetFilterStatus String
+  | SetFilterTag String
+  | TagClick String MouseEvent
   | SetSearchText String
   | ClearFilters
   | ApplyFilters
@@ -125,6 +129,8 @@ data Action
   | SetFormStatusReason String
   | QuickStatusChange Int Status MouseEvent
   | QuickEdit Int MouseEvent
+  | NextProject
+  | PrevProject
   | HashChange String
   | AutoSave Int
   | KeyDown KeyEvent
@@ -156,6 +162,7 @@ initialState =
   , view: ListView
   , filterDomain: Nothing
   , filterStatus: Nothing
+  , filterTag: Nothing
   , searchText: ""
   , loading: true
   , error: Nothing
@@ -194,7 +201,7 @@ render state =
     -- Keyboard shortcut hint (shown when no card is focused)
     , if state.view == ListView && state.focusIndex < 0
         then HH.div [ HP.class_ (H.ClassName "keyboard-hint") ]
-          [ HH.text "hjkl navigate  /search  enter open  1-7 status  e edit  n note  esc close" ]
+          [ HH.text "hjkl navigate  /search  enter open  1-7 status  e edit  n note  i inbox  esc close" ]
         else HH.text ""
     -- Slide-out detail panel (overlays the list)
     , case state.view of
@@ -212,9 +219,11 @@ renderNotePanel :: forall m. State -> H.ComponentHTML Action () m
 renderNotePanel state =
   let projectName = case state.noteProjectId of
         Nothing -> ""
-        Just pid -> case Array.find (\p -> p.id == pid) state.projects of
-          Nothing -> "Project #" <> show pid
-          Just p -> p.name
+        Just pid ->
+          if pid == inboxProjectId then "Claude Inbox"
+          else case Array.find (\p -> p.id == pid) state.projects of
+            Nothing -> "Project #" <> show pid
+            Just p -> p.name
   in HH.div [ HP.class_ (H.ClassName "note-panel") ]
     [ HH.div [ HP.class_ (H.ClassName "note-panel-header") ]
         [ HH.span [ HP.class_ (H.ClassName "note-panel-title") ]
@@ -269,6 +278,14 @@ renderHeader state =
                 , HE.onClick \_ -> ClearFilters
                 ]
                 [ HH.text (show (Array.length state.projects) <> " projects") ]
+            , case state.filterTag of
+                Nothing -> HH.text ""
+                Just tag -> HH.span
+                  [ HP.class_ (H.ClassName "active-tag-filter")
+                  , HE.onClick \_ -> SetFilterTag ""
+                  , HP.title "Click to clear tag filter"
+                  ]
+                  [ HH.text ("#" <> tag) ]
             , renderStatusFilterLights state
             , HH.input
                 [ HP.class_ (H.ClassName "header-search")
@@ -324,7 +341,7 @@ renderDomainFilterBar state =
 
 hasActiveFilters :: State -> Boolean
 hasActiveFilters state =
-  isJust state.filterDomain || isJust state.filterStatus || not (String.null state.searchText)
+  isJust state.filterDomain || isJust state.filterStatus || isJust state.filterTag || not (String.null state.searchText)
 
 -- =============================================================================
 -- Filter Helpers
@@ -412,6 +429,10 @@ renderProjectCard state idx project =
             Nothing -> HH.text ""
             Just sub -> HH.span [ HP.class_ (H.ClassName "card-subdomain") ]
               [ HH.text sub ]
+        , case project.slug of
+            Nothing -> HH.text ""
+            Just s -> HH.span [ HP.class_ (H.ClassName "card-slug") ]
+              [ HH.text s ]
         ]
     , case project.description of
         Nothing -> HH.text ""
@@ -420,8 +441,18 @@ renderProjectCard state idx project =
     , if Array.null project.tags
         then HH.text ""
         else HH.div [ HP.class_ (H.ClassName "card-tags") ]
-          (map (\t -> HH.span [ HP.class_ (H.ClassName "tag") ] [ HH.text t ]) project.tags)
+          (map renderTag project.tags)
     ]
+
+-- | Render a tag span. Option-click filters by that tag.
+renderTag :: forall m. String -> H.ComponentHTML Action () m
+renderTag t =
+  HH.span
+    [ HP.class_ (H.ClassName "tag")
+    , HP.title "Option-click to filter by this tag"
+    , HE.onClick \e -> TagClick t e
+    ]
+    [ HH.text t ]
 
 -- | Traffic light status control: always-visible row of 7 colored dots + label
 renderStatusControl :: forall m. Project -> H.ComponentHTML Action () m
@@ -479,7 +510,21 @@ renderDetailPanel :: forall m. State -> ProjectDetail -> H.ComponentHTML Action 
 renderDetailPanel _state detail =
   HH.div [ HP.class_ (H.ClassName "detail-panel") ]
     [ HH.div [ HP.class_ (H.ClassName "detail-header") ]
-        [ HH.button
+        [ HH.div [ HP.class_ (H.ClassName "detail-nav") ]
+            [ HH.button
+                [ HP.class_ (H.ClassName "btn btn-back")
+                , HE.onClick \_ -> PrevProject
+                , HP.title "Previous project (k)"
+                ]
+                [ HH.text "‹" ]
+            , HH.button
+                [ HP.class_ (H.ClassName "btn btn-back")
+                , HE.onClick \_ -> NextProject
+                , HP.title "Next project (j)"
+                ]
+                [ HH.text "›" ]
+            ]
+        , HH.button
             [ HP.class_ (H.ClassName "btn btn-secondary")
             , HE.onClick \_ -> ShowEditForm
             ]
@@ -511,7 +556,7 @@ renderDetailPanel _state detail =
             else HH.div [ HP.class_ (H.ClassName "detail-tags") ]
               [ HH.h4_ [ HH.text "Tags" ]
               , HH.div [ HP.class_ (H.ClassName "tag-list") ]
-                  (map (\t -> HH.span [ HP.class_ (H.ClassName "tag") ] [ HH.text t ]) detail.tags)
+                  (map renderTag detail.tags)
               ]
         , renderDependencies detail
         , renderNotes detail
@@ -786,7 +831,7 @@ handleAction = case _ of
   LoadProjects -> do
     H.modify_ \s -> s { loading = true, error = Nothing }
     state <- H.get
-    projects <- liftAff $ API.fetchProjects state.filterDomain state.filterStatus
+    projects <- liftAff $ API.fetchProjects state.filterDomain state.filterStatus state.filterTag
       (if String.null state.searchText then Nothing else Just state.searchText)
     H.modify_ \s -> s { projects = projects, loading = false }
 
@@ -804,6 +849,19 @@ handleAction = case _ of
     H.modify_ \s -> s { filterStatus = mStatus }
     handleAction LoadProjects
 
+  SetFilterTag val -> do
+    let mTag = if String.null val then Nothing else Just val
+    H.modify_ \s -> s { filterTag = mTag }
+    handleAction LoadProjects
+
+  TagClick tagName mouseEvent -> do
+    isOpt <- liftEffect $ altKey_ (toEvent mouseEvent)
+    when isOpt do
+      liftEffect $ stopPropagation_ (toEvent mouseEvent)
+      state <- H.get
+      let newTag = if state.filterTag == Just tagName then "" else tagName
+      handleAction (SetFilterTag newTag)
+
   SetSearchText val -> do
     H.modify_ \s -> s { searchText = val }
     -- Only search when 3+ characters or empty (cleared)
@@ -813,7 +871,7 @@ handleAction = case _ of
   ClearFilters -> do
     liftEffect $ setHash_ ""
     H.modify_ \s -> s
-      { filterDomain = Nothing, filterStatus = Nothing, searchText = ""
+      { filterDomain = Nothing, filterStatus = Nothing, filterTag = Nothing, searchText = ""
       , view = ListView, selectedProject = Nothing
       }
     handleAction LoadProjects
@@ -940,6 +998,9 @@ handleAction = case _ of
     _ <- liftAff $ API.updateProject projectId input
     handleAction LoadProjects
     handleAction LoadStats
+
+  NextProject -> cycleSelectedProject 1
+  PrevProject -> cycleSelectedProject (-1)
 
   QuickEdit projectId mouseEvent -> do
     liftEffect $ stopPropagation_ (toEvent mouseEvent)
@@ -1082,6 +1143,25 @@ emptyProjectInput =
   , statusReason: ""
   }
 
+-- | Cycle the currently-selected project in the detail panel by `delta`
+-- | (1 for next, -1 for previous), wrapping around the visible project list.
+cycleSelectedProject :: forall o m. MonadAff m =>
+  Int -> H.HalogenM State Action () o m Unit
+cycleSelectedProject delta = do
+  state <- H.get
+  case state.view of
+    DetailView currentId -> do
+      let projects = state.projects
+      case Array.findIndex (\p -> p.id == currentId) projects of
+        Nothing -> pure unit
+        Just idx -> do
+          let len = Array.length projects
+              newIdx = ((idx + delta) `mod` len + len) `mod` len
+          case Array.index projects newIdx of
+            Nothing -> pure unit
+            Just p -> handleAction (SelectProject p.id)
+    _ -> pure unit
+
 -- | Auto-save: if in edit mode, fire a save
 triggerAutoSave :: forall o m. MonadAff m => H.HalogenM State Action () o m Unit
 triggerAutoSave = do
@@ -1156,9 +1236,16 @@ handleListViewKey ke state = case ke.key of
   "7" -> setFocusedStatus state Evolved
 
   -- Add note to focused card
-  "n" -> case focusedProject state of
-    Nothing -> pure unit
-    Just p -> handleAction (OpenNotePanel p.id)
+  "n" -> do
+    liftEffect ke.preventDefault
+    case focusedProject state of
+      Nothing -> pure unit
+      Just p -> handleAction (OpenNotePanel p.id)
+
+  -- Open Claude inbox (project #123) for multi-project dictation
+  "i" -> do
+    liftEffect ke.preventDefault
+    handleAction (OpenNotePanel inboxProjectId)
 
   -- Escape: close note panel, clear focus, blur search
   "Escape" -> do
@@ -1175,12 +1262,24 @@ handleDetailViewKey :: forall o m. MonadAff m =>
 handleDetailViewKey ke = case ke.key of
   "Escape" -> handleAction CloseDetail
   "e" -> handleAction ShowEditForm
+  "j" -> handleAction NextProject
+  "ArrowDown" -> handleAction NextProject
+  "k" -> handleAction PrevProject
+  "ArrowUp" -> handleAction PrevProject
   "n" -> do
+    liftEffect ke.preventDefault
     state <- H.get
     case state.selectedProject of
       Nothing -> pure unit
       Just detail -> handleAction (OpenNotePanel detail.id)
+  "i" -> do
+    liftEffect ke.preventDefault
+    handleAction (OpenNotePanel inboxProjectId)
   _ -> pure unit
+
+-- | Hardcoded project id for the Claude Inbox special project
+inboxProjectId :: Int
+inboxProjectId = 123
 
 handleEditViewKey :: forall o m. MonadAff m =>
   KeyEvent -> H.HalogenM State Action () o m Unit

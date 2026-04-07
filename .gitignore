@@ -3,6 +3,8 @@
 node_modules/
 .spago/
 output/
+__pycache__/
+*.pyc
 project-tracker/database/tracker.duckdb
 project-tracker/database/tracker.duckdb.wal
 project-tracker/frontend/public/bundle.js

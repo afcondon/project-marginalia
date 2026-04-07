@@ -27,6 +27,7 @@ import Routing.Duplex.Generic (noArgs, product, sum)
 data Route
   = Projects
   | ProjectById Int
+  | ProjectTags Int
   | Stats
   | AgentProjects
   | AgentProjectById Int
@@ -42,6 +43,7 @@ route :: RouteDuplex' Route
 route = root $ sum
   { "Projects": path "api/projects" noArgs
   , "ProjectById": path "api/projects" (int segment)
+  , "ProjectTags": path "api/projects" (suffix (int segment) "tags")
   , "Stats": path "api/stats" noArgs
   , "AgentProjects": path "api/agent/projects" noArgs
   , "AgentProjectById": path "api/agent/projects" (int segment)
@@ -114,6 +116,13 @@ main = launchAff_ do
         Put -> do
           bodyStr <- toString body
           Projects.updateProject db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectTags projectId -> case method of
+        Post -> do
+          bodyStr <- toString body
+          Projects.addTag db projectId bodyStr
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

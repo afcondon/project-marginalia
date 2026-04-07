@@ -8,6 +8,7 @@ module API.Projects
   , getProject
   , createProject
   , updateProject
+  , addTag
   ) where
 
 import Prelude
@@ -18,12 +19,13 @@ import Data.Argonaut.Parser (jsonParser)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..), fromMaybe)
-import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, firstRow)
+import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, firstRow, isEmpty)
 import Effect.Aff (Aff)
 import Foreign (Foreign, unsafeToForeign)
 import Foreign.Object (Object, lookup) as FO
 import HTTPurple (Response, ok', badRequest', notFound)
 import HTTPurple.Headers (ResponseHeaders, headers)
+import Slug as Slug
 
 -- | JSON content type header with CORS
 jsonHeaders :: ResponseHeaders
@@ -71,7 +73,7 @@ hasField key obj = case FO.lookup key obj of
 -- | List projects with optional filtering by domain, status, tag, and search text.
 listProjects :: Database -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff Response
 listProjects db mDomain mStatus mTag mSearch = do
-  let baseSql = "SELECT p.id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id WHERE 1=1"
+  let baseSql = "SELECT p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id WHERE 1=1"
   let domainClause = case mDomain of
         Just _ -> " AND domain = ?"
         Nothing -> ""
@@ -79,12 +81,12 @@ listProjects db mDomain mStatus mTag mSearch = do
         Just _ -> " AND status = ?"
         Nothing -> ""
   let tagClause = case mTag of
-        Just _ -> " AND tags LIKE '%' || ? || '%'"
+        Just _ -> " AND EXISTS (SELECT 1 FROM project_tags pt2 JOIN tags t2 ON t2.id = pt2.tag_id WHERE pt2.project_id = p.id AND t2.name = ?)"
         Nothing -> ""
   let searchClause = case mSearch of
         Just _ -> " AND (LOWER(name) LIKE '%' || LOWER(?) || '%' OR LOWER(description) LIKE '%' || LOWER(?) || '%')"
         Nothing -> ""
-  let groupClause = " GROUP BY p.id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"
+  let groupClause = " GROUP BY p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"
   let orderClause = " ORDER BY p.updated_at DESC NULLS LAST"
   let sql = baseSql <> domainClause <> statusClause <> tagClause <> searchClause <> groupClause <> orderClause
   let params = buildFilterParams mDomain mStatus mTag mSearch
@@ -121,7 +123,7 @@ getProject db projectId = do
        LEFT JOIN project_tags pt ON pt.project_id = p.id
        LEFT JOIN tags t ON t.id = pt.tag_id
        WHERE p.id = ?
-       GROUP BY p.id, p.name, p.domain, p.subdomain, p.status,
+       GROUP BY p.id, p.slug, p.name, p.domain, p.subdomain, p.status,
                 p.evolved_into, p.description, p.source_url, p.source_path,
                 p.repo, p.created_at, p.updated_at"""
     idParam
@@ -162,9 +164,12 @@ createProject db bodyStr = case parseBody bodyStr of
     let sourcePath = getField "sourcePath" obj
     let repo = getField "repo" obj
 
+    slug <- Slug.generateUniqueSlug db
+
     run db
-      "INSERT INTO projects (name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      [ unsafeToForeign name
+      "INSERT INTO projects (slug, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      [ unsafeToForeign slug
+      , unsafeToForeign name
       , unsafeToForeign domain
       , unsafeToForeign subdomain
       , unsafeToForeign status
@@ -179,7 +184,16 @@ createProject db bodyStr = case parseBody bodyStr of
       "INSERT INTO status_history (project_id, old_status, new_status, reason, author) VALUES ((SELECT MAX(id) FROM projects), NULL, ?, 'Project created', 'api')"
       [ unsafeToForeign status ]
 
-    rows <- queryAll db "SELECT * FROM project_with_tags WHERE id = (SELECT MAX(id) FROM projects)"
+    -- Use the same query shape as listProjects so the response includes slug
+    rows <- queryAllParams db
+      """SELECT p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
+                STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags
+         FROM projects p
+         LEFT JOIN project_tags pt ON pt.project_id = p.id
+         LEFT JOIN tags t ON t.id = pt.tag_id
+         WHERE p.id = (SELECT MAX(id) FROM projects)
+         GROUP BY p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"""
+      []
     ok' jsonHeaders (buildProjectListJson rows)
 
 -- =============================================================================
@@ -218,6 +232,42 @@ updateProject db projectId bodyStr = case parseBody bodyStr of
         rows <- queryAllParams db "SELECT * FROM project_with_tags WHERE id = ?"
           [ unsafeToForeign projectId ]
         ok' jsonHeaders (buildProjectListJson rows)
+
+-- =============================================================================
+-- POST /api/projects/:id/tags  — add a tag to a project (creates the tag if needed)
+-- =============================================================================
+
+addTag :: Database -> Int -> String -> Aff Response
+addTag db projectId bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
+  Just obj -> case getFieldMaybe "tag" obj of
+    Nothing -> badRequest' jsonHeaders """{"error": "Missing 'tag' field"}"""
+    Just tagName -> do
+      -- Find or create the tag
+      tagRows <- queryAllParams db
+        "SELECT id FROM tags WHERE name = ?"
+        [ unsafeToForeign tagName ]
+      case firstRow tagRows of
+        Just _ -> pure unit
+        Nothing -> run db
+          "INSERT INTO tags (name) VALUES (?)"
+          [ unsafeToForeign tagName ]
+      -- Get the tag id
+      tagRows2 <- queryAllParams db
+        "SELECT id FROM tags WHERE name = ?"
+        [ unsafeToForeign tagName ]
+      case firstRow tagRows2 of
+        Nothing -> badRequest' jsonHeaders """{"error": "Tag creation failed"}"""
+        Just _tagRow -> do
+          -- Insert the link if it doesn't exist
+          existing <- queryAllParams db
+            "SELECT 1 FROM project_tags pt JOIN tags t ON t.id = pt.tag_id WHERE pt.project_id = ? AND t.name = ?"
+            [ unsafeToForeign projectId, unsafeToForeign tagName ]
+          when (isEmpty existing) do
+            run db
+              "INSERT INTO project_tags (project_id, tag_id) SELECT ?, id FROM tags WHERE name = ?"
+              [ unsafeToForeign projectId, unsafeToForeign tagName ]
+          ok' jsonHeaders ("""{"projectId": """ <> show projectId <> """, "tag": """ <> "\"" <> tagName <> "\"" <> """}""")
 
 -- =============================================================================
 -- Helpers

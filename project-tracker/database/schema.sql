@@ -34,6 +34,7 @@ CREATE SEQUENCE IF NOT EXISTS seq_issues START 1;
 -- The main entity. Covers aspirations, clippings, active work, finished things.
 CREATE TABLE IF NOT EXISTS projects (
     id            INTEGER PRIMARY KEY DEFAULT nextval('seq_projects'),
+    slug          TEXT UNIQUE,            -- dictation-friendly identifier: adjective-animal-animal
     name          TEXT NOT NULL,
     domain        TEXT NOT NULL,          -- programming, house, garden, woodworking, music, infrastructure
     subdomain     TEXT,                   -- hylograph, minard, shapedsteer, furniture, eurorack, etc.

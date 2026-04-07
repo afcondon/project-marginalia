@@ -6,6 +6,7 @@
 export const buildProjectListJson = (rows) => {
   const projects = (rows || []).map(row => ({
     id: Number(row.id),
+    slug: row.slug || null,
     name: row.name,
     domain: row.domain,
     subdomain: row.subdomain || null,
@@ -43,6 +44,7 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
 
   return JSON.stringify({
     id: projectId,
+    slug: project.slug || null,
     name: project.name,
     domain: project.domain,
     subdomain: project.subdomain || null,

@@ -19,6 +19,7 @@ package:
     - node-fs
     - nullable
     - prelude
+    - random
     - strings
     - transformers
     - tuples
