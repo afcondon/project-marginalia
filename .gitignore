@@ -8,6 +8,7 @@ __pycache__/
 project-tracker/database/tracker.duckdb
 project-tracker/database/tracker.duckdb.wal
 project-tracker/frontend/public/bundle.js
+project-tracker/frontend/public/attachments
 package-lock.json
 spago.lock
 *.pdf

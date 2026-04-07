@@ -23,6 +23,10 @@ export const buildCreateBody = (input) => {
 export const buildNoteBody = (content) =>
   JSON.stringify({ content, author: "human" });
 
+// Build JSON body for creating a child project under a parent
+export const buildChildBody = (parentId) => (name) => (domain) =>
+  JSON.stringify({ parentId, name, domain, status: "idea" });
+
 // Build JSON body for PUT /api/projects/:id
 // Only includes non-empty fields (partial update)
 export const buildUpdateBody = (input) => {

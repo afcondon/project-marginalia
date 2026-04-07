@@ -126,6 +126,7 @@ type Attachment =
   { id :: Int
   , filename :: String
   , mimeType :: Maybe String
+  , url :: Maybe String
   , description :: Maybe String
   , createdAt :: Maybe String
   }
@@ -302,6 +303,7 @@ decodeAttachment json = case toObject json of
     in { id
        , filename
        , mimeType: optString "mimeType" obj
+       , url: optString "url" obj
        , description: optString "description" obj
        , createdAt: optString "createdAt" obj
        }

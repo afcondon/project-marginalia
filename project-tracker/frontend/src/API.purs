@@ -7,6 +7,7 @@ module API
   , fetchProject
   , fetchStats
   , createProject
+  , createChild
   , updateProject
   , addNote
   ) where
@@ -191,6 +192,22 @@ addNote projectId content = do
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
   pure unit
 
+-- | Create a child project under the given parent. Returns the new project on success.
+createChild :: Int -> String -> String -> Aff (Maybe Project)
+createChild parentId name domain = do
+  let url = baseUrl <> "/api/projects"
+  let body = buildChildBody parentId name domain
+  result <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  case result of
+    Left _ -> pure Nothing
+    Right response -> case jsonParser response.body of
+      Left _ -> pure Nothing
+      Right json -> case decodeProjectList json of
+        Left _ -> pure Nothing
+        Right projects -> case projects of
+          [] -> pure Nothing
+          _ -> pure (Just (unsafeIndex projects 0))
+
 -- =============================================================================
 -- JSON Body Builders (FFI)
 -- =============================================================================
@@ -198,3 +215,4 @@ addNote projectId content = do
 foreign import buildCreateBody :: ProjectInput -> String
 foreign import buildUpdateBody :: ProjectInput -> String
 foreign import buildNoteBody :: String -> String
+foreign import buildChildBody :: Int -> String -> String -> String

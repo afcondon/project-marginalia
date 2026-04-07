@@ -69,12 +69,21 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
       blocking,
       blockedBy
     },
-    attachments: (attachments || []).map(a => ({
-      id: Number(a.id),
-      filename: a.filename,
-      mimeType: a.mime_type,
-      description: a.description || null,
-      createdAt: a.created_at
-    }))
+    attachments: (attachments || []).map(a => {
+      // Convert filesystem path to a URL relative to the frontend's static root.
+      // The frontend serves /attachments/* via a symlink to the canonical
+      // attachment store on Crucial4TB.
+      const PREFIX = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
+      const path = a.file_path || '';
+      const url = path.startsWith(PREFIX) ? '/attachments/' + path.slice(PREFIX.length) : null;
+      return {
+        id: Number(a.id),
+        filename: a.filename,
+        mimeType: a.mime_type,
+        url: url,
+        description: a.description || null,
+        createdAt: a.created_at
+      };
+    })
   });
 };

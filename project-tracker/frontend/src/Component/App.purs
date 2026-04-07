@@ -22,7 +22,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Types (Project, ProjectDetail, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString)
+import Types (Attachment, Project, ProjectDetail, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString)
 import Web.Event.Event (Event)
 import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 
@@ -100,6 +100,9 @@ type State =
   , noteProjectId :: Maybe Int -- which project are we adding a note to?
   , noteText :: String         -- note content being composed
   , recording :: Boolean       -- currently recording audio?
+  -- Add-child inline form
+  , addChildOpen :: Maybe Int  -- project id we're adding a child to
+  , addChildName :: String
   }
 
 data Action
@@ -146,6 +149,10 @@ data Action
   | SetNoteText String
   | SubmitNote
   | ToggleRecording
+  | OpenAddChild Int
+  | CloseAddChild
+  | SetAddChildName String
+  | SubmitAddChild Int
 
 -- =============================================================================
 -- Component
@@ -190,6 +197,8 @@ initialState =
   , noteProjectId: Nothing
   , noteText: ""
   , recording: false
+  , addChildOpen: Nothing
+  , addChildName: ""
   }
 
 -- =============================================================================
@@ -605,6 +614,7 @@ renderDetailPanel state detail =
             Just desc -> HH.div [ HP.class_ (H.ClassName "detail-description") ]
               [ HH.p_ [ HH.text desc ] ]
         , renderChildrenList state detail
+        , renderAttachments detail
         , renderDetailInfo detail
         , if Array.null detail.tags
             then HH.text ""
@@ -617,6 +627,47 @@ renderDetailPanel state detail =
         , renderNotes detail
         ]
     ]
+
+-- | Render image previews and links for attachments.
+renderAttachments :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderAttachments detail =
+  if Array.null detail.attachments
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName "detail-attachments") ]
+      [ HH.h4_ [ HH.text (show (Array.length detail.attachments) <> " attachment" <> (if Array.length detail.attachments == 1 then "" else "s")) ]
+      , HH.div [ HP.class_ (H.ClassName "attachment-grid") ]
+          (map renderAttachment detail.attachments)
+      ]
+
+renderAttachment :: forall m. Attachment -> H.ComponentHTML Action () m
+renderAttachment att =
+  let isImage = case att.mimeType of
+        Just mt -> String.take 6 mt == "image/"
+        Nothing -> false
+      caption = case att.description of
+        Just d -> d
+        Nothing -> att.filename
+  in case att.url of
+    Nothing ->
+      -- No URL — just show filename as text
+      HH.div [ HP.class_ (H.ClassName "attachment-tile attachment-no-url") ]
+        [ HH.span [ HP.class_ (H.ClassName "attachment-filename") ] [ HH.text att.filename ] ]
+    Just url ->
+      if isImage
+        then HH.a
+          [ HP.class_ (H.ClassName "attachment-tile attachment-image")
+          , HP.href url
+          , HP.target "_blank"
+          , HP.title caption
+          ]
+          [ HH.img [ HP.src url, HP.alt caption ] ]
+        else HH.a
+          [ HP.class_ (H.ClassName "attachment-tile attachment-file")
+          , HP.href url
+          , HP.target "_blank"
+          , HP.title caption
+          ]
+          [ HH.span [ HP.class_ (H.ClassName "attachment-filename") ] [ HH.text att.filename ] ]
 
 renderDetailInfo :: forall m. ProjectDetail -> H.ComponentHTML Action () m
 renderDetailInfo detail =
@@ -667,16 +718,60 @@ collectAncestors projects = go []
     Just p -> go (Array.snoc acc p) p.parentId
 
 -- | List children of this project, if any. Click to navigate.
+-- | Always show the "+ Add child" affordance so any project can be split.
 renderChildrenList :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
 renderChildrenList state detail =
   let children = Array.filter (\p -> p.parentId == Just detail.id) state.allProjects
-  in if Array.null children
-    then HH.text ""
-    else HH.div [ HP.class_ (H.ClassName "detail-children") ]
-      [ HH.h4_ [ HH.text (show (Array.length children) <> " projects in this group") ]
-      , HH.div [ HP.class_ (H.ClassName "children-list") ]
-          (map renderChildItem children)
-      ]
+      childCount = Array.length children
+      heading = if childCount == 0
+        then "Children"
+        else show childCount <> " projects in this group"
+  in HH.div [ HP.class_ (H.ClassName "detail-children") ]
+    [ HH.div [ HP.class_ (H.ClassName "children-header") ]
+        [ HH.h4_ [ HH.text heading ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn btn-back add-child-btn")
+            , HE.onClick \_ -> OpenAddChild detail.id
+            , HP.title "Split into child projects"
+            ]
+            [ HH.text "+ child" ]
+        ]
+    , if Array.null children
+        then HH.text ""
+        else HH.div [ HP.class_ (H.ClassName "children-list") ]
+              (map renderChildItem children)
+    , case state.addChildOpen of
+        Just pid | pid == detail.id -> renderAddChildForm state detail.id
+        _ -> HH.text ""
+    ]
+
+renderAddChildForm :: forall m. State -> Int -> H.ComponentHTML Action () m
+renderAddChildForm state parentId =
+  HH.form
+    [ HP.class_ (H.ClassName "add-child-form")
+    , HE.onSubmit \_ -> SubmitAddChild parentId
+    ]
+    [ HH.input
+        [ HP.class_ (H.ClassName "add-child-input")
+        , HP.type_ HP.InputText
+        , HP.placeholder "New child project name (Enter to add, Esc to close)"
+        , HP.value state.addChildName
+        , HE.onValueInput SetAddChildName
+        , HP.autofocus true
+        ]
+    , HH.button
+        [ HP.class_ (H.ClassName "btn btn-primary")
+        , HP.type_ HP.ButtonSubmit
+        , HP.disabled (String.null state.addChildName)
+        ]
+        [ HH.text "Add" ]
+    , HH.button
+        [ HP.class_ (H.ClassName "btn btn-back")
+        , HP.type_ HP.ButtonButton
+        , HE.onClick \_ -> CloseAddChild
+        ]
+        [ HH.text "Done" ]
+    ]
 
 renderChildItem :: forall m. Project -> H.ComponentHTML Action () m
 renderChildItem child =
@@ -1239,6 +1334,33 @@ handleAction = case _ of
         started <- liftAff $ toAffE startRecording_
         when started do
           H.modify_ \s -> s { recording = true }
+
+  OpenAddChild parentId ->
+    H.modify_ \s -> s { addChildOpen = Just parentId, addChildName = "" }
+
+  CloseAddChild ->
+    H.modify_ \s -> s { addChildOpen = Nothing, addChildName = "" }
+
+  SetAddChildName val ->
+    H.modify_ \s -> s { addChildName = val }
+
+  SubmitAddChild parentId -> do
+    state <- H.get
+    when (not (String.null state.addChildName)) do
+      -- Use the parent's domain so the child inherits it
+      let parentDomain = case Array.find (\p -> p.id == parentId) state.allProjects of
+            Just p -> p.domain
+            Nothing -> "programming"
+      _ <- liftAff $ API.createChild parentId state.addChildName parentDomain
+      -- Clear the input but keep the form open for rapid splitting
+      H.modify_ \s -> s { addChildName = "" }
+      handleAction LoadAllProjects
+      -- Refresh the detail panel so the new child shows in the list
+      case state.selectedProject of
+        Just detail | detail.id == parentId -> do
+          mDetail <- liftAff $ API.fetchProject parentId
+          H.modify_ \s -> s { selectedProject = mDetail }
+        _ -> pure unit
 
   KeyDown ke -> do
     state <- H.get

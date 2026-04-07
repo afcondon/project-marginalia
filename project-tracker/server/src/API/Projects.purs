@@ -14,10 +14,11 @@ module API.Projects
 import Prelude
 
 import Data.Argonaut.Core (Json)
-import Data.Argonaut.Core (toObject, toString) as J
+import Data.Argonaut.Core (toObject, toString, toNumber) as J
 import Data.Argonaut.Parser (jsonParser)
 import Data.Array as Array
 import Data.Either (Either(..))
+import Data.Int (floor) as Int
 import Data.Maybe (Maybe(..), fromMaybe)
 import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, firstRow, isEmpty)
 import Effect.Aff (Aff)
@@ -65,6 +66,14 @@ hasField :: String -> FO.Object Json -> Boolean
 hasField key obj = case FO.lookup key obj of
   Nothing -> false
   Just _ -> true
+
+-- | Extract an int field from a JSON object (handles both numeric and stringified ints).
+getIntField :: String -> FO.Object Json -> Maybe Int
+getIntField key obj = case FO.lookup key obj of
+  Nothing -> Nothing
+  Just json -> case J.toNumber json of
+    Just n -> Just (Int.floor n)
+    Nothing -> Nothing
 
 -- =============================================================================
 -- GET /api/projects
@@ -149,7 +158,7 @@ getProject db projectId = do
            WHERE d.blocker_id = ? OR d.blocked_id = ?"""
         [unsafeToForeign projectId, unsafeToForeign projectId]
       attachments <- queryAllParams db
-        "SELECT id, filename, mime_type, description, created_at FROM attachments WHERE project_id = ? ORDER BY created_at DESC"
+        "SELECT id, filename, mime_type, file_path, description, created_at FROM attachments WHERE project_id = ? ORDER BY created_at DESC"
         idParam
       ok' jsonHeaders (buildProjectDetailJson project notes deps attachments)
 
@@ -169,21 +178,38 @@ createProject db bodyStr = case parseBody bodyStr of
     let sourceUrl = getField "sourceUrl" obj
     let sourcePath = getField "sourcePath" obj
     let repo = getField "repo" obj
+    let mParentId = getIntField "parentId" obj
 
     slug <- Slug.generateUniqueSlug db
 
-    run db
-      "INSERT INTO projects (slug, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      [ unsafeToForeign slug
-      , unsafeToForeign name
-      , unsafeToForeign domain
-      , unsafeToForeign subdomain
-      , unsafeToForeign status
-      , unsafeToForeign description
-      , unsafeToForeign sourceUrl
-      , unsafeToForeign sourcePath
-      , unsafeToForeign repo
-      ]
+    case mParentId of
+      Nothing ->
+        run db
+          "INSERT INTO projects (slug, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          [ unsafeToForeign slug
+          , unsafeToForeign name
+          , unsafeToForeign domain
+          , unsafeToForeign subdomain
+          , unsafeToForeign status
+          , unsafeToForeign description
+          , unsafeToForeign sourceUrl
+          , unsafeToForeign sourcePath
+          , unsafeToForeign repo
+          ]
+      Just parentId ->
+        run db
+          "INSERT INTO projects (slug, parent_id, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          [ unsafeToForeign slug
+          , unsafeToForeign parentId
+          , unsafeToForeign name
+          , unsafeToForeign domain
+          , unsafeToForeign subdomain
+          , unsafeToForeign status
+          , unsafeToForeign description
+          , unsafeToForeign sourceUrl
+          , unsafeToForeign sourcePath
+          , unsafeToForeign repo
+          ]
 
     -- Record initial status
     run db
