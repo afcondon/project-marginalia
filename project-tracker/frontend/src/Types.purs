@@ -89,6 +89,7 @@ nextStatuses = case _ of
 type Project =
   { id :: Int
   , slug :: Maybe String
+  , parentId :: Maybe Int
   , name :: String
   , domain :: String
   , subdomain :: Maybe String
@@ -131,6 +132,8 @@ type Attachment =
 
 type ProjectDetail =
   { id :: Int
+  , slug :: Maybe String
+  , parentId :: Maybe Int
   , name :: String
   , domain :: String
   , subdomain :: Maybe String
@@ -249,6 +252,7 @@ decodeProject json = case toObject json of
     status <- reqStatus "status" obj
     in { id
        , slug: optString "slug" obj
+       , parentId: optInt "parentId" obj
        , name
        , domain
        , subdomain: optString "subdomain" obj
@@ -333,6 +337,8 @@ decodeProjectDetail json = case toObject json of
       Just depsJson -> decodeDependencies depsJson
     attachments <- decodeArrayField "attachments" decodeAttachment obj
     in { id
+       , slug: optString "slug" obj
+       , parentId: optInt "parentId" obj
        , name
        , domain
        , subdomain: optString "subdomain" obj

@@ -77,6 +77,9 @@ type State =
   , filterDomain :: Maybe String
   , filterStatus :: Maybe String
   , filterTag :: Maybe String
+  , filterAncestor :: Maybe { id :: Int, name :: String }
+  , filterDepth :: Maybe Int  -- 0 = leaves, 1 = parents, 2 = grandparents
+  , allProjects :: Array Project  -- unfiltered cache for ancestor/depth lookups
   , searchText :: String
   , loading :: Boolean
   , error :: Maybe String
@@ -102,11 +105,14 @@ type State =
 data Action
   = Initialize
   | LoadProjects
+  | LoadAllProjects
   | LoadStats
   | SetFilterDomain String
   | SetFilterStatus String
   | SetFilterTag String
   | TagClick String MouseEvent
+  | SetFilterAncestor (Maybe { id :: Int, name :: String })
+  | SetFilterDepth (Maybe Int)
   | SetSearchText String
   | ClearFilters
   | ApplyFilters
@@ -131,6 +137,7 @@ data Action
   | QuickEdit Int MouseEvent
   | NextProject
   | PrevProject
+  | NavigateToParent
   | HashChange String
   | AutoSave Int
   | KeyDown KeyEvent
@@ -163,6 +170,9 @@ initialState =
   , filterDomain: Nothing
   , filterStatus: Nothing
   , filterTag: Nothing
+  , filterAncestor: Nothing
+  , filterDepth: Nothing
+  , allProjects: []
   , searchText: ""
   , loading: true
   , error: Nothing
@@ -333,15 +343,55 @@ renderStatusFilterLight state status =
     ]
     []
 
--- | Domain pills row (second line of header)
+-- | Domain pills row (second line of header) — also includes the depth (P-rank) pills.
 renderDomainFilterBar :: forall m. State -> H.ComponentHTML Action () m
 renderDomainFilterBar state =
   HH.div [ HP.class_ (H.ClassName "header-domains") ]
-    (renderDomainPills state)
+    (renderDomainPills state <> renderDepthPills state)
+
+-- | Always-visible P0/P1/P2 radio buttons.
+-- | P0 = leaves (no children), P1 = parents (have children but no grandchildren),
+-- | P2 = grandparents (have grandchildren).
+renderDepthPills :: forall m. State -> Array (H.ComponentHTML Action () m)
+renderDepthPills state =
+  [ depthPill 0 "P0", depthPill 1 "P1", depthPill 2 "P2" ]
+  where
+  depthPill :: Int -> String -> H.ComponentHTML Action () m
+  depthPill d label =
+    let isActive = state.filterDepth == Just d
+        activeClass = if isActive then " filter-pill-active" else ""
+        count = Array.length (Array.filter (\p -> projectHeight state.allProjects p.id == d) state.allProjects)
+    in HH.button
+      [ HP.class_ (H.ClassName ("filter-pill depth-pill" <> activeClass))
+      , HP.title (depthDescription d)
+      , HE.onClick \_ -> SetFilterDepth (if isActive then Nothing else Just d)
+      ]
+      [ HH.text label
+      , HH.span [ HP.class_ (H.ClassName "pill-count") ]
+          [ HH.text (" (" <> show count <> ")") ]
+      ]
+
+  depthDescription :: Int -> String
+  depthDescription = case _ of
+    0 -> "Leaves: projects with no children"
+    1 -> "Parents: have children but no grandchildren"
+    2 -> "Grandparents: top-level rollups"
+    _ -> ""
+
+-- | Compute the "height" of a project: 0 if leaf, 1 if has only leaf children,
+-- | 2 if has grandchildren, etc.
+projectHeight :: Array Project -> Int -> Int
+projectHeight projects pid =
+  let children = Array.filter (\p -> p.parentId == Just pid) projects
+  in if Array.null children
+    then 0
+    else 1 + Array.foldr max 0 (map (\c -> projectHeight projects c.id) children)
 
 hasActiveFilters :: State -> Boolean
 hasActiveFilters state =
-  isJust state.filterDomain || isJust state.filterStatus || isJust state.filterTag || not (String.null state.searchText)
+  isJust state.filterDomain || isJust state.filterStatus || isJust state.filterTag
+    || isJust state.filterAncestor || isJust state.filterDepth
+    || not (String.null state.searchText)
 
 -- =============================================================================
 -- Filter Helpers
@@ -507,7 +557,7 @@ renderLoading =
 -- =============================================================================
 
 renderDetailPanel :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderDetailPanel _state detail =
+renderDetailPanel state detail =
   HH.div [ HP.class_ (H.ClassName "detail-panel") ]
     [ HH.div [ HP.class_ (H.ClassName "detail-header") ]
         [ HH.div [ HP.class_ (H.ClassName "detail-nav") ]
@@ -536,7 +586,8 @@ renderDetailPanel _state detail =
             [ HH.text "X" ]
         ]
     , HH.div [ HP.class_ (H.ClassName "detail-content") ]
-        [ HH.h2 [ HP.class_ (H.ClassName "detail-title") ]
+        [ renderParentBreadcrumb state detail
+        , HH.h2 [ HP.class_ (H.ClassName "detail-title") ]
             [ HH.text detail.name ]
         , HH.div [ HP.class_ (H.ClassName "detail-meta") ]
             [ renderStatusBadge detail.status
@@ -545,11 +596,15 @@ renderDetailPanel _state detail =
                 Nothing -> HH.text ""
                 Just sub -> HH.span [ HP.class_ (H.ClassName "detail-subdomain") ]
                   [ HH.text sub ]
+            , case detail.slug of
+                Nothing -> HH.text ""
+                Just s -> HH.span [ HP.class_ (H.ClassName "detail-slug") ] [ HH.text s ]
             ]
         , case detail.description of
             Nothing -> HH.text ""
             Just desc -> HH.div [ HP.class_ (H.ClassName "detail-description") ]
               [ HH.p_ [ HH.text desc ] ]
+        , renderChildrenList state detail
         , renderDetailInfo detail
         , if Array.null detail.tags
             then HH.text ""
@@ -579,6 +634,60 @@ renderDetailInfo detail =
         [ HH.dt_ [ HH.text row.label ]
         , HH.dd_ [ HH.text row.value ]
         ]) infoRows)
+
+-- | Show ancestor chain above the title (P1 = parent, P2 = grandparent, ...)
+-- | Each ancestor is a clickable pill that navigates up the chain.
+renderParentBreadcrumb :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderParentBreadcrumb state detail =
+  let ancestors = collectAncestors state.allProjects detail.parentId
+  in if Array.null ancestors
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName "detail-breadcrumb") ]
+      (Array.mapWithIndex renderAncestor ancestors)
+  where
+  renderAncestor :: Int -> Project -> H.ComponentHTML Action () m
+  renderAncestor i p =
+    HH.span
+      [ HP.class_ (H.ClassName "breadcrumb-pill")
+      , HE.onClick \_ -> SetFilterAncestor (Just { id: p.id, name: p.name })
+      , HP.title ("Filter to all descendants of " <> p.name)
+      ]
+      [ HH.span [ HP.class_ (H.ClassName "breadcrumb-rank") ] [ HH.text ("P" <> show (i + 1)) ]
+      , HH.span [ HP.class_ (H.ClassName "breadcrumb-name") ] [ HH.text p.name ]
+      ]
+
+-- | Walk up the parent chain, returning [parent, grandparent, great-grandparent, ...]
+-- | Stops when an ancestor is not in the projects array (out of view) or chain is exhausted.
+collectAncestors :: Array Project -> Maybe Int -> Array Project
+collectAncestors projects = go []
+  where
+  go acc Nothing = acc
+  go acc (Just pid) = case Array.find (\p -> p.id == pid) projects of
+    Nothing -> acc
+    Just p -> go (Array.snoc acc p) p.parentId
+
+-- | List children of this project, if any. Click to navigate.
+renderChildrenList :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderChildrenList state detail =
+  let children = Array.filter (\p -> p.parentId == Just detail.id) state.allProjects
+  in if Array.null children
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName "detail-children") ]
+      [ HH.h4_ [ HH.text (show (Array.length children) <> " projects in this group") ]
+      , HH.div [ HP.class_ (H.ClassName "children-list") ]
+          (map renderChildItem children)
+      ]
+
+renderChildItem :: forall m. Project -> H.ComponentHTML Action () m
+renderChildItem child =
+  HH.div
+    [ HP.class_ (H.ClassName "child-item")
+    , HE.onClick \_ -> SelectProject child.id
+    ]
+    [ HH.span [ HP.class_ (H.ClassName ("child-status status-light status-light-" <> statusToString child.status <> " current")) ] []
+    , HH.span [ HP.class_ (H.ClassName "child-name") ] [ HH.text child.name ]
+    , HH.span [ HP.class_ (H.ClassName "child-status-label") ] [ HH.text (statusLabel child.status) ]
+    ]
 
 renderDependencies :: forall m. ProjectDetail -> H.ComponentHTML Action () m
 renderDependencies detail =
@@ -814,6 +923,7 @@ handleAction :: forall o m. MonadAff m =>
 handleAction = case _ of
   Initialize -> do
     handleAction LoadStats
+    handleAction LoadAllProjects
     handleAction LoadProjects
     -- Subscribe to hash changes for browser back/forward
     { emitter: hashEmitter, listener: hashListener } <- liftEffect HS.create
@@ -831,9 +941,18 @@ handleAction = case _ of
   LoadProjects -> do
     H.modify_ \s -> s { loading = true, error = Nothing }
     state <- H.get
-    projects <- liftAff $ API.fetchProjects state.filterDomain state.filterStatus state.filterTag
+    let mAncestorId = map _.id state.filterAncestor
+    rawProjects <- liftAff $ API.fetchProjects state.filterDomain state.filterStatus state.filterTag mAncestorId
       (if String.null state.searchText then Nothing else Just state.searchText)
+    -- Apply client-side depth filter using the allProjects cache
+    let projects = case state.filterDepth of
+          Nothing -> rawProjects
+          Just d -> Array.filter (\p -> projectHeight state.allProjects p.id == d) rawProjects
     H.modify_ \s -> s { projects = projects, loading = false }
+
+  LoadAllProjects -> do
+    all <- liftAff $ API.fetchProjects Nothing Nothing Nothing Nothing Nothing
+    H.modify_ \s -> s { allProjects = all }
 
   LoadStats -> do
     mStats <- liftAff API.fetchStats
@@ -862,6 +981,15 @@ handleAction = case _ of
       let newTag = if state.filterTag == Just tagName then "" else tagName
       handleAction (SetFilterTag newTag)
 
+  SetFilterAncestor mAncestor -> do
+    H.modify_ \s -> s { filterAncestor = mAncestor, view = ListView, selectedProject = Nothing }
+    liftEffect $ setHash_ ""
+    handleAction LoadProjects
+
+  SetFilterDepth mDepth -> do
+    H.modify_ \s -> s { filterDepth = mDepth }
+    handleAction LoadProjects
+
   SetSearchText val -> do
     H.modify_ \s -> s { searchText = val }
     -- Only search when 3+ characters or empty (cleared)
@@ -871,7 +999,8 @@ handleAction = case _ of
   ClearFilters -> do
     liftEffect $ setHash_ ""
     H.modify_ \s -> s
-      { filterDomain = Nothing, filterStatus = Nothing, filterTag = Nothing, searchText = ""
+      { filterDomain = Nothing, filterStatus = Nothing, filterTag = Nothing
+      , filterAncestor = Nothing, filterDepth = Nothing, searchText = ""
       , view = ListView, selectedProject = Nothing
       }
     handleAction LoadProjects
@@ -997,10 +1126,19 @@ handleAction = case _ of
     let input = emptyProjectInput { status = statusToString newStatus }
     _ <- liftAff $ API.updateProject projectId input
     handleAction LoadProjects
+    handleAction LoadAllProjects
     handleAction LoadStats
 
   NextProject -> cycleSelectedProject 1
   PrevProject -> cycleSelectedProject (-1)
+
+  NavigateToParent -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> case detail.parentId of
+        Nothing -> pure unit
+        Just pid -> handleAction (SelectProject pid)
 
   QuickEdit projectId mouseEvent -> do
     liftEffect $ stopPropagation_ (toEvent mouseEvent)
@@ -1259,13 +1397,23 @@ handleListViewKey ke state = case ke.key of
 
 handleDetailViewKey :: forall o m. MonadAff m =>
   KeyEvent -> H.HalogenM State Action () o m Unit
+handleDetailViewKey ke
+  -- Cmd-Up: go to parent (Mac Finder convention)
+  | ke.key == "ArrowUp" && ke.meta = handleAction NavigateToParent
 handleDetailViewKey ke = case ke.key of
   "Escape" -> handleAction CloseDetail
   "e" -> handleAction ShowEditForm
   "j" -> handleAction NextProject
   "ArrowDown" -> handleAction NextProject
   "k" -> handleAction PrevProject
-  "ArrowUp" -> handleAction PrevProject
+  -- Plain Up: previous project in view (or parent if visible breadcrumb)
+  "ArrowUp" -> do
+    state <- H.get
+    case state.selectedProject of
+      Just detail | isJust detail.parentId
+                 , Just _ <- Array.find (\p -> Just p.id == detail.parentId) state.projects ->
+        handleAction NavigateToParent
+      _ -> handleAction PrevProject
   "n" -> do
     liftEffect ke.preventDefault
     state <- H.get

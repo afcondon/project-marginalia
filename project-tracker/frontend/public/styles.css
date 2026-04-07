@@ -434,6 +434,17 @@ body {
   cursor: pointer;
 }
 
+.active-ancestor-filter {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  background: var(--color-programming);
+  color: var(--color-surface);
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
 .detail-nav {
   display: flex;
   gap: var(--space-1);
@@ -532,6 +543,96 @@ body {
   font-size: var(--text-lg);
   font-weight: 300;
   padding: var(--space-1) var(--space-2);
+}
+
+.detail-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.breadcrumb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.breadcrumb-pill:hover {
+  border-color: var(--color-text);
+  color: var(--color-text);
+}
+
+.breadcrumb-rank {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 600;
+  font-size: 0.6rem;
+  color: var(--color-text-light);
+  letter-spacing: 0;
+}
+
+.breadcrumb-name {
+  font-weight: 500;
+}
+
+.detail-slug {
+  font-size: var(--text-xs);
+  color: var(--color-text-light);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  margin-left: auto;
+}
+
+.detail-children {
+  margin: var(--space-6) 0;
+}
+
+.children-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+
+.child-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.child-item:hover {
+  background: var(--color-bg);
+  margin: 0 calc(-1 * var(--space-2));
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.child-status {
+  flex-shrink: 0;
+}
+
+.child-name {
+  flex: 1;
+}
+
+.child-status-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: lowercase;
 }
 
 .detail-title {
@@ -807,6 +908,32 @@ body {
 .domain-pill.domain-woodworking.filter-pill-active    { background: var(--color-woodworking);    color: #fff; border-color: var(--color-woodworking); }
 .domain-pill.domain-garden.filter-pill-active         { background: var(--color-garden);         color: #fff; border-color: var(--color-garden); }
 .domain-pill.domain-infrastructure.filter-pill-active { background: var(--color-infrastructure); color: #fff; border-color: var(--color-infrastructure); }
+
+/* Ancestor (P-rank) pills */
+.ancestor-pill {
+  border-left-color: var(--color-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ancestor-pill .ancestor-rank {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--color-text-light);
+}
+
+.ancestor-pill.filter-pill-active {
+  background: var(--color-text);
+  color: var(--color-surface);
+  border-color: var(--color-text);
+}
+
+.ancestor-pill.filter-pill-active .ancestor-rank {
+  color: var(--color-surface);
+  opacity: 0.7;
+}
 
 /* Status pill border colors */
 .status-pill.status-idea     { border-left-color: var(--color-idea); }

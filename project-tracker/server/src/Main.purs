@@ -103,8 +103,9 @@ main = launchAff_ do
           let mDomain = Object.lookup "domain" query
           let mStatus = Object.lookup "status" query
           let mTag = Object.lookup "tag" query
+          let mAncestor = Object.lookup "ancestor" query
           let mSearch = Object.lookup "search" query
-          Projects.listProjects db mDomain mStatus mTag mSearch
+          Projects.listProjects db mDomain mStatus mTag mAncestor mSearch
         Post -> do
           bodyStr <- toString body
           Projects.createProject db bodyStr

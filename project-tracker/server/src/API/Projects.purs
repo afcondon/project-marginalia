@@ -71,31 +71,34 @@ hasField key obj = case FO.lookup key obj of
 -- =============================================================================
 
 -- | List projects with optional filtering by domain, status, tag, and search text.
-listProjects :: Database -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff Response
-listProjects db mDomain mStatus mTag mSearch = do
-  let baseSql = "SELECT p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id WHERE 1=1"
+listProjects :: Database -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff Response
+listProjects db mDomain mStatus mTag mAncestor mSearch = do
+  let baseSql = "SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id WHERE 1=1"
   let domainClause = case mDomain of
-        Just _ -> " AND domain = ?"
+        Just _ -> " AND p.domain = ?"
         Nothing -> ""
   let statusClause = case mStatus of
-        Just _ -> " AND status = ?"
+        Just _ -> " AND p.status = ?"
         Nothing -> ""
   let tagClause = case mTag of
         Just _ -> " AND EXISTS (SELECT 1 FROM project_tags pt2 JOIN tags t2 ON t2.id = pt2.tag_id WHERE pt2.project_id = p.id AND t2.name = ?)"
         Nothing -> ""
-  let searchClause = case mSearch of
-        Just _ -> " AND (LOWER(name) LIKE '%' || LOWER(?) || '%' OR LOWER(description) LIKE '%' || LOWER(?) || '%')"
+  let ancestorClause = case mAncestor of
+        Just _ -> " AND p.id IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM projects WHERE id = CAST(? AS INTEGER) UNION ALL SELECT p2.id FROM projects p2 JOIN descendants d ON p2.parent_id = d.id) SELECT id FROM descendants)"
         Nothing -> ""
-  let groupClause = " GROUP BY p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"
+  let searchClause = case mSearch of
+        Just _ -> " AND (LOWER(p.name) LIKE '%' || LOWER(?) || '%' OR LOWER(p.description) LIKE '%' || LOWER(?) || '%')"
+        Nothing -> ""
+  let groupClause = " GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"
   let orderClause = " ORDER BY p.updated_at DESC NULLS LAST"
-  let sql = baseSql <> domainClause <> statusClause <> tagClause <> searchClause <> groupClause <> orderClause
-  let params = buildFilterParams mDomain mStatus mTag mSearch
+  let sql = baseSql <> domainClause <> statusClause <> tagClause <> ancestorClause <> searchClause <> groupClause <> orderClause
+  let params = buildFilterParams mDomain mStatus mTag mAncestor mSearch
   rows <- queryAllParams db sql params
   ok' jsonHeaders (buildProjectListJson rows)
 
-buildFilterParams :: Maybe String -> Maybe String -> Maybe String -> Maybe String -> Array Foreign
-buildFilterParams mDomain mStatus mTag mSearch =
-  domainP <> statusP <> tagP <> searchP
+buildFilterParams :: Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Array Foreign
+buildFilterParams mDomain mStatus mTag mAncestor mSearch =
+  domainP <> statusP <> tagP <> ancestorP <> searchP
   where
   domainP = case mDomain of
     Just d -> [unsafeToForeign d]
@@ -105,6 +108,9 @@ buildFilterParams mDomain mStatus mTag mSearch =
     Nothing -> []
   tagP = case mTag of
     Just t -> [unsafeToForeign t]
+    Nothing -> []
+  ancestorP = case mAncestor of
+    Just a -> [unsafeToForeign a]
     Nothing -> []
   searchP = case mSearch of
     Just q -> [unsafeToForeign q, unsafeToForeign q]
@@ -123,7 +129,7 @@ getProject db projectId = do
        LEFT JOIN project_tags pt ON pt.project_id = p.id
        LEFT JOIN tags t ON t.id = pt.tag_id
        WHERE p.id = ?
-       GROUP BY p.id, p.slug, p.name, p.domain, p.subdomain, p.status,
+       GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status,
                 p.evolved_into, p.description, p.source_url, p.source_path,
                 p.repo, p.created_at, p.updated_at"""
     idParam
@@ -184,15 +190,15 @@ createProject db bodyStr = case parseBody bodyStr of
       "INSERT INTO status_history (project_id, old_status, new_status, reason, author) VALUES ((SELECT MAX(id) FROM projects), NULL, ?, 'Project created', 'api')"
       [ unsafeToForeign status ]
 
-    -- Use the same query shape as listProjects so the response includes slug
+    -- Use the same query shape as listProjects so the response includes slug + parent_id
     rows <- queryAllParams db
-      """SELECT p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
+      """SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
                 STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags
          FROM projects p
          LEFT JOIN project_tags pt ON pt.project_id = p.id
          LEFT JOIN tags t ON t.id = pt.tag_id
          WHERE p.id = (SELECT MAX(id) FROM projects)
-         GROUP BY p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"""
+         GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"""
       []
     ok' jsonHeaders (buildProjectListJson rows)
 
