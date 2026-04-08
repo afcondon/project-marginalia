@@ -86,6 +86,17 @@ DELETE /api/servers/:id
 POST /api/agent/projects/:id/notes
 Body: { "content": "...", "author": "claude" }
 
+POST /api/agent/projects/:id/attachments
+Body: { "filename":    "report.md",
+        "filePath":    "/abs/path/to/file",
+        "mimeType":    "text/markdown",      # optional, default application/octet-stream
+        "description": "..." }               # optional
+# Registers a filesystem reference on the project. No upload — the file stays
+# where it is. If the path starts with the canonical store prefix
+# (/Volumes/Crucial4TB/Documents/Notes Attachments/), the response url field
+# points at /attachments/... so the frontend can link it. Otherwise url=null
+# and the attachment shows as a plain pointer.
+
 POST /api/projects/:id/tags
 Body: { "tag": "library" }
 ```

@@ -100,6 +100,27 @@ export const buildAgentNoteJson = (row) => {
   });
 };
 
+// Build attachment creation response from the newly inserted row.
+// Mirrors the url-derivation logic in Projects.js: paths under the canonical
+// attachment store get a /attachments/ URL; others return url=null.
+export const buildAgentAttachmentJson = (row) => {
+  const PREFIX = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
+  const filePath = row.file_path || '';
+  const url = filePath.startsWith(PREFIX)
+    ? '/attachments/' + filePath.slice(PREFIX.length)
+    : null;
+  return JSON.stringify({
+    id: Number(row.id),
+    projectId: Number(row.project_id),
+    filename: row.filename,
+    mimeType: row.mime_type,
+    filePath: filePath || null,
+    url: url,
+    description: row.description || null,
+    createdAt: row.created_at
+  });
+};
+
 // Build search results.
 // nameRows: projects matching on name; descRows: matching on description.
 // Results are deduplicated: name matches take priority.

@@ -11,6 +11,7 @@ module API.Agent
   , agentGetProject
   , agentUpdateStatus
   , agentAddNote
+  , agentAddAttachment
   , agentSearch
   ) where
 
@@ -48,6 +49,7 @@ foreign import buildAgentProjectListJson :: Rows -> FO.Object (Array String) -> 
 foreign import buildAgentProjectDetailJson :: Foreign -> Rows -> Rows -> Rows -> Rows -> Array String -> String
 foreign import buildAgentProjectSummaryJson :: Foreign -> Array String -> String
 foreign import buildAgentNoteJson :: Foreign -> String
+foreign import buildAgentAttachmentJson :: Foreign -> String
 foreign import buildAgentSearchJson :: String -> Rows -> Rows -> String
 foreign import extractRowStatus :: Foreign -> String
 
@@ -307,6 +309,66 @@ agentAddNote db projectId bodyStr = case parseBody bodyStr of
         case firstRow noteRows of
           Nothing   -> ok' jsonHeaders "{}"
           Just note -> ok' jsonHeaders (buildAgentNoteJson note)
+
+-- =============================================================================
+-- POST /api/agent/projects/:id/attachments
+-- =============================================================================
+
+-- | Register an attachment reference on a project.
+-- |
+-- | This is a "reference" attachment, not a content upload: the caller passes
+-- | a filesystem path that already exists and we record it in the attachments
+-- | table. Useful for linking Claude-generated artifacts (reports, indexes,
+-- | plans) to the project they belong to without having to stuff their bytes
+-- | into DuckDB.
+-- |
+-- | Body shape:
+-- |   { "filename":    "remastering-inventory.md"   (required)
+-- |   , "filePath":    "/abs/path/to/file"          (required)
+-- |   , "mimeType":    "text/markdown"              (optional, default application/octet-stream)
+-- |   , "description": "..."                        (optional)
+-- |   }
+-- |
+-- | Returns the newly inserted attachment row in agent-friendly format,
+-- | including a /attachments/... url if the file lives inside the canonical
+-- | attachment store at /Volumes/Crucial4TB/Documents/Notes Attachments/.
+agentAddAttachment :: Database -> Int -> String -> Aff Response
+agentAddAttachment db projectId bodyStr = case parseBody bodyStr of
+  Nothing  -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
+  Just obj -> do
+    let filename = getField "filename" obj
+    let filePath = getField "filePath" obj
+    let mimeType = fromMaybe "application/octet-stream" (getFieldMaybe "mimeType" obj)
+    let description = getField "description" obj
+
+    if filename == "" || filePath == ""
+      then badRequest' jsonHeaders
+        """{"error": "filename and filePath are required"}"""
+      else do
+        -- Verify project exists
+        let idParam = [ unsafeToForeign projectId ]
+        projectRows <- queryAllParams db
+          "SELECT id FROM projects WHERE id = ?"
+          idParam
+        case firstRow projectRows of
+          Nothing -> notFound
+          Just _  -> do
+            run db
+              "INSERT INTO attachments (project_id, filename, mime_type, file_path, description) VALUES (?, ?, ?, ?, ?)"
+              [ unsafeToForeign projectId
+              , unsafeToForeign filename
+              , unsafeToForeign mimeType
+              , unsafeToForeign filePath
+              , unsafeToForeign description
+              ]
+
+            -- Fetch the inserted row
+            attRows <- queryAllParams db
+              "SELECT * FROM attachments WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+              idParam
+            case firstRow attRows of
+              Nothing  -> ok' jsonHeaders "{}"
+              Just att -> ok' jsonHeaders (buildAgentAttachmentJson att)
 
 -- =============================================================================
 -- GET /api/agent/search
