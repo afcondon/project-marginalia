@@ -6,6 +6,9 @@ module API
   ( fetchProjects
   , fetchProject
   , fetchStats
+  , fetchPorts
+  , fetchServersForProject
+  , deleteServer
   , createProject
   , createChild
   , updateProject
@@ -26,7 +29,7 @@ import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Foreign.Object (lookup) as FO
-import Types (Project, ProjectDetail, ProjectInput, Stats, decodeProjectList, decodeProjectDetail, decodeStats)
+import Types (Project, ProjectDetail, ProjectInput, Server, Stats, decodeProjectList, decodeProjectDetail, decodeServerArray, decodeServerList, decodeStats)
 
 -- =============================================================================
 -- Configuration
@@ -142,6 +145,43 @@ fetchStats = do
           liftEffect $ log $ "fetchStats: decode error: " <> show decErr
           pure Nothing
         Right stats -> pure (Just stats)
+
+-- | Fetch the full port registry (all servers across all projects).
+fetchPorts :: Aff (Array Server)
+fetchPorts = do
+  let url = baseUrl <> "/api/ports"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left err -> do
+      liftEffect $ log $ "fetchPorts error: " <> AX.printError err
+      pure []
+    Right response -> case jsonParser response.body of
+      Left _ -> pure []
+      Right json -> case decodeServerList json of
+        Left _ -> pure []
+        Right servers -> pure servers
+
+-- | Fetch servers for a specific project.
+fetchServersForProject :: Int -> Aff (Array Server)
+fetchServersForProject projectId = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/servers"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left _ -> pure []
+    Right response -> case jsonParser response.body of
+      Left _ -> pure []
+      Right json -> case decodeServerArray json of
+        Left _ -> pure []
+        Right servers -> pure servers
+
+-- | Delete a server by id.
+deleteServer :: Int -> Aff Boolean
+deleteServer serverId = do
+  let url = baseUrl <> "/api/servers/" <> show serverId
+  result <- AX.delete ResponseFormat.string url
+  case result of
+    Left _ -> pure false
+    Right _ -> pure true
 
 -- | Create a new project. Returns the created project on success.
 createProject :: ProjectInput -> Aff (Maybe Project)

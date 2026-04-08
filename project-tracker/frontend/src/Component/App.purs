@@ -12,6 +12,7 @@ import Data.Array as Array
 import Data.Int (fromString) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.String as String
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (liftEffect)
@@ -22,7 +23,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Types (Attachment, Project, ProjectDetail, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString)
+import Types (Attachment, Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString)
 import Web.Event.Event (Event)
 import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 
@@ -80,6 +81,7 @@ type State =
   , filterAncestor :: Maybe { id :: Int, name :: String }
   , filterDepth :: Maybe Int  -- 0 = leaves, 1 = parents, 2 = grandparents
   , allProjects :: Array Project  -- unfiltered cache for ancestor/depth lookups
+  , servers :: Array Server        -- full port registry for lookups on cards and in detail
   , searchText :: String
   , loading :: Boolean
   , error :: Maybe String
@@ -113,6 +115,7 @@ data Action
   = Initialize
   | LoadProjects
   | LoadAllProjects
+  | LoadPorts
   | LoadStats
   | SetFilterDomain String
   | SetFilterStatus String
@@ -163,6 +166,7 @@ data Action
   | ToggleRenameDirectory
   | SubmitRename Int
   | ClearStatus
+  | DeleteServerAction Int  -- server id
 
 -- =============================================================================
 -- Component
@@ -190,6 +194,7 @@ initialState =
   , filterAncestor: Nothing
   , filterDepth: Nothing
   , allProjects: []
+  , servers: []
   , searchText: ""
   , loading: true
   , error: Nothing
@@ -509,6 +514,7 @@ renderProjectCard state idx project =
             Nothing -> HH.text ""
             Just sub -> HH.span [ HP.class_ (H.ClassName "card-subdomain") ]
               [ HH.text sub ]
+        , renderCardPortBadges state project.id
         , case project.slug of
             Nothing -> HH.text ""
             Just s -> HH.span [ HP.class_ (H.ClassName "card-slug") ]
@@ -523,6 +529,25 @@ renderProjectCard state idx project =
         else HH.div [ HP.class_ (H.ClassName "card-tags") ]
           (map renderTag project.tags)
     ]
+
+-- | Port badges on cards — show every allocated port for this project as
+-- | a small monospace chip. Projects with no servers render nothing.
+renderCardPortBadges :: forall m. State -> Int -> H.ComponentHTML Action () m
+renderCardPortBadges state projectId =
+  let myServers = Array.filter (\s -> s.projectId == projectId) state.servers
+      withPorts = Array.catMaybes (map (\s -> map (Tuple s.role) s.port) myServers)
+  in if Array.null withPorts
+    then HH.text ""
+    else HH.span [ HP.class_ (H.ClassName "card-ports") ]
+      (map renderPortChip withPorts)
+  where
+  renderPortChip :: Tuple String Int -> H.ComponentHTML Action () m
+  renderPortChip (Tuple role port) =
+    HH.span
+      [ HP.class_ (H.ClassName "port-chip")
+      , HP.title (role <> " :" <> show port)
+      ]
+      [ HH.text (":" <> show port) ]
 
 -- | Render a tag span. Option-click filters by that tag.
 renderTag :: forall m. String -> H.ComponentHTML Action () m
@@ -634,6 +659,7 @@ renderDetailPanel state detail =
             Just desc -> HH.div [ HP.class_ (H.ClassName "detail-description") ]
               [ HH.p_ [ HH.text desc ] ]
         , renderChildrenList state detail
+        , renderServers state detail
         , renderAttachments detail
         , renderDetailInfo detail
         , if Array.null detail.tags
@@ -702,6 +728,50 @@ renderDetailTitle state detail = case state.renameOpen of
       , HP.title "Click to rename"
       ]
       [ HH.text detail.name ]
+
+-- | Render the servers section of the detail panel: read-only view of
+-- | registered servers with delete buttons. New servers are added by asking
+-- | Claude, which inspects the project and POSTs via the API. The form
+-- | composition surface is intentionally absent — the UI is a display, not
+-- | a composer.
+renderServers :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderServers state detail =
+  let myServers = Array.filter (\s -> s.projectId == detail.id) state.servers
+  in if Array.null myServers
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName "detail-servers") ]
+      [ HH.h4_ [ HH.text (show (Array.length myServers) <> " servers") ]
+      , HH.div [ HP.class_ (H.ClassName "servers-list") ]
+          (map renderServerRow myServers)
+      ]
+
+renderServerRow :: forall m. Server -> H.ComponentHTML Action () m
+renderServerRow server =
+  HH.div [ HP.class_ (H.ClassName "server-row") ]
+    [ HH.span [ HP.class_ (H.ClassName "server-role") ]
+        [ HH.text server.role ]
+    , HH.span [ HP.class_ (H.ClassName "server-port") ]
+        [ HH.text (case server.port of
+            Just p -> ":" <> show p
+            Nothing -> "(no port)") ]
+    , case server.url of
+        Nothing -> HH.text ""
+        Just u -> HH.a
+          [ HP.class_ (H.ClassName "server-link")
+          , HP.href u
+          , HP.target "_blank"
+          , HP.title "Open in new tab"
+          ]
+          [ HH.text "↗" ]
+    , HH.span [ HP.class_ (H.ClassName "server-desc") ]
+        [ HH.text (fromMaybe "" server.description) ]
+    , HH.button
+        [ HP.class_ (H.ClassName "btn btn-back server-delete")
+        , HE.onClick \_ -> DeleteServerAction server.id
+        , HP.title "Delete this server"
+        ]
+        [ HH.text "×" ]
+    ]
 
 -- | Render image previews and links for attachments.
 renderAttachments :: forall m. ProjectDetail -> H.ComponentHTML Action () m
@@ -1094,6 +1164,7 @@ handleAction = case _ of
   Initialize -> do
     handleAction LoadStats
     handleAction LoadAllProjects
+    handleAction LoadPorts
     handleAction LoadProjects
     -- Subscribe to hash changes for browser back/forward
     { emitter: hashEmitter, listener: hashListener } <- liftEffect HS.create
@@ -1123,6 +1194,10 @@ handleAction = case _ of
   LoadAllProjects -> do
     all <- liftAff $ API.fetchProjects Nothing Nothing Nothing Nothing Nothing
     H.modify_ \s -> s { allProjects = all }
+
+  LoadPorts -> do
+    servers <- liftAff API.fetchPorts
+    H.modify_ \s -> s { servers = servers }
 
   LoadStats -> do
     mStats <- liftAff API.fetchStats
@@ -1168,6 +1243,10 @@ handleAction = case _ of
 
   ClearStatus ->
     H.modify_ \s -> s { error = Nothing }
+
+  DeleteServerAction serverId -> do
+    _ <- liftAff $ API.deleteServer serverId
+    handleAction LoadPorts
 
   ClearFilters -> do
     liftEffect $ setHash_ ""
@@ -1709,6 +1788,15 @@ clamp lo hi x
   | x < lo = lo
   | x > hi = hi
   | otherwise = x
+
+-- | Walk the sorted allocated list looking for the first gap starting from `start`.
+firstFreePort :: Int -> Array Int -> Int
+firstFreePort start xs = case Array.uncons xs of
+  Nothing -> start
+  Just { head, tail } ->
+    if head < start then firstFreePort start tail
+    else if head == start then firstFreePort (start + 1) tail
+    else start
 
 -- =============================================================================
 -- Hash Routing

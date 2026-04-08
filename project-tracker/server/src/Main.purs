@@ -5,6 +5,7 @@ import Prelude
 import API.Agent as Agent
 import API.Dependencies as Dependencies
 import API.Projects as Projects
+import API.Servers as Servers
 import API.Stats as Stats
 import Data.Generic.Rep (class Generic)
 import Database.DuckDB as DB
@@ -29,6 +30,10 @@ data Route
   | ProjectById Int
   | ProjectTags Int
   | ProjectRename Int
+  | ProjectServers Int
+  | Ports
+  | PortsSuggest
+  | ServerById Int
   | Stats
   | AgentProjects
   | AgentProjectById Int
@@ -46,6 +51,10 @@ route = root $ sum
   , "ProjectById": path "api/projects" (int segment)
   , "ProjectTags": path "api/projects" (suffix (int segment) "tags")
   , "ProjectRename": path "api/projects" (suffix (int segment) "rename")
+  , "ProjectServers": path "api/projects" (suffix (int segment) "servers")
+  , "Ports": path "api/ports" noArgs
+  , "PortsSuggest": path "api/ports/suggest" noArgs
+  , "ServerById": path "api/servers" (int segment)
   , "Stats": path "api/stats" noArgs
   , "AgentProjects": path "api/agent/projects" noArgs
   , "AgentProjectById": path "api/agent/projects" (int segment)
@@ -133,6 +142,29 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Projects.renameProject db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectServers projectId -> case method of
+        Get -> Servers.listServersForProject db projectId
+        Post -> do
+          bodyStr <- toString body
+          Servers.addServer db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      Ports -> case method of
+        Get -> Servers.listPorts db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      PortsSuggest -> case method of
+        Get -> Servers.suggestPort db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ServerById serverId -> case method of
+        Delete -> Servers.deleteServer db serverId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

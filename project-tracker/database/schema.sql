@@ -26,6 +26,7 @@ CREATE SEQUENCE IF NOT EXISTS seq_status_history START 1;
 CREATE SEQUENCE IF NOT EXISTS seq_attachments START 1;
 CREATE SEQUENCE IF NOT EXISTS seq_agent_sessions START 1;
 CREATE SEQUENCE IF NOT EXISTS seq_issues START 1;
+CREATE SEQUENCE IF NOT EXISTS seq_servers START 1;
 
 -- =============================================================================
 -- CORE TABLES
@@ -189,6 +190,27 @@ CREATE TABLE IF NOT EXISTS project_issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_project ON project_issues(project_id);
 CREATE INDEX IF NOT EXISTS idx_issues_state ON project_issues(state);
+
+-- =============================================================================
+-- SERVERS
+-- =============================================================================
+
+-- Each running server (or to-be-running) is a row here. A project can have
+-- zero or many. This is the port registry that lets Claude and humans avoid
+-- collisions without grepping through config files.
+CREATE TABLE IF NOT EXISTS project_servers (
+    id            INTEGER PRIMARY KEY DEFAULT nextval('seq_servers'),
+    project_id    INTEGER NOT NULL,        -- owning project
+    role          TEXT NOT NULL,           -- 'api', 'frontend', 'websocket', 'worker', 'whisper', etc.
+    port          INTEGER,                 -- nullable for workers without a port
+    url           TEXT,                    -- optional canonical URL, e.g. 'http://localhost:3100'
+    start_command TEXT,                    -- how to launch it
+    description   TEXT,
+    created_at    TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_servers_project ON project_servers(project_id);
+CREATE INDEX IF NOT EXISTS idx_servers_port ON project_servers(port);
 
 -- =============================================================================
 -- CONVENIENCE VIEWS

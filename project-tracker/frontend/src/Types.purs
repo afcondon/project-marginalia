@@ -131,6 +131,22 @@ type Attachment =
   , createdAt :: Maybe String
   }
 
+-- =============================================================================
+-- Server (port registry entry)
+-- =============================================================================
+
+type Server =
+  { id :: Int
+  , projectId :: Int
+  , projectName :: String
+  , projectSlug :: Maybe String
+  , role :: String
+  , port :: Maybe Int
+  , url :: Maybe String
+  , startCommand :: Maybe String
+  , description :: Maybe String
+  }
+
 type ProjectDetail =
   { id :: Int
   , slug :: Maybe String
@@ -307,6 +323,41 @@ decodeAttachment json = case toObject json of
        , description: optString "description" obj
        , createdAt: optString "createdAt" obj
        }
+
+decodeServer :: Json -> Either JsonDecodeError Server
+decodeServer json = case toObject json of
+  Nothing -> Left (TypeMismatch "Object")
+  Just obj -> ado
+    id <- reqInt "id" obj
+    projectId <- reqInt "projectId" obj
+    projectName <- reqString "projectName" obj
+    role <- reqString "role" obj
+    in { id
+       , projectId
+       , projectName
+       , projectSlug: optString "projectSlug" obj
+       , role
+       , port: optInt "port" obj
+       , url: optString "url" obj
+       , startCommand: optString "startCommand" obj
+       , description: optString "description" obj
+       }
+
+-- | The /api/ports response envelope
+decodeServerList :: Json -> Either JsonDecodeError (Array Server)
+decodeServerList json = case toObject json of
+  Nothing -> Left (TypeMismatch "Object")
+  Just obj -> case getField "servers" obj of
+    Nothing -> Left (AtKey "servers" MissingValue)
+    Just serversJson -> case toArray serversJson of
+      Nothing -> Left (AtKey "servers" (TypeMismatch "Array"))
+      Just arr -> traverse decodeServer arr
+
+-- | The /api/projects/:id/servers response is a bare array, not an envelope
+decodeServerArray :: Json -> Either JsonDecodeError (Array Server)
+decodeServerArray json = case toArray json of
+  Nothing -> Left (TypeMismatch "Array")
+  Just arr -> traverse decodeServer arr
 
 -- | Decode an array field from a JSON object, using the given element decoder.
 -- | Returns an empty array if the field is missing.
