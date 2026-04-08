@@ -9,6 +9,7 @@ module API
   , createProject
   , createChild
   , updateProject
+  , renameProject
   , addNote
   ) where
 
@@ -17,12 +18,14 @@ import Prelude
 import Affjax.Web as AX
 import Affjax.RequestBody as RequestBody
 import Affjax.ResponseFormat as ResponseFormat
+import Data.Argonaut.Core (toObject, toString) as J
 import Data.Argonaut.Parser (jsonParser)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
+import Foreign.Object (lookup) as FO
 import Types (Project, ProjectDetail, ProjectInput, Stats, decodeProjectList, decodeProjectDetail, decodeStats)
 
 -- =============================================================================
@@ -192,6 +195,32 @@ addNote projectId content = do
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
   pure unit
 
+-- | Result of a rename attempt — used to surface warnings/errors to the UI.
+type RenameResponse =
+  { ok :: Boolean
+  , message :: Maybe String  -- error text on failure, or warning on partial success
+  }
+
+-- | Rename a project, optionally also renaming its source directory.
+-- | Returns Ok with an optional warning, or an error message.
+renameProject :: Int -> String -> Boolean -> Aff RenameResponse
+renameProject projectId newName renameDir = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/rename"
+  let body = buildRenameBody newName renameDir
+  result <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  case result of
+    Left err -> pure { ok: false, message: Just (AX.printError err) }
+    Right response -> case jsonParser response.body of
+      Left _ -> pure { ok: false, message: Just "failed to parse response" }
+      Right json -> case J.toObject json of
+        Nothing -> pure { ok: false, message: Just "response was not an object" }
+        Just obj -> do
+          let mError = J.toString =<< FO.lookup "error" obj
+          let mWarning = J.toString =<< FO.lookup "warning" obj
+          case mError of
+            Just e -> pure { ok: false, message: Just e }
+            Nothing -> pure { ok: true, message: mWarning }
+
 -- | Create a child project under the given parent. Returns the new project on success.
 createChild :: Int -> String -> String -> Aff (Maybe Project)
 createChild parentId name domain = do
@@ -216,3 +245,4 @@ foreign import buildCreateBody :: ProjectInput -> String
 foreign import buildUpdateBody :: ProjectInput -> String
 foreign import buildNoteBody :: String -> String
 foreign import buildChildBody :: Int -> String -> String -> String
+foreign import buildRenameBody :: String -> Boolean -> String

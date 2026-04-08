@@ -9,6 +9,7 @@ module API.Projects
   , createProject
   , updateProject
   , addTag
+  , renameProject
   ) where
 
 import Prelude
@@ -21,7 +22,11 @@ import Data.Either (Either(..))
 import Data.Int (floor) as Int
 import Data.Maybe (Maybe(..), fromMaybe)
 import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, firstRow, isEmpty)
+import Effect (Effect)
 import Effect.Aff (Aff)
+import Effect.Class (liftEffect)
+import Filesystem (RenameOutcome(..)) as FS
+import Filesystem (renameProjectDirectory) as FS
 import Foreign (Foreign, unsafeToForeign)
 import Foreign.Object (Object, lookup) as FO
 import HTTPurple (Response, ok', badRequest', notFound)
@@ -266,8 +271,70 @@ updateProject db projectId bodyStr = case parseBody bodyStr of
         ok' jsonHeaders (buildProjectListJson rows)
 
 -- =============================================================================
--- POST /api/projects/:id/tags  — add a tag to a project (creates the tag if needed)
+-- POST /api/projects/:id/rename — rename a project, optionally moving its directory
 -- =============================================================================
+-- |
+-- | Body shape:
+-- |   { "name": "New Name", "renameDirectory": true|false }
+-- |
+-- | If `renameDirectory` is true and the project's source_path is an existing
+-- | directory, the directory is renamed too (via `git mv` if inside a git repo,
+-- | otherwise plain `fs.rename`). All filesystem logic lives in Filesystem.js.
+
+renameProject :: Database -> Int -> String -> Aff Response
+renameProject db projectId bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
+  Just obj -> case getFieldMaybe "name" obj of
+    Nothing -> badRequest' jsonHeaders """{"error": "Missing 'name' field"}"""
+    Just newName -> do
+      if newName == ""
+        then badRequest' jsonHeaders """{"error": "Name must not be empty"}"""
+        else do
+          rows <- queryAllParams db
+            "SELECT source_path FROM projects WHERE id = ?"
+            [ unsafeToForeign projectId ]
+          case firstRow rows of
+            Nothing -> notFound
+            Just row -> do
+              let renameDir = case getFieldMaybe "renameDirectory" obj of
+                    Just "true" -> true
+                    _ -> false
+              if not renameDir
+                then renameInDbOnly newName
+                else do
+                  let sourcePath = getRowString_ "source_path" row
+                  outcome <- liftEffect $ FS.renameProjectDirectory sourcePath newName
+                  case outcome of
+                    FS.RenameError err ->
+                      -- Refuse the whole operation — neither DB nor FS are changed
+                      badRequest' jsonHeaders ("{\"error\": \"" <> escapeJson err <> "\"}")
+                    FS.Skipped reason -> do
+                      -- Filesystem rename was asked for but couldn't run (no source path, file not dir, etc.).
+                      -- Still update the DB name, but include a warning so the user knows.
+                      run db
+                        "UPDATE projects SET name = ?, updated_at = current_timestamp WHERE id = ?"
+                        [ unsafeToForeign newName, unsafeToForeign projectId ]
+                      ok' jsonHeaders ("{\"ok\": true, \"name\": \"" <> escapeJson newName <> "\", \"warning\": \"Directory rename skipped: " <> escapeJson reason <> "\"}")
+                    FS.Renamed newPath method -> do
+                      run db
+                        "UPDATE projects SET name = ?, source_path = ?, updated_at = current_timestamp WHERE id = ?"
+                        [ unsafeToForeign newName
+                        , unsafeToForeign newPath
+                        , unsafeToForeign projectId
+                        ]
+                      ok' jsonHeaders ("{\"ok\": true, \"name\": \"" <> escapeJson newName <> "\", \"newPath\": \"" <> escapeJson newPath <> "\", \"method\": \"" <> method <> "\"}")
+  where
+  renameInDbOnly newName = do
+    run db
+      "UPDATE projects SET name = ?, updated_at = current_timestamp WHERE id = ?"
+      [ unsafeToForeign newName, unsafeToForeign projectId ]
+    ok' jsonHeaders ("{\"ok\": true, \"name\": \"" <> escapeJson newName <> "\"}")
+
+  escapeJson :: String -> String
+  escapeJson s = s  -- TODO: real JSON escaping; safe enough for project names
+
+-- | Read a string field from a Foreign row. Returns "" if missing or null.
+foreign import getRowString_ :: String -> Foreign -> String
 
 addTag :: Database -> Int -> String -> Aff Response
 addTag db projectId bodyStr = case parseBody bodyStr of

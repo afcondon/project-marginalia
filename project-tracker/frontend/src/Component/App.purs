@@ -106,6 +106,7 @@ type State =
   -- Inline rename
   , renameOpen :: Maybe Int  -- project id being renamed
   , renameValue :: String
+  , renameDirectory :: Boolean  -- also rename the source directory?
   }
 
 data Action
@@ -159,7 +160,9 @@ data Action
   | StartRename Int String
   | CancelRename
   | SetRenameValue String
+  | ToggleRenameDirectory
   | SubmitRename Int
+  | ClearStatus
 
 -- =============================================================================
 -- Component
@@ -208,6 +211,7 @@ initialState =
   , addChildName: ""
   , renameOpen: Nothing
   , renameValue: ""
+  , renameDirectory: false
   }
 
 -- =============================================================================
@@ -237,6 +241,14 @@ render state =
           Nothing -> renderSlidePanel true renderLoading
           Just detail -> renderSlidePanel true (renderDetailPanel state detail)
         _ -> HH.text ""
+    -- Toast/status message (rename warnings, errors, etc.)
+    , case state.error of
+        Nothing -> HH.text ""
+        Just msg -> HH.div
+          [ HP.class_ (H.ClassName "status-toast")
+          , HE.onClick \_ -> ClearStatus
+          ]
+          [ HH.text msg ]
     -- Quick note panel (floating at bottom)
     , if state.notePanel
         then renderNotePanel state
@@ -641,29 +653,47 @@ renderDetailPanel state detail =
 renderDetailTitle :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
 renderDetailTitle state detail = case state.renameOpen of
   Just pid | pid == detail.id ->
-    HH.form
-      [ HP.class_ (H.ClassName "detail-rename-form")
-      , HE.onSubmit \_ -> SubmitRename detail.id
-      ]
-      [ HH.input
-          [ HP.class_ (H.ClassName "detail-rename-input")
-          , HP.type_ HP.InputText
-          , HP.value state.renameValue
-          , HP.autofocus true
-          , HE.onValueInput SetRenameValue
+    let hasDirSource = case detail.sourcePath of
+          Just sp -> not (String.null sp)
+          Nothing -> false
+    in HH.div [ HP.class_ (H.ClassName "detail-rename-wrap") ]
+      [ HH.form
+          [ HP.class_ (H.ClassName "detail-rename-form")
+          , HE.onSubmit \_ -> SubmitRename detail.id
           ]
-      , HH.button
-          [ HP.class_ (H.ClassName "btn btn-primary")
-          , HP.type_ HP.ButtonSubmit
-          , HP.disabled (String.null (String.trim state.renameValue))
+          [ HH.input
+              [ HP.class_ (H.ClassName "detail-rename-input")
+              , HP.type_ HP.InputText
+              , HP.value state.renameValue
+              , HP.autofocus true
+              , HE.onValueInput SetRenameValue
+              ]
+          , HH.button
+              [ HP.class_ (H.ClassName "btn btn-primary")
+              , HP.type_ HP.ButtonSubmit
+              , HP.disabled (String.null (String.trim state.renameValue))
+              ]
+              [ HH.text "Save" ]
+          , HH.button
+              [ HP.class_ (H.ClassName "btn btn-back")
+              , HP.type_ HP.ButtonButton
+              , HE.onClick \_ -> CancelRename
+              ]
+              [ HH.text "Cancel" ]
           ]
-          [ HH.text "Save" ]
-      , HH.button
-          [ HP.class_ (H.ClassName "btn btn-back")
-          , HP.type_ HP.ButtonButton
-          , HE.onClick \_ -> CancelRename
-          ]
-          [ HH.text "Cancel" ]
+      , if hasDirSource
+          then HH.label [ HP.class_ (H.ClassName "rename-directory-toggle") ]
+            [ HH.input
+                [ HP.type_ HP.InputCheckbox
+                , HP.checked state.renameDirectory
+                , HE.onClick \_ -> ToggleRenameDirectory
+                ]
+            , HH.text " Also rename source directory ("
+            , HH.span [ HP.class_ (H.ClassName "rename-directory-path") ]
+                [ HH.text (fromMaybe "" detail.sourcePath) ]
+            , HH.text ")"
+            ]
+          else HH.text ""
       ]
   _ ->
     HH.h2
@@ -1136,6 +1166,9 @@ handleAction = case _ of
     when (String.length val >= 3 || String.null val) do
       handleAction LoadProjects
 
+  ClearStatus ->
+    H.modify_ \s -> s { error = Nothing }
+
   ClearFilters -> do
     liftEffect $ setHash_ ""
     H.modify_ \s -> s
@@ -1408,30 +1441,41 @@ handleAction = case _ of
         _ -> pure unit
 
   StartRename projectId currentName ->
-    H.modify_ \s -> s { renameOpen = Just projectId, renameValue = currentName }
+    H.modify_ \s -> s { renameOpen = Just projectId, renameValue = currentName, renameDirectory = false }
 
   CancelRename ->
-    H.modify_ \s -> s { renameOpen = Nothing, renameValue = "" }
+    H.modify_ \s -> s { renameOpen = Nothing, renameValue = "", renameDirectory = false }
 
   SetRenameValue val ->
     H.modify_ \s -> s { renameValue = val }
+
+  ToggleRenameDirectory ->
+    H.modify_ \s -> s { renameDirectory = not s.renameDirectory }
 
   SubmitRename projectId -> do
     state <- H.get
     let trimmed = String.trim state.renameValue
     when (not (String.null trimmed)) do
-      -- Use updateProject with just the name field set
-      let input = emptyProjectInput { name = trimmed }
-      _ <- liftAff $ API.updateProject projectId input
-      H.modify_ \s -> s { renameOpen = Nothing, renameValue = "" }
-      -- Refresh the detail panel + caches
-      handleAction LoadAllProjects
-      handleAction LoadProjects
-      case state.selectedProject of
-        Just detail | detail.id == projectId -> do
-          mDetail <- liftAff $ API.fetchProject projectId
-          H.modify_ \s -> s { selectedProject = mDetail }
-        _ -> pure unit
+      resp <- liftAff $ API.renameProject projectId trimmed state.renameDirectory
+      if not resp.ok
+        then do
+          -- Keep the form open so the user can fix and retry
+          H.modify_ \s -> s { error = resp.message }
+        else do
+          H.modify_ \s -> s
+            { renameOpen = Nothing
+            , renameValue = ""
+            , renameDirectory = false
+            , error = resp.message  -- carries warnings (may be Nothing)
+            }
+          -- Refresh everything
+          handleAction LoadAllProjects
+          handleAction LoadProjects
+          case state.selectedProject of
+            Just detail | detail.id == projectId -> do
+              mDetail <- liftAff $ API.fetchProject projectId
+              H.modify_ \s -> s { selectedProject = mDetail }
+            _ -> pure unit
 
   KeyDown ke -> do
     state <- H.get

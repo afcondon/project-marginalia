@@ -27,6 +27,10 @@ export const buildNoteBody = (content) =>
 export const buildChildBody = (parentId) => (name) => (domain) =>
   JSON.stringify({ parentId, name, domain, status: "idea" });
 
+// Build JSON body for the rename endpoint
+export const buildRenameBody = (name) => (renameDirectory) =>
+  JSON.stringify({ name, renameDirectory: renameDirectory ? "true" : "false" });
+
 // Build JSON body for PUT /api/projects/:id
 // Only includes non-empty fields (partial update)
 export const buildUpdateBody = (input) => {

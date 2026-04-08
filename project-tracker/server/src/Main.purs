@@ -28,6 +28,7 @@ data Route
   = Projects
   | ProjectById Int
   | ProjectTags Int
+  | ProjectRename Int
   | Stats
   | AgentProjects
   | AgentProjectById Int
@@ -44,6 +45,7 @@ route = root $ sum
   { "Projects": path "api/projects" noArgs
   , "ProjectById": path "api/projects" (int segment)
   , "ProjectTags": path "api/projects" (suffix (int segment) "tags")
+  , "ProjectRename": path "api/projects" (suffix (int segment) "rename")
   , "Stats": path "api/stats" noArgs
   , "AgentProjects": path "api/agent/projects" noArgs
   , "AgentProjectById": path "api/agent/projects" (int segment)
@@ -124,6 +126,13 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Projects.addTag db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectRename projectId -> case method of
+        Post -> do
+          bodyStr <- toString body
+          Projects.renameProject db projectId bodyStr
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

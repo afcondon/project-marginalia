@@ -1,4 +1,11 @@
 // FFI for API.Projects
+
+// Read a string field from a row object. Returns "" if missing/null.
+export const getRowString_ = (key) => (row) => {
+  if (row == null) return "";
+  const v = row[key];
+  return v == null ? "" : String(v);
+};
 // JSON response builders only — marshalling Foreign (DuckDB rows) to JSON strings.
 // All body parsing and SQL construction is in PureScript.
 
