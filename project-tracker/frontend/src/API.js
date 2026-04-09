@@ -23,6 +23,10 @@ export const buildCreateBody = (input) => {
 export const buildNoteBody = (content) =>
   JSON.stringify({ content, author: "human" });
 
+// Build JSON body for POST /api/projects/:id/tags
+export const buildTagBody = (tag) =>
+  JSON.stringify({ tag });
+
 // Build JSON body for creating a child project under a parent
 export const buildChildBody = (parentId) => (name) => (domain) =>
   JSON.stringify({ parentId, name, domain, status: "idea" });

@@ -16,14 +16,13 @@ import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (liftEffect)
-import Effect.Console (log)
 import Foreign.Object as FO
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Types (Attachment, Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString)
+import Types (Attachment, Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString, nextStatuses)
 import Web.Event.Event (Event)
 import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 
@@ -66,9 +65,37 @@ data View
   = ListView
   | DetailView Int
   | CreateView
-  | EditView Int
 
 derive instance Eq View
+
+-- | How to render a project detail. Different domains may eventually get
+-- | different layouts (Dossier for WSJ-style fact-and-figure work, Magazine
+-- | for Pinterest-ish ideaboards, Workshop for photo-heavy projects, etc.).
+-- | For now only Dossier is implemented; the sum is deliberately open.
+data DetailViewKind = DossierView
+
+derive instance Eq DetailViewKind
+
+-- | Fields in the Dossier view that are editable via plain click-to-edit.
+-- | Title uses the existing rename flow (has directory-rename side effects).
+-- | Status uses QuickStatusChange (has transition validation).
+-- | Everything else goes through the generic DossierStartEdit/CommitEdit path.
+data EditableField
+  = FDescription
+  | FSubdomain
+  | FRepo
+  | FSourceUrl
+  | FSourcePath
+
+derive instance Eq EditableField
+
+fieldLabel :: EditableField -> String
+fieldLabel = case _ of
+  FDescription -> "description"
+  FSubdomain -> "subdomain"
+  FRepo -> "repo"
+  FSourceUrl -> "source url"
+  FSourcePath -> "source path"
 
 type State =
   { projects :: Array Project
@@ -94,7 +121,6 @@ type State =
   , formRepo :: String
   , formSourceUrl :: String
   , formSourcePath :: String
-  , formStatusReason :: String
   -- Keyboard navigation
   , focusIndex :: Int  -- which card is focused (-1 = none)
   -- Quick note
@@ -109,6 +135,15 @@ type State =
   , renameOpen :: Maybe Int  -- project id being renamed
   , renameValue :: String
   , renameDirectory :: Boolean  -- also rename the source directory?
+  -- Dossier inline editing. Only one field at a time.
+  , detailViewKind :: DetailViewKind
+  , dossierEditField :: Maybe EditableField
+  , dossierEditValue :: String
+  , dossierDomainOpen :: Boolean    -- domain dropdown visible?
+  , dossierNoteOpen :: Boolean      -- inline note composer visible?
+  , dossierNoteDraft :: String
+  , dossierTagOpen :: Boolean       -- new-tag input visible?
+  , dossierTagDraft :: String
   }
 
 data Action
@@ -129,22 +164,10 @@ data Action
   | SelectProject Int
   | CloseDetail
   | ShowCreateForm
-  | ShowEditForm
   | CancelForm
-  | DiscardEdits Int
   | SubmitCreate
-  | SubmitUpdate Int
   | SetFormName String
-  | SetFormDomain String
-  | SetFormSubdomain String
-  | SetFormStatus String
-  | SetFormDescription String
-  | SetFormRepo String
-  | SetFormSourceUrl String
-  | SetFormSourcePath String
-  | SetFormStatusReason String
   | QuickStatusChange Int Status MouseEvent
-  | QuickEdit Int MouseEvent
   | NextProject
   | PrevProject
   | NavigateToParent
@@ -167,6 +190,21 @@ data Action
   | SubmitRename Int
   | ClearStatus
   | DeleteServerAction Int  -- server id
+  -- Dossier view inline editing
+  | DossierStartEdit EditableField String
+  | DossierSetEditValue String
+  | DossierCommitEdit
+  | DossierCancelEdit
+  | DossierOpenDomain
+  | DossierPickDomain String
+  | DossierOpenNote
+  | DossierSetNote String
+  | DossierSubmitNote
+  | DossierCancelNote
+  | DossierOpenTag
+  | DossierSetTag String
+  | DossierSubmitTag
+  | DossierCancelTag
 
 -- =============================================================================
 -- Component
@@ -206,7 +244,6 @@ initialState =
   , formRepo: ""
   , formSourceUrl: ""
   , formSourcePath: ""
-  , formStatusReason: ""
   , focusIndex: -1
   , notePanel: false
   , noteProjectId: Nothing
@@ -217,6 +254,14 @@ initialState =
   , renameOpen: Nothing
   , renameValue: ""
   , renameDirectory: false
+  , detailViewKind: DossierView
+  , dossierEditField: Nothing
+  , dossierEditValue: ""
+  , dossierDomainOpen: false
+  , dossierNoteOpen: false
+  , dossierNoteDraft: ""
+  , dossierTagOpen: false
+  , dossierTagDraft: ""
   }
 
 -- =============================================================================
@@ -226,26 +271,26 @@ initialState =
 render :: forall m. State -> H.ComponentHTML Action () m
 render state =
   HH.div [ HP.class_ (H.ClassName "app-shell") ]
-    [ renderHeader state
+    [ -- Header only shown when browsing the list (it IS the index masthead).
+      -- Dossier-style views (DetailView, CreateView) have their own top strip.
+      case state.view of
+        DetailView _ -> HH.text ""
+        CreateView   -> HH.text ""
+        _ -> renderHeader state
     , HH.main [ HP.class_ (H.ClassName "main-content") ]
         [ case state.view of
-            CreateView -> renderForm state Nothing
-            EditView _ -> case state.selectedProject of
+            CreateView -> renderCreateDossier state
+            DetailView _ -> case state.selectedProject of
               Nothing -> renderLoading
-              Just detail -> renderForm state (Just detail)
-            _ -> renderProjectList state
+              Just detail -> case state.detailViewKind of
+                DossierView -> renderDossier state detail
+            ListView -> renderProjectList state
         ]
-    -- Keyboard shortcut hint (shown when no card is focused)
+    -- Keyboard shortcut hint (shown when no card is focused on the list)
     , if state.view == ListView && state.focusIndex < 0
         then HH.div [ HP.class_ (H.ClassName "keyboard-hint") ]
           [ HH.text "hjkl navigate  /search  enter open  1-7 status  e edit  n note  i inbox  esc close" ]
         else HH.text ""
-    -- Slide-out detail panel (overlays the list)
-    , case state.view of
-        DetailView _ -> case state.selectedProject of
-          Nothing -> renderSlidePanel true renderLoading
-          Just detail -> renderSlidePanel true (renderDetailPanel state detail)
-        _ -> HH.text ""
     -- Toast/status message (rename warnings, errors, etc.)
     , case state.error of
         Nothing -> HH.text ""
@@ -505,7 +550,6 @@ renderProjectCard state idx project =
             [ HH.text project.name ]
         , HH.div [ HP.class_ (H.ClassName "card-header-controls") ]
             [ renderStatusControl project
-            , renderQuickEditButton project
             ]
         ]
     , HH.div [ HP.class_ (H.ClassName "card-meta") ]
@@ -583,20 +627,6 @@ renderStatusLight project status =
     ]
     []
 
--- | Small edit button on the card (Task 3)
-renderQuickEditButton :: forall m. Project -> H.ComponentHTML Action () m
-renderQuickEditButton project =
-  HH.button
-    [ HP.class_ (H.ClassName "btn btn-back card-edit-btn")
-    , HE.onClick \e -> QuickEdit project.id e
-    ]
-    [ HH.text "Edit" ]
-
-renderStatusBadge :: forall m. Status -> H.ComponentHTML Action () m
-renderStatusBadge status =
-  HH.span [ HP.class_ (H.ClassName ("status-badge status-" <> statusToString status)) ]
-    [ HH.text (statusLabel status) ]
-
 renderDomainLabel :: forall m. String -> H.ComponentHTML Action () m
 renderDomainLabel domain =
   HH.span [ HP.class_ (H.ClassName ("domain-label domain-" <> domain)) ]
@@ -608,142 +638,8 @@ renderLoading =
     [ HH.text "Loading..." ]
 
 -- =============================================================================
--- Detail Panel
+-- Shared detail helpers (used by the Dossier view)
 -- =============================================================================
-
-renderDetailPanel :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderDetailPanel state detail =
-  HH.div [ HP.class_ (H.ClassName "detail-panel") ]
-    [ HH.div [ HP.class_ (H.ClassName "detail-header") ]
-        [ HH.div [ HP.class_ (H.ClassName "detail-nav") ]
-            [ HH.button
-                [ HP.class_ (H.ClassName "btn btn-back")
-                , HE.onClick \_ -> PrevProject
-                , HP.title "Previous project (k)"
-                ]
-                [ HH.text "‹" ]
-            , HH.button
-                [ HP.class_ (H.ClassName "btn btn-back")
-                , HE.onClick \_ -> NextProject
-                , HP.title "Next project (j)"
-                ]
-                [ HH.text "›" ]
-            ]
-        , HH.button
-            [ HP.class_ (H.ClassName "btn btn-secondary")
-            , HE.onClick \_ -> ShowEditForm
-            ]
-            [ HH.text "Edit" ]
-        , HH.button
-            [ HP.class_ (H.ClassName "btn btn-back detail-close")
-            , HE.onClick \_ -> CloseDetail
-            ]
-            [ HH.text "X" ]
-        ]
-    , HH.div [ HP.class_ (H.ClassName "detail-content") ]
-        [ renderParentBreadcrumb state detail
-        , renderDetailTitle state detail
-        , HH.div [ HP.class_ (H.ClassName "detail-meta") ]
-            [ renderStatusBadge detail.status
-            , renderDomainLabel detail.domain
-            , case detail.subdomain of
-                Nothing -> HH.text ""
-                Just sub -> HH.span [ HP.class_ (H.ClassName "detail-subdomain") ]
-                  [ HH.text sub ]
-            , case detail.slug of
-                Nothing -> HH.text ""
-                Just s -> HH.span [ HP.class_ (H.ClassName "detail-slug") ] [ HH.text s ]
-            ]
-        , case detail.description of
-            Nothing -> HH.text ""
-            Just desc -> HH.div [ HP.class_ (H.ClassName "detail-description") ]
-              [ HH.p_ [ HH.text desc ] ]
-        , renderChildrenList state detail
-        , renderServers state detail
-        , renderAttachments detail
-        , renderDetailInfo detail
-        , if Array.null detail.tags
-            then HH.text ""
-            else HH.div [ HP.class_ (H.ClassName "detail-tags") ]
-              [ HH.h4_ [ HH.text "Tags" ]
-              , HH.div [ HP.class_ (H.ClassName "tag-list") ]
-                  (map renderTag detail.tags)
-              ]
-        , renderDependencies detail
-        , renderNotes detail
-        ]
-    ]
-
--- | Detail title with inline rename.
--- | Click the title to edit; Enter saves, Esc cancels.
-renderDetailTitle :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderDetailTitle state detail = case state.renameOpen of
-  Just pid | pid == detail.id ->
-    let hasDirSource = case detail.sourcePath of
-          Just sp -> not (String.null sp)
-          Nothing -> false
-    in HH.div [ HP.class_ (H.ClassName "detail-rename-wrap") ]
-      [ HH.form
-          [ HP.class_ (H.ClassName "detail-rename-form")
-          , HE.onSubmit \_ -> SubmitRename detail.id
-          ]
-          [ HH.input
-              [ HP.class_ (H.ClassName "detail-rename-input")
-              , HP.type_ HP.InputText
-              , HP.value state.renameValue
-              , HP.autofocus true
-              , HE.onValueInput SetRenameValue
-              ]
-          , HH.button
-              [ HP.class_ (H.ClassName "btn btn-primary")
-              , HP.type_ HP.ButtonSubmit
-              , HP.disabled (String.null (String.trim state.renameValue))
-              ]
-              [ HH.text "Save" ]
-          , HH.button
-              [ HP.class_ (H.ClassName "btn btn-back")
-              , HP.type_ HP.ButtonButton
-              , HE.onClick \_ -> CancelRename
-              ]
-              [ HH.text "Cancel" ]
-          ]
-      , if hasDirSource
-          then HH.label [ HP.class_ (H.ClassName "rename-directory-toggle") ]
-            [ HH.input
-                [ HP.type_ HP.InputCheckbox
-                , HP.checked state.renameDirectory
-                , HE.onClick \_ -> ToggleRenameDirectory
-                ]
-            , HH.text " Also rename source directory ("
-            , HH.span [ HP.class_ (H.ClassName "rename-directory-path") ]
-                [ HH.text (fromMaybe "" detail.sourcePath) ]
-            , HH.text ")"
-            ]
-          else HH.text ""
-      ]
-  _ ->
-    HH.h2
-      [ HP.class_ (H.ClassName "detail-title detail-title-editable")
-      , HE.onClick \_ -> StartRename detail.id detail.name
-      , HP.title "Click to rename"
-      ]
-      [ HH.text detail.name ]
-
--- | Render the servers section of the detail panel: read-only view of
--- | registered servers with delete buttons. New servers are added by asking
--- | Claude, which inspects the project and POSTs via the API. The form
--- | composition surface is intentionally absent — the UI is a display, not
--- | a composer.
-renderServers :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderServers state detail =
-  let myServers = Array.filter (\s -> s.projectId == detail.id) state.servers
-  in if Array.null myServers
-    then HH.text ""
-    else HH.div [ HP.class_ (H.ClassName "detail-servers") ]
-      [ HH.h4_ [ HH.text (show (Array.length myServers) <> " servers") ]
-      , HH.div [ HP.class_ (H.ClassName "servers-list") ]
-          (map renderServerRow myServers)
-      ]
 
 renderServerRow :: forall m. Server -> H.ComponentHTML Action () m
 renderServerRow server =
@@ -774,84 +670,6 @@ renderServerRow server =
     ]
 
 -- | Render image previews and links for attachments.
-renderAttachments :: forall m. ProjectDetail -> H.ComponentHTML Action () m
-renderAttachments detail =
-  if Array.null detail.attachments
-    then HH.text ""
-    else HH.div [ HP.class_ (H.ClassName "detail-attachments") ]
-      [ HH.h4_ [ HH.text (show (Array.length detail.attachments) <> " attachment" <> (if Array.length detail.attachments == 1 then "" else "s")) ]
-      , HH.div [ HP.class_ (H.ClassName "attachment-grid") ]
-          (map renderAttachment detail.attachments)
-      ]
-
-renderAttachment :: forall m. Attachment -> H.ComponentHTML Action () m
-renderAttachment att =
-  let isImage = case att.mimeType of
-        Just mt -> String.take 6 mt == "image/"
-        Nothing -> false
-      caption = case att.description of
-        Just d -> d
-        Nothing -> att.filename
-  in case att.url of
-    Nothing ->
-      -- No URL — just show filename as text
-      HH.div [ HP.class_ (H.ClassName "attachment-tile attachment-no-url") ]
-        [ HH.span [ HP.class_ (H.ClassName "attachment-filename") ] [ HH.text att.filename ] ]
-    Just url ->
-      if isImage
-        then HH.a
-          [ HP.class_ (H.ClassName "attachment-tile attachment-image")
-          , HP.href url
-          , HP.target "_blank"
-          , HP.title caption
-          ]
-          [ HH.img [ HP.src url, HP.alt caption ] ]
-        else HH.a
-          [ HP.class_ (H.ClassName "attachment-tile attachment-file")
-          , HP.href url
-          , HP.target "_blank"
-          , HP.title caption
-          ]
-          [ HH.span [ HP.class_ (H.ClassName "attachment-filename") ] [ HH.text att.filename ] ]
-
-renderDetailInfo :: forall m. ProjectDetail -> H.ComponentHTML Action () m
-renderDetailInfo detail =
-  let infoRows = Array.catMaybes
-        [ detail.repo <#> \r -> { label: "Repository", value: r }
-        , detail.sourceUrl <#> \u -> { label: "Source URL", value: u }
-        , detail.sourcePath <#> \p -> { label: "Source Path", value: p }
-        , detail.createdAt <#> \c -> { label: "Created", value: c }
-        , detail.updatedAt <#> \u -> { label: "Updated", value: u }
-        ]
-  in if Array.null infoRows
-    then HH.text ""
-    else HH.dl [ HP.class_ (H.ClassName "detail-info") ]
-      (Array.concatMap (\row ->
-        [ HH.dt_ [ HH.text row.label ]
-        , HH.dd_ [ HH.text row.value ]
-        ]) infoRows)
-
--- | Show ancestor chain above the title (P1 = parent, P2 = grandparent, ...)
--- | Each ancestor is a clickable pill that navigates up the chain.
-renderParentBreadcrumb :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderParentBreadcrumb state detail =
-  let ancestors = collectAncestors state.allProjects detail.parentId
-  in if Array.null ancestors
-    then HH.text ""
-    else HH.div [ HP.class_ (H.ClassName "detail-breadcrumb") ]
-      (Array.mapWithIndex renderAncestor ancestors)
-  where
-  renderAncestor :: Int -> Project -> H.ComponentHTML Action () m
-  renderAncestor i p =
-    HH.span
-      [ HP.class_ (H.ClassName "breadcrumb-pill")
-      , HE.onClick \_ -> SetFilterAncestor (Just { id: p.id, name: p.name })
-      , HP.title ("Filter to all descendants of " <> p.name)
-      ]
-      [ HH.span [ HP.class_ (H.ClassName "breadcrumb-rank") ] [ HH.text ("P" <> show (i + 1)) ]
-      , HH.span [ HP.class_ (H.ClassName "breadcrumb-name") ] [ HH.text p.name ]
-      ]
-
 -- | Walk up the parent chain, returning [parent, grandparent, great-grandparent, ...]
 -- | Stops when an ancestor is not in the projects array (out of view) or chain is exhausted.
 collectAncestors :: Array Project -> Maybe Int -> Array Project
@@ -864,295 +682,557 @@ collectAncestors projects = go []
 
 -- | List children of this project, if any. Click to navigate.
 -- | Always show the "+ Add child" affordance so any project can be split.
-renderChildrenList :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderChildrenList state detail =
-  let children = Array.filter (\p -> p.parentId == Just detail.id) state.allProjects
-      childCount = Array.length children
-      heading = if childCount == 0
-        then "Children"
-        else show childCount <> " projects in this group"
-  in HH.div [ HP.class_ (H.ClassName "detail-children") ]
-    [ HH.div [ HP.class_ (H.ClassName "children-header") ]
-        [ HH.h4_ [ HH.text heading ]
+-- =============================================================================
+-- The Dossier — click-to-edit project page
+-- =============================================================================
+-- | A project page modeled on a WSJ feature story: narrow text column on the
+-- | left (description, notes) with a wide marginalia column on the right
+-- | carrying all metadata. No edit-mode; every field is click-to-edit in
+-- | place. Extends the index's broadsheet grammar to a detail spread.
+-- |
+-- | Orthogonal to this view, other domains may eventually get different
+-- | renderings (e.g. a Magazine view for ideaboards). The dispatch happens
+-- | at the top-level render via state.detailViewKind.
+
+renderDossier :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossier state detail =
+  HH.div [ HP.class_ (H.ClassName "dossier") ]
+    [ renderDossierTopStrip detail
+    , HH.div [ HP.class_ (H.ClassName "dossier-page") ]
+        [ HH.section [ HP.class_ (H.ClassName "dossier-main") ]
+            [ renderDossierBreadcrumb state detail
+            , renderDossierTitle state detail
+            , HH.div [ HP.class_ (H.ClassName "dossier-rule") ] []
+            , renderDossierDescription state detail
+            , renderDossierNotes state detail
+            ]
+        , HH.aside [ HP.class_ (H.ClassName "dossier-marginalia") ]
+            [ marginaliaSection "Status" (renderStatusEditor state detail)
+            , marginaliaSection "Domain" (renderDomainEditor state detail)
+            , marginaliaSection "Identifier" (renderIdentifierBlock detail)
+            , marginaliaSection "Tags" (renderTagsEditor state detail)
+            , marginaliaSection "Parent" (renderParentBlock state detail)
+            , marginaliaSection "Children" (renderChildrenBlock state detail)
+            , marginaliaSection "History" (renderHistoryBlock detail)
+            , marginaliaSection "External" (renderExternalEditor state detail)
+            , marginaliaSection "Servers" (renderServersBlock state detail)
+            , marginaliaSection "Dependencies" (renderDependenciesBlock detail)
+            , marginaliaSection "Attachments" (renderAttachmentsBlock detail)
+            ]
+        ]
+    ]
+
+-- | Top navigation strip: ← prev · close ×
+renderDossierTopStrip :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderDossierTopStrip detail =
+  HH.div [ HP.class_ (H.ClassName "dossier-top") ]
+    [ HH.div [ HP.class_ (H.ClassName "dossier-top-nav") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "dossier-nav-btn")
+            , HE.onClick \_ -> PrevProject
+            , HP.title "Previous project (k)"
+            ]
+            [ HH.text "‹ prev" ]
+        , HH.span [ HP.class_ (H.ClassName "dossier-page-num") ]
+            [ HH.text ("No. " <> show detail.id) ]
         , HH.button
-            [ HP.class_ (H.ClassName "btn btn-back add-child-btn")
-            , HE.onClick \_ -> OpenAddChild detail.id
-            , HP.title "Split into child projects"
+            [ HP.class_ (H.ClassName "dossier-nav-btn")
+            , HE.onClick \_ -> NextProject
+            , HP.title "Next project (j)"
             ]
-            [ HH.text "+ child" ]
-        ]
-    , if Array.null children
-        then HH.text ""
-        else HH.div [ HP.class_ (H.ClassName "children-list") ]
-              (map renderChildItem children)
-    , case state.addChildOpen of
-        Just pid | pid == detail.id -> renderAddChildForm state detail.id
-        _ -> HH.text ""
-    ]
-
-renderAddChildForm :: forall m. State -> Int -> H.ComponentHTML Action () m
-renderAddChildForm state parentId =
-  HH.form
-    [ HP.class_ (H.ClassName "add-child-form")
-    , HE.onSubmit \_ -> SubmitAddChild parentId
-    ]
-    [ HH.input
-        [ HP.class_ (H.ClassName "add-child-input")
-        , HP.type_ HP.InputText
-        , HP.placeholder "New child project name (Enter to add, Esc to close)"
-        , HP.value state.addChildName
-        , HE.onValueInput SetAddChildName
-        , HP.autofocus true
+            [ HH.text "next ›" ]
         ]
     , HH.button
-        [ HP.class_ (H.ClassName "btn btn-primary")
-        , HP.type_ HP.ButtonSubmit
-        , HP.disabled (String.null state.addChildName)
+        [ HP.class_ (H.ClassName "dossier-close")
+        , HE.onClick \_ -> CloseDetail
+        , HP.title "Close (Esc)"
         ]
-        [ HH.text "Add" ]
-    , HH.button
-        [ HP.class_ (H.ClassName "btn btn-back")
-        , HP.type_ HP.ButtonButton
-        , HE.onClick \_ -> CloseAddChild
-        ]
-        [ HH.text "Done" ]
+        [ HH.text "close ×" ]
     ]
 
-renderChildItem :: forall m. Project -> H.ComponentHTML Action () m
-renderChildItem child =
-  HH.div
-    [ HP.class_ (H.ClassName "child-item")
-    , HE.onClick \_ -> SelectProject child.id
-    ]
-    [ HH.span [ HP.class_ (H.ClassName ("child-status status-light status-light-" <> statusToString child.status <> " current")) ] []
-    , HH.span [ HP.class_ (H.ClassName "child-name") ] [ HH.text child.name ]
-    , HH.span [ HP.class_ (H.ClassName "child-status-label") ] [ HH.text (statusLabel child.status) ]
-    ]
-
-renderDependencies :: forall m. ProjectDetail -> H.ComponentHTML Action () m
-renderDependencies detail =
-  let hasBlocking = not (Array.null detail.dependencies.blocking)
-      hasBlockedBy = not (Array.null detail.dependencies.blockedBy)
-  in if not hasBlocking && not hasBlockedBy
+-- | Breadcrumb pills above the title, showing parent chain. Click an
+-- | ancestor to filter the Register down to its descendants.
+renderDossierBreadcrumb :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierBreadcrumb state detail =
+  let ancestors = collectAncestors state.allProjects detail.parentId
+      reversedAncestors = Array.reverse ancestors  -- top-down: oldest first
+  in if Array.null ancestors
     then HH.text ""
-    else HH.div [ HP.class_ (H.ClassName "detail-dependencies") ]
-      [ HH.h4_ [ HH.text "Dependencies" ]
-      , if hasBlockedBy
-          then HH.div_
-            [ HH.h5_ [ HH.text "Blocked by" ]
-            , HH.ul [ HP.class_ (H.ClassName "dep-list") ]
-                (map (\d -> HH.li_
-                  [ HH.span
-                      [ HP.class_ (H.ClassName "dep-link")
-                      , HE.onClick \_ -> SelectProject d.projectId
-                      ]
-                      [ HH.text d.projectName ]
-                  , HH.span [ HP.class_ (H.ClassName "dep-type") ]
-                      [ HH.text (" (" <> d.dependencyType <> ")") ]
-                  ]) detail.dependencies.blockedBy)
-            ]
-          else HH.text ""
-      , if hasBlocking
-          then HH.div_
-            [ HH.h5_ [ HH.text "Blocks" ]
-            , HH.ul [ HP.class_ (H.ClassName "dep-list") ]
-                (map (\d -> HH.li_
-                  [ HH.span
-                      [ HP.class_ (H.ClassName "dep-link")
-                      , HE.onClick \_ -> SelectProject d.projectId
-                      ]
-                      [ HH.text d.projectName ]
-                  , HH.span [ HP.class_ (H.ClassName "dep-type") ]
-                      [ HH.text (" (" <> d.dependencyType <> ")") ]
-                  ]) detail.dependencies.blocking)
+    else HH.nav [ HP.class_ (H.ClassName "dossier-breadcrumb") ]
+      (Array.intercalate [ HH.span [ HP.class_ (H.ClassName "dossier-breadcrumb-sep") ] [ HH.text " › " ] ]
+        (map (\p -> [ HH.span
+              [ HP.class_ (H.ClassName "dossier-breadcrumb-crumb")
+              , HE.onClick \_ -> SelectProject p.id
+              ]
+              [ HH.text p.name ]
+            ]) reversedAncestors))
+
+-- | Click-to-edit project title. Delegates to the existing rename flow,
+-- | which already handles the "also rename source directory" sidecar.
+renderDossierTitle :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierTitle state detail = case state.renameOpen of
+  Just pid | pid == detail.id ->
+    let hasDirSource = case detail.sourcePath of
+          Just sp -> not (String.null sp)
+          Nothing -> false
+    in HH.div [ HP.class_ (H.ClassName "dossier-title-edit") ]
+      [ HH.form
+          [ HE.onSubmit \_ -> SubmitRename detail.id ]
+          [ HH.input
+              [ HP.class_ (H.ClassName "dossier-title-input")
+              , HP.type_ HP.InputText
+              , HP.value state.renameValue
+              , HP.autofocus true
+              , HE.onValueInput SetRenameValue
+              ]
+          ]
+      , if hasDirSource
+          then HH.label [ HP.class_ (H.ClassName "dossier-title-dirtoggle") ]
+            [ HH.input
+                [ HP.type_ HP.InputCheckbox
+                , HP.checked state.renameDirectory
+                , HE.onClick \_ -> ToggleRenameDirectory
+                ]
+            , HH.text " also rename source directory"
             ]
           else HH.text ""
       ]
+  _ ->
+    HH.h1
+      [ HP.class_ (H.ClassName "dossier-title")
+      , HE.onClick \_ -> StartRename detail.id detail.name
+      , HP.title "Click to rename"
+      ]
+      [ HH.text detail.name ]
 
-renderNotes :: forall m. ProjectDetail -> H.ComponentHTML Action () m
-renderNotes detail =
-  HH.div [ HP.class_ (H.ClassName "detail-notes") ]
-    [ HH.h4_ [ HH.text "Notes" ]
+-- | Click-to-edit description. Appears in the main text column, the heart
+-- | of the dossier. Uses a textarea when editing; commits on blur.
+renderDossierDescription :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierDescription state detail =
+  case state.dossierEditField of
+    Just FDescription ->
+      HH.div [ HP.class_ (H.ClassName "dossier-description-edit") ]
+        [ HH.textarea
+            [ HP.class_ (H.ClassName "dossier-description-input")
+            , HP.value state.dossierEditValue
+            , HP.autofocus true
+            , HP.rows 8
+            , HP.placeholder "What is this project?"
+            , HE.onValueInput DossierSetEditValue
+            , HE.onBlur \_ -> DossierCommitEdit
+            ]
+        , HH.div [ HP.class_ (H.ClassName "dossier-edit-hint") ]
+            [ HH.text "Blur to save · Esc to cancel" ]
+        ]
+    _ ->
+      let currentDesc = fromMaybe "" detail.description
+      in HH.div
+        [ HP.class_ (H.ClassName "dossier-description editable")
+        , HE.onClick \_ -> DossierStartEdit FDescription currentDesc
+        , HP.title "Click to edit description"
+        ]
+        [ if String.null currentDesc
+            then HH.p [ HP.class_ (H.ClassName "dossier-description-empty") ]
+              [ HH.text "No description. Click to write one." ]
+            else HH.p_ [ HH.text currentDesc ]
+        ]
+
+-- | Note stream: numbered list of existing notes, plus an append-only
+-- | inline composer at the bottom. Notes are immutable once saved.
+renderDossierNotes :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierNotes state detail =
+  HH.section [ HP.class_ (H.ClassName "dossier-notes") ]
+    [ HH.h3 [ HP.class_ (H.ClassName "dossier-section-label") ]
+        [ HH.text "§ notes" ]
+    , HH.div [ HP.class_ (H.ClassName "dossier-notes-rule") ] []
     , if Array.null detail.notes
-        then HH.p [ HP.class_ (H.ClassName "text-muted") ]
+        then HH.p [ HP.class_ (H.ClassName "dossier-notes-empty") ]
           [ HH.text "No notes yet." ]
-        else HH.div [ HP.class_ (H.ClassName "notes-list") ]
-          (map renderNote detail.notes)
+        else HH.ol [ HP.class_ (H.ClassName "dossier-notes-list") ]
+          (map renderDossierNote detail.notes)
+    , renderDossierNoteComposer state
     ]
 
-renderNote :: forall m. { id :: Int, content :: String, author :: Maybe String, createdAt :: Maybe String } -> H.ComponentHTML Action () m
-renderNote note =
-  HH.div [ HP.class_ (H.ClassName "note-card") ]
-    [ HH.div [ HP.class_ (H.ClassName "note-meta") ]
-        [ case note.author of
+renderDossierNote :: forall m.
+  { id :: Int, content :: String, author :: Maybe String, createdAt :: Maybe String }
+  -> H.ComponentHTML Action () m
+renderDossierNote note =
+  HH.li [ HP.class_ (H.ClassName "dossier-note") ]
+    [ HH.div [ HP.class_ (H.ClassName "dossier-note-meta") ]
+        [ case note.createdAt of
+            Just d -> HH.span [ HP.class_ (H.ClassName "dossier-note-date") ]
+              [ HH.text (String.take 10 d) ]
             Nothing -> HH.text ""
-            Just a -> HH.span [ HP.class_ (H.ClassName "note-author") ] [ HH.text a ]
-        , case note.createdAt of
+        , case note.author of
+            Just a -> HH.span [ HP.class_ (H.ClassName "dossier-note-author") ]
+              [ HH.text (" · " <> a) ]
             Nothing -> HH.text ""
-            Just d -> HH.span [ HP.class_ (H.ClassName "note-date") ] [ HH.text d ]
         ]
-    , HH.p [ HP.class_ (H.ClassName "note-content") ]
+    , HH.p [ HP.class_ (H.ClassName "dossier-note-content") ]
         [ HH.text note.content ]
     ]
 
--- =============================================================================
--- Create/Edit Form
--- =============================================================================
-
-renderForm :: forall m. State -> Maybe ProjectDetail -> H.ComponentHTML Action () m
-renderForm state mDetail =
-  let isEdit = isJust mDetail
-      title = if isEdit then "Edit Project" else "New Project"
-      submitAction = case mDetail of
-        Nothing -> SubmitCreate
-        Just d -> SubmitUpdate d.id
-  in HH.div [ HP.class_ (H.ClassName "form-panel") ]
-    [ HH.div [ HP.class_ (H.ClassName "form-header") ]
-        [ HH.h2_ [ HH.text title ]
-        , HH.button
-            [ HP.class_ (H.ClassName "btn btn-back")
-            , HE.onClick \_ -> CancelForm
-            ]
-            [ HH.text "Cancel" ]
-        ]
-    , HH.form
-        [ HP.class_ (H.ClassName "project-form")
-        , HE.onSubmit \_ -> submitAction
-        ]
-        [ HH.div [ HP.class_ (H.ClassName "form-row") ]
-            [ HH.label [ HP.for "name" ] [ HH.text "Name" ]
-            , HH.input
-                [ HP.type_ HP.InputText
-                , HP.id "name"
-                , HP.value state.formName
-                , HP.placeholder "Project name"
-                , HP.required true
-                , HE.onValueInput SetFormName
-                ]
-            ]
-        , HH.div [ HP.class_ (H.ClassName "form-row form-row-pair") ]
-            [ HH.div [ HP.class_ (H.ClassName "form-field") ]
-                [ HH.label [ HP.for "domain" ] [ HH.text "Domain" ]
-                , HH.select
-                    [ HP.id "domain"
-                    , HE.onValueChange SetFormDomain
-                    ]
-                    (domainFormOptions state)
-                ]
-            , HH.div [ HP.class_ (H.ClassName "form-field") ]
-                [ HH.label [ HP.for "subdomain" ] [ HH.text "Subdomain" ]
-                , HH.input
-                    [ HP.type_ HP.InputText
-                    , HP.id "subdomain"
-                    , HP.value state.formSubdomain
-                    , HP.placeholder "e.g. hylograph, eurorack"
-                    , HE.onValueInput SetFormSubdomain
-                    ]
-                ]
-            ]
-        , HH.div [ HP.class_ (H.ClassName "form-row") ]
-            [ HH.label [ HP.for "status" ] [ HH.text "Status" ]
-            , HH.select
-                [ HP.id "status"
-                , HE.onValueChange SetFormStatus
-                ]
-                (map (\s ->
-                  HH.option
-                    [ HP.value (statusToString s)
-                    , HP.selected (statusToString s == state.formStatus)
-                    ]
-                    [ HH.text (statusLabel s) ]
-                ) allStatuses)
-            ]
-        , if isEdit
-            then HH.div [ HP.class_ (H.ClassName "form-row") ]
-              [ HH.label [ HP.for "statusReason" ] [ HH.text "Status Change Reason" ]
-              , HH.input
-                  [ HP.type_ HP.InputText
-                  , HP.id "statusReason"
-                  , HP.value state.formStatusReason
-                  , HP.placeholder "Why is the status changing?"
-                  , HE.onValueInput SetFormStatusReason
-                  ]
+renderDossierNoteComposer :: forall m. State -> H.ComponentHTML Action () m
+renderDossierNoteComposer state =
+  if state.dossierNoteOpen
+    then HH.div [ HP.class_ (H.ClassName "dossier-note-composer") ]
+      [ HH.textarea
+          [ HP.class_ (H.ClassName "dossier-note-input")
+          , HP.id "note-input"
+          , HP.value state.dossierNoteDraft
+          , HP.placeholder "Write a note. ⌘+Enter to save, Esc to cancel."
+          , HP.rows 4
+          , HP.autofocus true
+          , HE.onValueInput DossierSetNote
+          ]
+      , HH.div [ HP.class_ (H.ClassName "dossier-note-composer-actions") ]
+          [ HH.button
+              [ HP.class_ (H.ClassName "dossier-btn-ghost")
+              , HE.onClick \_ -> DossierCancelNote
               ]
-            else HH.text ""
-        , HH.div [ HP.class_ (H.ClassName "form-row") ]
-            [ HH.label [ HP.for "description" ] [ HH.text "Description" ]
-            , HH.textarea
-                [ HP.id "description"
-                , HP.value state.formDescription
-                , HP.placeholder "What is this project?"
-                , HP.rows 4
-                , HE.onValueInput SetFormDescription
-                ]
-            ]
-        , HH.div [ HP.class_ (H.ClassName "form-row") ]
-            [ HH.label [ HP.for "repo" ] [ HH.text "Repository" ]
-            , HH.input
-                [ HP.type_ HP.InputText
-                , HP.id "repo"
-                , HP.value state.formRepo
-                , HP.placeholder "e.g. purescript-hylograph-libs"
-                , HE.onValueInput SetFormRepo
-                ]
-            ]
-        , HH.div [ HP.class_ (H.ClassName "form-row form-row-pair") ]
-            [ HH.div [ HP.class_ (H.ClassName "form-field") ]
-                [ HH.label [ HP.for "sourceUrl" ] [ HH.text "Source URL" ]
-                , HH.input
-                    [ HP.type_ HP.InputText
-                    , HP.id "sourceUrl"
-                    , HP.value state.formSourceUrl
-                    , HP.placeholder "https://..."
-                    , HE.onValueInput SetFormSourceUrl
-                    ]
-                ]
-            , HH.div [ HP.class_ (H.ClassName "form-field") ]
-                [ HH.label [ HP.for "sourcePath" ] [ HH.text "Source Path" ]
-                , HH.input
-                    [ HP.type_ HP.InputText
-                    , HP.id "sourcePath"
-                    , HP.value state.formSourcePath
-                    , HP.placeholder "/path/to/project"
-                    , HE.onValueInput SetFormSourcePath
-                    ]
-                ]
-            ]
-        , HH.div [ HP.class_ (H.ClassName "form-actions") ]
-            [ HH.button
-                [ HP.class_ (H.ClassName "btn btn-primary")
-                , HP.type_ HP.ButtonButton
-                , HE.onClick \_ -> submitAction
-                ]
-                [ HH.text (if isEdit then "Save" else "Create Project") ]
-            , HH.button
-                [ HP.class_ (H.ClassName "btn btn-secondary")
-                , HP.type_ HP.ButtonButton
-                , HE.onClick \_ -> CancelForm
-                ]
-                [ HH.text "Cancel" ]
-            ]
+              [ HH.text "cancel" ]
+          , HH.button
+              [ HP.class_ (H.ClassName "dossier-btn-primary")
+              , HE.onClick \_ -> DossierSubmitNote
+              , HP.disabled (String.null (String.trim state.dossierNoteDraft))
+              ]
+              [ HH.text "add note" ]
+          ]
+      ]
+    else HH.button
+      [ HP.class_ (H.ClassName "dossier-note-addbtn")
+      , HE.onClick \_ -> DossierOpenNote
+      ]
+      [ HH.text "+ add note" ]
+
+-- ---- Marginalia helpers ----
+
+-- | Render one labeled block in the right marginalia column.
+marginaliaSection :: forall m. String -> H.ComponentHTML Action () m -> H.ComponentHTML Action () m
+marginaliaSection label body =
+  HH.section [ HP.class_ (H.ClassName "marginalia-section") ]
+    [ HH.h4 [ HP.class_ (H.ClassName "marginalia-label") ] [ HH.text label ]
+    , HH.div [ HP.class_ (H.ClassName "marginalia-body") ] [ body ]
+    ]
+
+-- | Status editor: shows the current status, clicking reveals a row of
+-- | valid-transition pills (enforces the lifecycle DAG via nextStatuses).
+renderStatusEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderStatusEditor _state detail =
+  HH.div [ HP.class_ (H.ClassName "status-editor") ]
+    [ HH.span
+        [ HP.class_ (H.ClassName ("status-current status-" <> statusToString detail.status))
         ]
-    , case mDetail of
-        Just detail ->
-          if not (Array.null detail.notes)
-            then renderNotes detail
-            else HH.text ""
+        [ HH.text (statusLabel detail.status) ]
+    , let opts = nextStatuses detail.status
+      in if Array.null opts
+        then HH.div [ HP.class_ (H.ClassName "status-transitions-empty") ]
+          [ HH.text "terminal" ]
+        else HH.div [ HP.class_ (H.ClassName "status-transitions") ]
+          ( [ HH.span [ HP.class_ (H.ClassName "status-arrow") ] [ HH.text "→ " ] ]
+          <> map (\s -> HH.button
+              [ HP.class_ (H.ClassName "status-transition-pill")
+              , HE.onClick (\me -> QuickStatusChange detail.id s me)
+              , HP.title ("Transition to " <> statusLabel s)
+              ]
+              [ HH.text (statusLabel s) ]) opts
+          )
+    ]
+
+-- | Domain editor: click to open a dropdown of all domains. Selecting one
+-- | commits immediately via PUT.
+renderDomainEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDomainEditor state detail =
+  if state.dossierDomainOpen
+    then HH.div [ HP.class_ (H.ClassName "domain-editor-open") ]
+      (map (\d -> HH.button
+          [ HP.class_ (H.ClassName ("domain-option domain-" <> d))
+          , HE.onClick \_ -> DossierPickDomain d
+          ]
+          [ HH.text d ]) allDomains)
+    else HH.span
+      [ HP.class_ (H.ClassName ("domain-current editable domain-" <> detail.domain))
+      , HE.onClick \_ -> DossierOpenDomain
+      , HP.title "Click to change domain"
+      ]
+      [ HH.text detail.domain ]
+
+allDomains :: Array String
+allDomains =
+  [ "programming", "music", "house", "woodworking", "garden", "infrastructure" ]
+
+-- | Identifier block: slug (monospace, immutable) + id.
+renderIdentifierBlock :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderIdentifierBlock detail =
+  HH.div [ HP.class_ (H.ClassName "identifier-block") ]
+    [ case detail.slug of
+        Just s -> HH.span [ HP.class_ (H.ClassName "identifier-slug") ]
+          [ HH.text s ]
+        Nothing -> HH.text ""
+    , HH.span [ HP.class_ (H.ClassName "identifier-id") ]
+        [ HH.text ("id " <> show detail.id) ]
+    , case detail.subdomain of
+        Just sd | not (String.null sd) -> HH.span
+          [ HP.class_ (H.ClassName "identifier-subdomain editable")
+          , HE.onClick \_ -> DossierStartEdit FSubdomain sd
+          ]
+          [ HH.text sd ]
+        _ -> HH.text ""
+    ]
+
+-- | Tags editor: existing tags + "+ add" to open an inline input.
+renderTagsEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderTagsEditor state detail =
+  HH.div [ HP.class_ (H.ClassName "tags-editor") ]
+    [ if Array.null detail.tags
+        then HH.span [ HP.class_ (H.ClassName "tags-empty") ] [ HH.text "—" ]
+        else HH.div [ HP.class_ (H.ClassName "tag-pill-row") ]
+          (map (\t -> HH.span [ HP.class_ (H.ClassName "tag-pill") ] [ HH.text t ]) detail.tags)
+    , if state.dossierTagOpen
+        then HH.form
+          [ HP.class_ (H.ClassName "tag-add-form")
+          , HE.onSubmit \_ -> DossierSubmitTag
+          ]
+          [ HH.input
+              [ HP.class_ (H.ClassName "tag-add-input")
+              , HP.type_ HP.InputText
+              , HP.value state.dossierTagDraft
+              , HP.placeholder "new tag"
+              , HP.autofocus true
+              , HE.onValueInput DossierSetTag
+              ]
+          ]
+        else HH.button
+          [ HP.class_ (H.ClassName "tags-add-btn")
+          , HE.onClick \_ -> DossierOpenTag
+          ]
+          [ HH.text "+ add tag" ]
+    ]
+
+-- | Parent block: shows the parent project (clickable) or "(none)".
+renderParentBlock :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderParentBlock state detail =
+  case detail.parentId of
+    Nothing -> HH.span [ HP.class_ (H.ClassName "marginalia-muted") ] [ HH.text "(none)" ]
+    Just pid -> case Array.find (\p -> p.id == pid) state.allProjects of
+      Nothing -> HH.span [ HP.class_ (H.ClassName "marginalia-muted") ]
+        [ HH.text ("id " <> show pid) ]
+      Just p -> HH.span
+        [ HP.class_ (H.ClassName "parent-link")
+        , HE.onClick \_ -> SelectProject p.id
+        ]
+        [ HH.text ("↑ " <> p.name) ]
+
+-- | Children block: lists child projects with a + button for adding more.
+renderChildrenBlock :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderChildrenBlock state detail =
+  let children = Array.filter (\p -> p.parentId == Just detail.id) state.allProjects
+  in HH.div [ HP.class_ (H.ClassName "children-block") ]
+    [ if Array.null children
+        then HH.span [ HP.class_ (H.ClassName "marginalia-muted") ] [ HH.text "(none)" ]
+        else HH.ul [ HP.class_ (H.ClassName "children-list-marg") ]
+          (map (\c -> HH.li_
+            [ HH.span
+                [ HP.class_ (H.ClassName "child-link")
+                , HE.onClick \_ -> SelectProject c.id
+                ]
+                [ HH.text c.name ]
+            ]) children)
+    , case state.addChildOpen of
+        Just pid | pid == detail.id -> HH.form
+          [ HP.class_ (H.ClassName "add-child-form-marg")
+          , HE.onSubmit \_ -> SubmitAddChild detail.id
+          ]
+          [ HH.input
+              [ HP.class_ (H.ClassName "add-child-input")
+              , HP.type_ HP.InputText
+              , HP.value state.addChildName
+              , HP.placeholder "new child name"
+              , HP.autofocus true
+              , HE.onValueInput SetAddChildName
+              ]
+          ]
+        _ -> HH.button
+          [ HP.class_ (H.ClassName "children-add-btn")
+          , HE.onClick \_ -> OpenAddChild detail.id
+          ]
+          [ HH.text "+ add child" ]
+    ]
+
+-- | History block: created + updated dates in ISO format.
+renderHistoryBlock :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderHistoryBlock detail =
+  HH.div [ HP.class_ (H.ClassName "history-block") ]
+    [ case detail.createdAt of
+        Just c -> HH.div_
+          [ HH.span [ HP.class_ (H.ClassName "history-label") ] [ HH.text "created " ]
+          , HH.span [ HP.class_ (H.ClassName "history-date") ] [ HH.text (String.take 10 c) ]
+          ]
+        Nothing -> HH.text ""
+    , case detail.updatedAt of
+        Just u -> HH.div_
+          [ HH.span [ HP.class_ (H.ClassName "history-label") ] [ HH.text "updated " ]
+          , HH.span [ HP.class_ (H.ClassName "history-date") ] [ HH.text (String.take 10 u) ]
+          ]
         Nothing -> HH.text ""
     ]
 
-domainFormOptions :: forall m. State -> Array (H.ComponentHTML Action () m)
-domainFormOptions state =
-  let domains = case state.stats of
-        Nothing -> [ "programming", "music", "house", "woodworking", "garden", "infrastructure" ]
-        Just stats -> stats.domains
-  in map (\d ->
-    HH.option
-      [ HP.value d
-      , HP.selected (d == state.formDomain)
+-- | External links: repo, url, source path. Each click-to-edit.
+renderExternalEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderExternalEditor state detail =
+  HH.dl [ HP.class_ (H.ClassName "external-dl") ]
+    [ renderExternalField state FRepo "repo" detail.repo
+    , renderExternalField state FSourceUrl "url" detail.sourceUrl
+    , renderExternalField state FSourcePath "path" detail.sourcePath
+    ]
+
+renderExternalField
+  :: forall m. State -> EditableField -> String -> Maybe String
+  -> H.ComponentHTML Action () m
+renderExternalField state field label mValue =
+  let currentValue = fromMaybe "" mValue
+  in HH.div [ HP.class_ (H.ClassName "external-row") ]
+    [ HH.dt [ HP.class_ (H.ClassName "external-key") ] [ HH.text label ]
+    , HH.dd [ HP.class_ (H.ClassName "external-val") ]
+        [ case state.dossierEditField of
+            Just f | f == field ->
+              HH.form
+                [ HE.onSubmit \_ -> DossierCommitEdit ]
+                [ HH.input
+                    [ HP.class_ (H.ClassName "external-input")
+                    , HP.type_ HP.InputText
+                    , HP.value state.dossierEditValue
+                    , HP.autofocus true
+                    , HE.onValueInput DossierSetEditValue
+                    , HE.onBlur \_ -> DossierCommitEdit
+                    ]
+                ]
+            _ ->
+              if String.null currentValue
+                then HH.span
+                  [ HP.class_ (H.ClassName "external-empty editable")
+                  , HE.onClick \_ -> DossierStartEdit field currentValue
+                  ]
+                  [ HH.text "—" ]
+                else HH.span
+                  [ HP.class_ (H.ClassName "external-value editable")
+                  , HE.onClick \_ -> DossierStartEdit field currentValue
+                  , HP.title ("Click to edit " <> label)
+                  ]
+                  [ HH.text currentValue ]
+        ]
+    ]
+
+-- | Compact servers list in the marginalia column. Reuses the server-row
+-- | rendering from the old detail panel, which already has a row layout.
+renderServersBlock :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderServersBlock state detail =
+  let myServers = Array.filter (\s -> s.projectId == detail.id) state.servers
+  in if Array.null myServers
+    then HH.span [ HP.class_ (H.ClassName "marginalia-muted") ] [ HH.text "(none)" ]
+    else HH.div [ HP.class_ (H.ClassName "servers-block") ]
+      (map renderServerRow myServers)
+
+-- | Dependencies block: inbound and outbound references as lists.
+renderDependenciesBlock :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderDependenciesBlock detail =
+  let blocking = detail.dependencies.blocking
+      blockedBy = detail.dependencies.blockedBy
+  in if Array.null blocking && Array.null blockedBy
+    then HH.span [ HP.class_ (H.ClassName "marginalia-muted") ] [ HH.text "(none)" ]
+    else HH.div [ HP.class_ (H.ClassName "deps-block") ]
+      [ if Array.null blockedBy then HH.text ""
+        else HH.div_
+          [ HH.span [ HP.class_ (H.ClassName "deps-sublabel") ] [ HH.text "blocked by" ]
+          , HH.ul_
+            (map (\d -> HH.li_
+              [ HH.span
+                  [ HP.class_ (H.ClassName "dep-link")
+                  , HE.onClick \_ -> SelectProject d.projectId
+                  ]
+                  [ HH.text d.projectName ]
+              ]) blockedBy)
+          ]
+      , if Array.null blocking then HH.text ""
+        else HH.div_
+          [ HH.span [ HP.class_ (H.ClassName "deps-sublabel") ] [ HH.text "blocking" ]
+          , HH.ul_
+            (map (\d -> HH.li_
+              [ HH.span
+                  [ HP.class_ (H.ClassName "dep-link")
+                  , HE.onClick \_ -> SelectProject d.projectId
+                  ]
+                  [ HH.text d.projectName ]
+              ]) blocking)
+          ]
       ]
-      [ HH.text d ]
-    ) domains
+
+-- | Attachments in the marginalia column: filenames as links.
+renderAttachmentsBlock :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderAttachmentsBlock detail =
+  if Array.null detail.attachments
+    then HH.span [ HP.class_ (H.ClassName "marginalia-muted") ] [ HH.text "(none)" ]
+    else HH.ul [ HP.class_ (H.ClassName "attachments-marg-list") ]
+      (map renderAttachmentMargRow detail.attachments)
+
+renderAttachmentMargRow :: forall m. Attachment -> H.ComponentHTML Action () m
+renderAttachmentMargRow att =
+  HH.li [ HP.class_ (H.ClassName "attachment-marg-row") ]
+    [ case att.url of
+        Nothing -> HH.span [ HP.class_ (H.ClassName "attachment-marg-filename") ]
+          [ HH.text ("📎 " <> att.filename) ]
+        Just url -> HH.a
+          [ HP.class_ (H.ClassName "attachment-marg-filename")
+          , HP.href url
+          , HP.target "_blank"
+          ]
+          [ HH.text ("📎 " <> att.filename) ]
+    ]
+
+-- | Draft Dossier — the create flow. A slim dossier shell with just an
+-- | autofocused title input in the main column. On submit, the project
+-- | is created with defaults (domain=programming, status=idea) and we
+-- | transition straight into the full dossier where the user can edit
+-- | everything else in place. No separate edit form.
+renderCreateDossier :: forall m. State -> H.ComponentHTML Action () m
+renderCreateDossier state =
+  HH.div [ HP.class_ (H.ClassName "dossier dossier-draft") ]
+    [ HH.div [ HP.class_ (H.ClassName "dossier-top") ]
+        [ HH.div [ HP.class_ (H.ClassName "dossier-top-nav") ]
+            [ HH.button
+                [ HP.class_ (H.ClassName "dossier-nav-btn")
+                , HE.onClick \_ -> CancelForm
+                ]
+                [ HH.text "‹ cancel" ]
+            , HH.span [ HP.class_ (H.ClassName "dossier-page-num") ]
+                [ HH.text "new entry" ]
+            ]
+        ]
+    , HH.div [ HP.class_ (H.ClassName "dossier-page") ]
+        [ HH.section [ HP.class_ (H.ClassName "dossier-main") ]
+            [ HH.div [ HP.class_ (H.ClassName "dossier-draft-hint") ]
+                [ HH.text "New project" ]
+            , HH.form
+                [ HE.onSubmit \_ -> SubmitCreate ]
+                [ HH.input
+                    [ HP.class_ (H.ClassName "dossier-title-input dossier-draft-input")
+                    , HP.type_ HP.InputText
+                    , HP.value state.formName
+                    , HP.placeholder "Name your project — press Enter to begin"
+                    , HP.autofocus true
+                    , HE.onValueInput SetFormName
+                    ]
+                ]
+            , HH.p [ HP.class_ (H.ClassName "dossier-draft-footnote") ]
+                [ HH.text "Defaults: domain "
+                , HH.em_ [ HH.text "programming" ]
+                , HH.text ", status "
+                , HH.em_ [ HH.text "idea" ]
+                , HH.text ". You can change everything after creation."
+                ]
+            ]
+        ]
+    ]
 
 -- =============================================================================
 -- Action Handler
@@ -1248,6 +1328,122 @@ handleAction = case _ of
     _ <- liftAff $ API.deleteServer serverId
     handleAction LoadPorts
 
+  -- ---- Dossier inline editing (stubs filled in Phase D) ----
+  DossierStartEdit field initial -> do
+    H.modify_ \s -> s
+      { dossierEditField = Just field
+      , dossierEditValue = initial
+      , dossierNoteOpen = false
+      , dossierTagOpen = false
+      , dossierDomainOpen = false
+      }
+
+  DossierSetEditValue v ->
+    H.modify_ \s -> s { dossierEditValue = v }
+
+  DossierCommitEdit -> do
+    state <- H.get
+    case Tuple state.dossierEditField state.selectedProject of
+      Tuple (Just field) (Just detail) -> do
+        let newVal = String.trim state.dossierEditValue
+        let input = detailToInputWith field newVal detail
+        _ <- liftAff $ API.updateProject detail.id input
+        -- Refetch to get authoritative data
+        mNew <- liftAff $ API.fetchProject detail.id
+        H.modify_ \s -> s
+          { selectedProject = mNew
+          , dossierEditField = Nothing
+          , dossierEditValue = ""
+          }
+        handleAction LoadAllProjects
+      _ -> pure unit
+
+  DossierCancelEdit ->
+    H.modify_ \s -> s { dossierEditField = Nothing, dossierEditValue = "" }
+
+  DossierOpenDomain ->
+    H.modify_ \s -> s
+      { dossierDomainOpen = true
+      , dossierEditField = Nothing
+      , dossierNoteOpen = false
+      , dossierTagOpen = false
+      }
+
+  DossierPickDomain newDomain -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        let input = (detailToInput detail) { domain = newDomain }
+        _ <- liftAff $ API.updateProject detail.id input
+        mNew <- liftAff $ API.fetchProject detail.id
+        H.modify_ \s -> s
+          { selectedProject = mNew, dossierDomainOpen = false }
+        handleAction LoadAllProjects
+
+  DossierOpenNote -> do
+    H.modify_ \s -> s
+      { dossierNoteOpen = true
+      , dossierNoteDraft = ""
+      , dossierEditField = Nothing
+      , dossierTagOpen = false
+      , dossierDomainOpen = false
+      }
+    liftEffect focusNoteInput_
+
+  DossierSetNote v ->
+    H.modify_ \s -> s { dossierNoteDraft = v }
+
+  DossierSubmitNote -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        let content = String.trim state.dossierNoteDraft
+        if String.null content then pure unit
+          else do
+            liftAff $ API.addNote detail.id content
+            mNew <- liftAff $ API.fetchProject detail.id
+            H.modify_ \s -> s
+              { selectedProject = mNew
+              , dossierNoteOpen = false
+              , dossierNoteDraft = ""
+              }
+
+  DossierCancelNote ->
+    H.modify_ \s -> s { dossierNoteOpen = false, dossierNoteDraft = "" }
+
+  DossierOpenTag ->
+    H.modify_ \s -> s
+      { dossierTagOpen = true
+      , dossierTagDraft = ""
+      , dossierEditField = Nothing
+      , dossierNoteOpen = false
+      , dossierDomainOpen = false
+      }
+
+  DossierSetTag v ->
+    H.modify_ \s -> s { dossierTagDraft = v }
+
+  DossierSubmitTag -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        let tag = String.trim state.dossierTagDraft
+        if String.null tag then pure unit
+          else do
+            _ <- liftAff $ API.addTag detail.id tag
+            mNew <- liftAff $ API.fetchProject detail.id
+            H.modify_ \s -> s
+              { selectedProject = mNew
+              , dossierTagOpen = false
+              , dossierTagDraft = ""
+              }
+
+  DossierCancelTag ->
+    H.modify_ \s -> s { dossierTagOpen = false, dossierTagDraft = "" }
+
   ClearFilters -> do
     liftEffect $ setHash_ ""
     H.modify_ \s -> s
@@ -1282,96 +1478,30 @@ handleAction = case _ of
       , formRepo = ""
       , formSourceUrl = ""
       , formSourcePath = ""
-      , formStatusReason = ""
       }
 
-  ShowEditForm -> do
-    state <- H.get
-    case state.selectedProject of
-      Nothing -> pure unit
-      Just detail -> do
-        liftEffect $ setHash_ ("edit/" <> show detail.id)
-        H.modify_ \s -> s
-          { view = EditView detail.id
-        , formName = detail.name
-        , formDomain = detail.domain
-        , formSubdomain = fromMaybe "" detail.subdomain
-        , formStatus = statusToString detail.status
-        , formDescription = fromMaybe "" detail.description
-        , formRepo = fromMaybe "" detail.repo
-        , formSourceUrl = fromMaybe "" detail.sourceUrl
-        , formSourcePath = fromMaybe "" detail.sourcePath
-        , formStatusReason = ""
-        }
-
   CancelForm -> do
-    state <- H.get
-    case state.view of
-      EditView projectId -> do
-        liftEffect $ setHash_ ("project/" <> show projectId)
-        H.modify_ \s -> s { view = DetailView projectId }
-      _ -> do
-        liftEffect $ setHash_ ""
-        H.modify_ \s -> s { view = ListView }
-
-  DiscardEdits projectId -> do
-    liftEffect $ setHash_ ("project/" <> show projectId)
-    H.modify_ \s -> s { view = DetailView projectId, selectedProject = Nothing }
-    mDetail <- liftAff $ API.fetchProject projectId
-    H.modify_ \s -> s { selectedProject = mDetail }
+    liftEffect $ setHash_ ""
+    H.modify_ \s -> s { view = ListView }
 
   SubmitCreate -> do
     state <- H.get
-    let input = buildInput state
-    mProject <- liftAff $ API.createProject input
-    case mProject of
-      Nothing -> H.modify_ \s -> s { error = Just "Failed to create project" }
-      Just _ -> do
-        H.modify_ \s -> s { view = ListView }
-        handleAction LoadStats
-        handleAction LoadProjects
+    -- Refuse to create with a blank name — avoids accidental empty drafts
+    -- when Enter is pressed on an empty input.
+    let trimmedName = String.trim state.formName
+    when (not (String.null trimmedName)) do
+      let input = (buildInput state) { name = trimmedName }
+      mProject <- liftAff $ API.createProject input
+      case mProject of
+        Nothing -> H.modify_ \s -> s { error = Just "Failed to create project" }
+        Just p -> do
+          handleAction LoadStats
+          handleAction LoadAllProjects
+          -- Drop straight into the dossier for the newly-created project.
+          handleAction (SelectProject p.id)
 
-  SubmitUpdate projectId -> do
-    liftEffect $ log $ "SubmitUpdate called for project " <> show projectId
-    state <- H.get
-    let input = buildInput state
-    liftEffect $ log $ "Sending update: " <> show input.name <> " / " <> show input.description
-    mProject <- liftAff $ API.updateProject projectId input
-    case mProject of
-      Nothing -> do
-        liftEffect $ log "Update returned Nothing"
-        H.modify_ \s -> s { error = Just "Failed to update project" }
-      Just _ -> do
-        liftEffect $ log "Update succeeded"
-        -- Reload the detail
-        handleAction (SelectProject projectId)
-        handleAction LoadStats
-
-  SetFormName val -> do
+  SetFormName val ->
     H.modify_ \s -> s { formName = val }
-    triggerAutoSave
-  SetFormDomain val -> do
-    H.modify_ \s -> s { formDomain = val }
-    triggerAutoSave
-  SetFormSubdomain val -> do
-    H.modify_ \s -> s { formSubdomain = val }
-    triggerAutoSave
-  SetFormStatus val -> do
-    H.modify_ \s -> s { formStatus = val }
-    triggerAutoSave
-  SetFormDescription val -> do
-    H.modify_ \s -> s { formDescription = val }
-    triggerAutoSave
-  SetFormRepo val -> do
-    H.modify_ \s -> s { formRepo = val }
-    triggerAutoSave
-  SetFormSourceUrl val -> do
-    H.modify_ \s -> s { formSourceUrl = val }
-    triggerAutoSave
-  SetFormSourcePath val -> do
-    H.modify_ \s -> s { formSourcePath = val }
-    triggerAutoSave
-  SetFormStatusReason val -> H.modify_ \s -> s { formStatusReason = val }
 
   QuickStatusChange projectId newStatus mouseEvent -> do
     liftEffect $ stopPropagation_ (toEvent mouseEvent)
@@ -1380,6 +1510,14 @@ handleAction = case _ of
     handleAction LoadProjects
     handleAction LoadAllProjects
     handleAction LoadStats
+    -- If this project is currently being viewed in the dossier, refetch
+    -- its detail so the visible state matches the server's.
+    state <- H.get
+    case state.selectedProject of
+      Just detail | detail.id == projectId -> do
+        mNew <- liftAff $ API.fetchProject projectId
+        H.modify_ \s -> s { selectedProject = mNew }
+      _ -> pure unit
 
   NextProject -> cycleSelectedProject 1
   PrevProject -> cycleSelectedProject (-1)
@@ -1392,65 +1530,22 @@ handleAction = case _ of
         Nothing -> pure unit
         Just pid -> handleAction (SelectProject pid)
 
-  QuickEdit projectId mouseEvent -> do
-    liftEffect $ stopPropagation_ (toEvent mouseEvent)
-    liftEffect $ setHash_ ("edit/" <> show projectId)
-    H.modify_ \s -> s { view = DetailView projectId, selectedProject = Nothing }
-    mDetail <- liftAff $ API.fetchProject projectId
-    case mDetail of
-      Nothing -> pure unit
-      Just detail -> H.modify_ \s -> s
-        { view = EditView detail.id
-        , selectedProject = Just detail
-        , formName = detail.name
-        , formDomain = detail.domain
-        , formSubdomain = fromMaybe "" detail.subdomain
-        , formStatus = statusToString detail.status
-        , formDescription = fromMaybe "" detail.description
-        , formRepo = fromMaybe "" detail.repo
-        , formSourceUrl = fromMaybe "" detail.sourceUrl
-        , formSourcePath = fromMaybe "" detail.sourcePath
-        , formStatusReason = ""
-        }
-
   HashChange hash -> do
     state <- H.get
     let currentHash = viewToHash state.view
     -- Only navigate if hash actually changed (avoid loops)
     when (hash /= currentHash) do
       case parseHash hash of
-        Just ListView -> do
+        Just ListView ->
           H.modify_ \s -> s { view = ListView, selectedProject = Nothing }
         Just (DetailView pid) -> do
           H.modify_ \s -> s { view = DetailView pid, selectedProject = Nothing }
           mDetail <- liftAff $ API.fetchProject pid
           H.modify_ \s -> s { selectedProject = mDetail }
-        Just (EditView pid) -> do
-          H.modify_ \s -> s { view = DetailView pid, selectedProject = Nothing }
-          mDetail <- liftAff $ API.fetchProject pid
-          case mDetail of
-            Nothing -> pure unit
-            Just detail -> H.modify_ \s -> s
-              { view = EditView detail.id
-              , selectedProject = Just detail
-              , formName = detail.name
-              , formDomain = detail.domain
-              , formSubdomain = fromMaybe "" detail.subdomain
-              , formStatus = statusToString detail.status
-              , formDescription = fromMaybe "" detail.description
-              , formRepo = fromMaybe "" detail.repo
-              , formSourceUrl = fromMaybe "" detail.sourceUrl
-              , formSourcePath = fromMaybe "" detail.sourcePath
-              , formStatusReason = ""
-              }
         Just CreateView -> handleAction ShowCreateForm
         Nothing -> pure unit
 
-  AutoSave projectId -> do
-    state <- H.get
-    let input = buildInput state
-    _ <- liftAff $ API.updateProject projectId input
-    pure unit
+  AutoSave _ -> pure unit
 
   OpenNotePanel projectId -> do
     H.modify_ \s -> s { notePanel = true, noteProjectId = Just projectId, noteText = "", recording = false }
@@ -1563,8 +1658,7 @@ handleAction = case _ of
       case state.view of
         ListView -> handleListViewKey ke state
         DetailView _ -> handleDetailViewKey ke
-        EditView _ -> handleEditViewKey ke
-        CreateView -> handleEditViewKey ke
+        CreateView -> handleCreateViewKey ke
 
 -- =============================================================================
 -- Helpers
@@ -1580,7 +1674,7 @@ buildInput state =
   , repo: state.formRepo
   , sourceUrl: state.formSourceUrl
   , sourcePath: state.formSourcePath
-  , statusReason: state.formStatusReason
+  , statusReason: ""
   }
 
 -- | A minimal ProjectInput with all fields empty. Used for quick status changes.
@@ -1596,6 +1690,34 @@ emptyProjectInput =
   , sourcePath: ""
   , statusReason: ""
   }
+
+-- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
+-- | be round-tripped through the PUT endpoint. Used by the Dossier view for
+-- | single-field edits: copy everything, override one field, submit.
+detailToInput :: ProjectDetail -> ProjectInput
+detailToInput d =
+  { name: d.name
+  , domain: d.domain
+  , subdomain: fromMaybe "" d.subdomain
+  , status: statusToString d.status
+  , description: fromMaybe "" d.description
+  , repo: fromMaybe "" d.repo
+  , sourceUrl: fromMaybe "" d.sourceUrl
+  , sourcePath: fromMaybe "" d.sourcePath
+  , statusReason: ""
+  }
+
+-- | Copy a detail into a ProjectInput with a single field overridden.
+-- | Used by the Dossier commit handler.
+detailToInputWith :: EditableField -> String -> ProjectDetail -> ProjectInput
+detailToInputWith field value d =
+  let base = detailToInput d
+  in case field of
+    FDescription -> base { description = value }
+    FSubdomain   -> base { subdomain = value }
+    FRepo        -> base { repo = value }
+    FSourceUrl   -> base { sourceUrl = value }
+    FSourcePath  -> base { sourcePath = value }
 
 -- | Cycle the currently-selected project in the detail panel by `delta`
 -- | (1 for next, -1 for previous), wrapping around the visible project list.
@@ -1614,14 +1736,6 @@ cycleSelectedProject delta = do
           case Array.index projects newIdx of
             Nothing -> pure unit
             Just p -> handleAction (SelectProject p.id)
-    _ -> pure unit
-
--- | Auto-save: if in edit mode, fire a save
-triggerAutoSave :: forall o m. MonadAff m => H.HalogenM State Action () o m Unit
-triggerAutoSave = do
-  state <- H.get
-  case state.view of
-    EditView projectId -> handleAction (AutoSave projectId)
     _ -> pure unit
 
 -- =============================================================================
@@ -1652,28 +1766,11 @@ handleListViewKey ke state = case ke.key of
       Nothing -> pure unit
       Just p -> handleAction (SelectProject p.id)
 
-  -- Edit focused card
+  -- Open the focused card's dossier (editing happens inline there, no
+  -- separate edit mode any more)
   "e" -> case focusedProject state of
     Nothing -> pure unit
-    Just p -> do
-      liftEffect $ setHash_ ("edit/" <> show p.id)
-      H.modify_ \s -> s { view = DetailView p.id, selectedProject = Nothing }
-      mDetail <- liftAff $ API.fetchProject p.id
-      case mDetail of
-        Nothing -> pure unit
-        Just detail -> H.modify_ \s -> s
-          { view = EditView detail.id
-          , selectedProject = Just detail
-          , formName = detail.name
-          , formDomain = detail.domain
-          , formSubdomain = fromMaybe "" detail.subdomain
-          , formStatus = statusToString detail.status
-          , formDescription = fromMaybe "" detail.description
-          , formRepo = fromMaybe "" detail.repo
-          , formSourceUrl = fromMaybe "" detail.sourceUrl
-          , formSourcePath = fromMaybe "" detail.sourcePath
-          , formStatusReason = ""
-          }
+    Just p -> handleAction (SelectProject p.id)
 
   -- Search
   "/" -> do
@@ -1716,38 +1813,55 @@ handleDetailViewKey :: forall o m. MonadAff m =>
 handleDetailViewKey ke
   -- Cmd-Up: go to parent (Mac Finder convention)
   | ke.key == "ArrowUp" && ke.meta = handleAction NavigateToParent
-handleDetailViewKey ke = case ke.key of
-  "Escape" -> handleAction CloseDetail
-  "e" -> handleAction ShowEditForm
-  "j" -> handleAction NextProject
-  "ArrowDown" -> handleAction NextProject
-  "k" -> handleAction PrevProject
-  -- Plain Up: previous project in view (or parent if visible breadcrumb)
-  "ArrowUp" -> do
-    state <- H.get
-    case state.selectedProject of
-      Just detail | isJust detail.parentId
-                 , Just _ <- Array.find (\p -> Just p.id == detail.parentId) state.projects ->
-        handleAction NavigateToParent
-      _ -> handleAction PrevProject
-  "n" -> do
-    liftEffect ke.preventDefault
-    state <- H.get
-    case state.selectedProject of
-      Nothing -> pure unit
-      Just detail -> handleAction (OpenNotePanel detail.id)
-  "i" -> do
-    liftEffect ke.preventDefault
-    handleAction (OpenNotePanel inboxProjectId)
-  _ -> pure unit
+handleDetailViewKey ke = do
+  state <- H.get
+  case ke.key of
+    "Escape"
+      -- Dossier edit state takes priority over closing the detail view.
+      | isJust state.dossierEditField -> handleAction DossierCancelEdit
+      | state.dossierNoteOpen         -> handleAction DossierCancelNote
+      | state.dossierTagOpen          -> handleAction DossierCancelTag
+      | state.dossierDomainOpen       -> H.modify_ \s -> s { dossierDomainOpen = false }
+      | isJust state.renameOpen       -> handleAction CancelRename
+      | otherwise                      -> handleAction CloseDetail
+    "Enter"
+      -- Commit dossier edits when a text field is being edited (not
+      -- FDescription, which is a textarea and needs blur or the add
+      -- button). Form-element onSubmit handles most of this, but the
+      -- global key handler is the fallback.
+      | isJust state.dossierEditField
+      , state.dossierEditField /= Just FDescription ->
+          handleAction DossierCommitEdit
+      | state.dossierTagOpen ->
+          handleAction DossierSubmitTag
+    _ -> case ke.key of
+      "j" -> handleAction NextProject
+      "ArrowDown" -> handleAction NextProject
+      "k" -> handleAction PrevProject
+      -- Plain Up: previous project in view (or parent if visible breadcrumb)
+      "ArrowUp" ->
+        case state.selectedProject of
+          Just detail | isJust detail.parentId
+                     , Just _ <- Array.find (\p -> Just p.id == detail.parentId) state.projects ->
+            handleAction NavigateToParent
+          _ -> handleAction PrevProject
+      "n" -> do
+        liftEffect ke.preventDefault
+        case state.selectedProject of
+          Nothing -> pure unit
+          Just _  -> handleAction DossierOpenNote
+      "i" -> do
+        liftEffect ke.preventDefault
+        handleAction (OpenNotePanel inboxProjectId)
+      _ -> pure unit
 
 -- | Hardcoded project id for the Claude Inbox special project
 inboxProjectId :: Int
 inboxProjectId = 123
 
-handleEditViewKey :: forall o m. MonadAff m =>
+handleCreateViewKey :: forall o m. MonadAff m =>
   KeyEvent -> H.HalogenM State Action () o m Unit
-handleEditViewKey ke = case ke.key of
+handleCreateViewKey ke = case ke.key of
   "Escape" -> handleAction CancelForm
   _ -> pure unit
 
@@ -1807,7 +1921,6 @@ viewToHash = case _ of
   ListView -> ""
   DetailView pid -> "project/" <> show pid
   CreateView -> "new"
-  EditView pid -> "edit/" <> show pid
 
 parseHash :: String -> Maybe View
 parseHash hash = case hash of
@@ -1816,8 +1929,9 @@ parseHash hash = case hash of
   _ ->
     if String.take 8 hash == "project/" then
       Int.fromString (String.drop 8 hash) <#> DetailView
+    -- Legacy edit/:id hash: redirect to the new dossier view
     else if String.take 5 hash == "edit/" then
-      Int.fromString (String.drop 5 hash) <#> EditView
+      Int.fromString (String.drop 5 hash) <#> DetailView
     else
       Nothing
 

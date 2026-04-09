@@ -14,6 +14,7 @@ module API
   , updateProject
   , renameProject
   , addNote
+  , addTag
   ) where
 
 import Prelude
@@ -235,6 +236,14 @@ addNote projectId content = do
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
   pure unit
 
+-- | Add a tag to a project. Tag is created if it doesn't already exist.
+addTag :: Int -> String -> Aff Unit
+addTag projectId tag = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/tags"
+  let body = buildTagBody tag
+  _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  pure unit
+
 -- | Result of a rename attempt — used to surface warnings/errors to the UI.
 type RenameResponse =
   { ok :: Boolean
@@ -284,5 +293,6 @@ createChild parentId name domain = do
 foreign import buildCreateBody :: ProjectInput -> String
 foreign import buildUpdateBody :: ProjectInput -> String
 foreign import buildNoteBody :: String -> String
+foreign import buildTagBody :: String -> String
 foreign import buildChildBody :: Int -> String -> String -> String
 foreign import buildRenameBody :: String -> Boolean -> String

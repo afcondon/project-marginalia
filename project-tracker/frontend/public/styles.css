@@ -2050,3 +2050,886 @@ body {
   border: none !important;
   border-radius: 0 !important;
 }
+
+/* =============================================================================
+   THE DOSSIER — project detail view as an annotated manuscript spread
+   -----------------------------------------------------------------------------
+   Two-column layout: narrow main text column (description, notes) on the
+   left, wide marginalia column (status, domain, tags, identifiers, dates,
+   dependencies, attachments) on the right. All fields click-to-edit in
+   place. Matches the Register aesthetic of the index but inverts the
+   proportions — main text primary, marginalia secondary.
+   ============================================================================= */
+
+/* Dossier takes over the entire main content area when a project is open.
+   It is NOT a slide panel — it's a full-page replacement. */
+.dossier {
+  background: var(--paper);
+  min-height: 100vh;
+  margin: calc(var(--space-6) * -1) calc(var(--space-8) * -1) calc(var(--space-16) * -1);
+  padding: 0;
+}
+
+/* ----- Top navigation strip ------------------------------------------ */
+
+.dossier-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-10);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.dossier-top-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.dossier-nav-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.9rem;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.dossier-nav-btn:hover {
+  border-bottom-color: var(--ink);
+}
+
+.dossier-page-num {
+  font-family: var(--sans-label);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
+}
+
+.dossier-close {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.9rem;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.dossier-close:hover {
+  border-bottom-color: var(--ink);
+  color: var(--accent);
+}
+
+/* ----- The two-column spread ----------------------------------------- */
+
+.dossier-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-10) var(--space-16);
+  max-width: 80rem;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* Hairline column rule between main text and marginalia. */
+.dossier-page::before {
+  content: "";
+  position: absolute;
+  top: var(--space-8);
+  bottom: var(--space-16);
+  left: calc(100% - 22rem - var(--space-12) / 2);
+  width: 1px;
+  background: var(--rule);
+  pointer-events: none;
+}
+
+.dossier-main {
+  max-width: 52rem;
+}
+
+/* ----- Breadcrumb ---------------------------------------------------- */
+
+.dossier-breadcrumb {
+  font-family: var(--sans-label);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
+  margin-bottom: var(--space-4);
+}
+
+.dossier-breadcrumb-crumb {
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  padding: 2px 0;
+}
+
+.dossier-breadcrumb-crumb:hover {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+.dossier-breadcrumb-sep {
+  color: var(--ink-light);
+  margin: 0 var(--space-1);
+}
+
+/* ----- Title --------------------------------------------------------- */
+
+.dossier-title {
+  font-family: var(--serif-display);
+  font-weight: 400;
+  font-size: 3.25rem;
+  line-height: 1.05;
+  color: var(--ink);
+  margin: 0 0 var(--space-3);
+  cursor: pointer;
+  border-bottom: 2px dotted transparent;
+  transition: border-color 0.15s;
+  padding-bottom: 2px;
+}
+
+.dossier-title:hover {
+  border-bottom-color: var(--ink-light);
+}
+
+.dossier-title-edit {
+  margin-bottom: var(--space-3);
+}
+
+.dossier-title-input {
+  font-family: var(--serif-display);
+  font-weight: 400;
+  font-size: 3.25rem;
+  line-height: 1.05;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  color: var(--ink);
+  padding: 0 0 2px;
+  outline: none;
+}
+
+.dossier-title-dirtoggle {
+  display: inline-block;
+  margin-top: var(--space-2);
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+.dossier-title-dirtoggle input { margin-right: 4px; }
+
+/* ----- Horizontal rule under the title ------------------------------- */
+
+.dossier-rule {
+  height: 0;
+  border-top: 3px double var(--ink);
+  margin: var(--space-4) 0 var(--space-6) 0;
+}
+
+/* ----- Description --------------------------------------------------- */
+
+.dossier-description {
+  font-family: var(--serif-body);
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--ink);
+  max-width: 38em;
+  padding: var(--space-2) 0;
+  border-left: 2px solid transparent;
+  padding-left: var(--space-4);
+  margin-left: calc(var(--space-4) * -1);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.dossier-description:hover {
+  border-left-color: var(--ink-light);
+  background: rgba(26, 22, 18, 0.015);
+}
+
+.dossier-description p {
+  margin: 0 0 var(--space-3);
+}
+
+.dossier-description p:last-child {
+  margin-bottom: 0;
+}
+
+.dossier-description-empty {
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+.dossier-description-edit {
+  margin-left: calc(var(--space-4) * -1);
+}
+
+.dossier-description-input {
+  font-family: var(--serif-body);
+  font-size: 1.125rem;
+  line-height: 1.6;
+  width: 100%;
+  max-width: 42em;
+  background: rgba(26, 22, 18, 0.02);
+  border: none;
+  border-left: 2px solid var(--accent);
+  padding: var(--space-2) var(--space-4);
+  color: var(--ink);
+  resize: vertical;
+  outline: none;
+}
+
+.dossier-edit-hint {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-muted);
+  padding: var(--space-1) var(--space-4);
+}
+
+/* ----- Notes --------------------------------------------------------- */
+
+.dossier-notes {
+  margin-top: var(--space-12);
+}
+
+.dossier-section-label {
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.1rem;
+  color: var(--ink);
+  margin: 0 0 var(--space-2);
+}
+
+.dossier-notes-rule {
+  height: 0;
+  border-top: 1px solid var(--ink);
+  margin-bottom: var(--space-4);
+  max-width: 4rem;
+}
+
+.dossier-notes-empty {
+  font-family: var(--serif-body);
+  font-style: italic;
+  color: var(--ink-muted);
+  margin: var(--space-3) 0;
+}
+
+.dossier-notes-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  counter-reset: dnote;
+}
+
+.dossier-note {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  column-gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--rule);
+  counter-increment: dnote;
+}
+
+.dossier-note::before {
+  content: counter(dnote, decimal-leading-zero);
+  font-family: var(--serif-display);
+  font-size: 0.95rem;
+  color: var(--ink-light);
+  text-align: right;
+  font-variant-numeric: tabular-nums oldstyle-nums;
+}
+
+.dossier-note-meta {
+  grid-column: 2;
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-muted);
+  margin-bottom: var(--space-1);
+}
+
+.dossier-note-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.dossier-note-content {
+  grid-column: 2;
+  font-family: var(--serif-body);
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.dossier-note-addbtn {
+  background: transparent;
+  border: 1px dashed var(--rule);
+  color: var(--ink-muted);
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.95rem;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  width: 100%;
+  max-width: 24rem;
+}
+
+.dossier-note-addbtn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.dossier-note-composer {
+  margin-top: var(--space-4);
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-4);
+  background: rgba(139, 32, 32, 0.02);
+}
+
+.dossier-note-input {
+  font-family: var(--serif-body);
+  font-size: 1rem;
+  line-height: 1.55;
+  width: 100%;
+  max-width: 42em;
+  background: transparent;
+  border: none;
+  padding: var(--space-2) 0;
+  color: var(--ink);
+  resize: vertical;
+  outline: none;
+}
+
+.dossier-note-composer-actions {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 var(--space-3);
+}
+
+.dossier-btn-primary {
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  font-family: var(--sans-label);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.dossier-btn-primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.dossier-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dossier-btn-ghost {
+  background: transparent;
+  color: var(--ink-muted);
+  border: none;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.9rem;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.dossier-btn-ghost:hover {
+  color: var(--ink);
+}
+
+/* ----- Marginalia column -------------------------------------------- */
+
+.dossier-marginalia {
+  border-left: 0;  /* rule drawn by .dossier-page::before instead */
+  padding-left: var(--space-6);
+  font-family: var(--serif-body);
+}
+
+.marginalia-section {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.marginalia-section:first-child {
+  padding-top: 0;
+}
+
+.marginalia-section:last-child {
+  border-bottom: none;
+}
+
+.marginalia-label {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--ink-muted);
+  margin: 0 0 var(--space-2);
+}
+
+.marginalia-body {
+  font-family: var(--serif-body);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.marginalia-muted {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+/* ----- Status editor ------------------------------------------------- */
+
+.status-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.status-current {
+  font-family: var(--serif-display);
+  font-size: 1.35rem;
+  font-style: italic;
+  color: var(--ink);
+  background: transparent !important;
+  padding: 0 !important;
+  display: inline-block;
+  text-transform: none !important;
+}
+
+.status-transitions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.status-arrow {
+  font-family: var(--serif-display);
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.status-transition-pill {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: transparent;
+  color: var(--ink-muted);
+  border: none;
+  border-bottom: 1px solid var(--ink-light);
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.status-transition-pill:hover {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.status-transitions-empty {
+  font-family: var(--serif-display);
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+/* ----- Domain editor ------------------------------------------------ */
+
+.domain-current {
+  font-family: var(--serif-display);
+  font-size: 1.1rem;
+  font-style: italic;
+  color: var(--ink);
+  display: inline-block;
+  padding-bottom: 2px;
+}
+
+.domain-editor-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.domain-option {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 1rem;
+  text-align: left;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--ink-muted);
+}
+
+.domain-option:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* ----- Identifier --------------------------------------------------- */
+
+.identifier-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.identifier-slug {
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
+.identifier-id {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-light);
+}
+
+.identifier-subdomain {
+  font-family: var(--serif-body);
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+/* ----- Tags editor -------------------------------------------------- */
+
+.tags-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tag-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tag-pill {
+  font-family: var(--sans-label);
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  border-bottom: 1px dotted var(--ink-light);
+  padding: 0 2px;
+}
+
+.tags-empty {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.tag-add-form {
+  margin-top: var(--space-1);
+}
+
+.tag-add-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  font-family: var(--sans-label);
+  font-size: 0.8rem;
+  padding: 2px 0;
+  width: 100%;
+  outline: none;
+  color: var(--ink);
+}
+
+.tags-add-btn {
+  background: transparent;
+  border: none;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.tags-add-btn:hover {
+  color: var(--ink);
+}
+
+/* ----- Parent, children, deps, attachments ------------------------- */
+
+.parent-link,
+.child-link,
+.dep-link {
+  cursor: pointer;
+  color: var(--ink);
+  border-bottom: 1px solid var(--ink-light);
+  padding: 0 1px;
+  transition: border-color 0.15s;
+  font-family: var(--serif-body);
+  font-size: 0.92rem;
+}
+
+.parent-link:hover,
+.child-link:hover,
+.dep-link:hover {
+  border-bottom-color: var(--accent);
+}
+
+.children-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.children-list-marg,
+.attachments-marg-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.children-add-btn {
+  background: transparent;
+  border: none;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.children-add-btn:hover {
+  color: var(--ink);
+}
+
+.deps-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.deps-sublabel {
+  display: block;
+  font-family: var(--sans-label);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-muted);
+  margin-bottom: 2px;
+}
+
+.deps-block ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.attachment-marg-row {
+  font-size: 0.85rem;
+}
+
+.attachment-marg-filename {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px dotted transparent;
+}
+
+a.attachment-marg-filename:hover {
+  border-bottom-color: var(--ink-light);
+}
+
+/* ----- History ------------------------------------------------------ */
+
+.history-block {
+  font-family: var(--serif-body);
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.history-label {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-muted);
+}
+
+.history-date {
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
+/* ----- External (repo / url / path) -------------------------------- */
+
+.external-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 4rem 1fr;
+  column-gap: var(--space-3);
+  row-gap: var(--space-2);
+  font-size: 0.85rem;
+}
+
+.external-dl .external-row {
+  display: contents;
+}
+
+.external-key {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-muted);
+  margin: 0;
+  align-self: center;
+}
+
+.external-val {
+  margin: 0;
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--ink);
+  overflow-wrap: break-word;
+  word-break: break-all;
+}
+
+.external-value {
+  cursor: pointer;
+  border-bottom: 1px dotted transparent;
+}
+
+.external-value:hover {
+  border-bottom-color: var(--ink-light);
+}
+
+.external-empty {
+  color: var(--ink-light);
+  cursor: pointer;
+  font-family: var(--serif-body);
+  font-style: italic;
+}
+
+.external-empty:hover {
+  color: var(--ink);
+}
+
+.external-input {
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  padding: 0;
+  width: 100%;
+  outline: none;
+  color: var(--ink);
+}
+
+/* ----- Generic "editable" affordance (hover dotted underline) ----- */
+
+.editable {
+  cursor: pointer;
+  border-bottom: 1px dotted transparent;
+  transition: border-color 0.15s;
+}
+
+.editable:hover {
+  border-bottom-color: var(--ink-light);
+}
+
+/* ----- Draft dossier (create flow) --------------------------------- */
+
+.dossier-draft .dossier-page {
+  grid-template-columns: 1fr;
+  max-width: 60rem;
+  padding-top: var(--space-16);
+}
+
+.dossier-draft .dossier-main {
+  max-width: 48rem;
+}
+
+.dossier-draft-hint {
+  font-family: var(--sans-label);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--ink-muted);
+  margin-bottom: var(--space-3);
+}
+
+.dossier-draft-input {
+  font-family: var(--serif-display);
+  font-size: 3.5rem;
+  line-height: 1.05;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  padding: 0 0 var(--space-2);
+  width: 100%;
+  outline: none;
+}
+
+.dossier-draft-input::placeholder {
+  color: var(--ink-light);
+  font-style: italic;
+}
+
+.dossier-draft-footnote {
+  font-family: var(--serif-body);
+  font-style: italic;
+  font-size: 0.95rem;
+  color: var(--ink-muted);
+  margin-top: var(--space-6);
+  max-width: 42em;
+}
+
+.dossier-draft-footnote em {
+  font-style: normal;
+  border-bottom: 1px dotted var(--ink-light);
+  padding: 0 1px;
+}
+
