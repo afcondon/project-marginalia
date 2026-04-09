@@ -97,6 +97,7 @@ type Project =
   , description :: Maybe String
   , updatedAt :: Maybe String
   , tags :: Array String
+  , coverUrl :: Maybe String
   }
 
 -- =============================================================================
@@ -279,6 +280,7 @@ decodeProject json = case toObject json of
        , description: optString "description" obj
        , updatedAt: optString "updatedAt" obj
        , tags: decodeStringArray "tags" obj
+       , coverUrl: optString "coverUrl" obj
        }
 
 decodeProjectList :: Json -> Either JsonDecodeError (Array Project)

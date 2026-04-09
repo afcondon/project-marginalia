@@ -48,9 +48,14 @@ CREATE TABLE IF NOT EXISTS projects (
     source_path   TEXT,                   -- filesystem path to plan/doc if local
     repo          TEXT,                   -- git repo name if applicable
     preferred_view TEXT,                  -- which detail renderer to use: 'dossier' | 'magazine' | NULL
+    cover_attachment_id INTEGER,          -- id of the attachment to use as the project's hero image on the Register
     created_at    TIMESTAMP DEFAULT current_timestamp,
     updated_at    TIMESTAMP DEFAULT current_timestamp
 );
+
+-- Idempotent column adds for schemas created before a given column existed.
+-- DuckDB accepts ADD COLUMN IF NOT EXISTS so this is safe to re-run.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER;
 
 CREATE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
