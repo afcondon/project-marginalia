@@ -85,6 +85,8 @@ main = launchAff_ do
   -- time the server restarts. DuckDB supports ADD COLUMN IF NOT EXISTS so
   -- running these repeatedly is safe.
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER"
+  DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_status TEXT"
+  DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT"
   liftEffect $ log "Schema migrations applied"
 
   liftEffect do

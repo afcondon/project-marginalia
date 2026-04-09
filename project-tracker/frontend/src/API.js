@@ -50,5 +50,7 @@ export const buildUpdateBody = (input) => {
   if (input.sourcePath) body.sourcePath = input.sourcePath;
   if (input.statusReason) body.statusReason = input.statusReason;
   if (input.preferredView) body.preferredView = input.preferredView;
+  if (input.blogStatus) body.blogStatus = input.blogStatus;
+  if (input.blogContent) body.blogContent = input.blogContent;
   return JSON.stringify(body);
 };

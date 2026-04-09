@@ -3286,3 +3286,154 @@ a.attachment-marg-filename:hover {
   color: var(--ink);
 }
 
+/* =============================================================================
+   BLOG EDITOR — dossier sidebar widget for per-project blog-post classification
+   -----------------------------------------------------------------------------
+   Four state buttons (Not needed / Wanted / Drafted / Published) plus an
+   inline markdown textarea that appears only for Drafted/Published.
+   ============================================================================= */
+
+.blog-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.blog-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.blog-status-btn {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.blog-status-btn:hover:not(:disabled) {
+  background: rgba(26, 22, 18, 0.04);
+  border-color: var(--ink-light);
+  color: var(--ink);
+}
+
+.blog-status-btn.current {
+  cursor: default;
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* Per-state accent on the current button. Not-needed stays muted so it
+   doesn't scream at you from the sidebar — it's the "no" answer. */
+.blog-status-btn.blog-status-not_needed.current {
+  background: var(--ink-muted);
+  border-color: var(--ink-muted);
+}
+
+.blog-status-btn.blog-status-wanted.current {
+  background: #b84a2a;  /* muted red — signals want-to-write */
+  border-color: #b84a2a;
+}
+
+.blog-status-btn.blog-status-drafted.current {
+  background: #a8831e;  /* amber */
+  border-color: #a8831e;
+}
+
+.blog-status-btn.blog-status-published.current {
+  background: #3c6b3c;  /* muted green */
+  border-color: #3c6b3c;
+}
+
+.blog-content.editable {
+  cursor: text;
+  padding: var(--space-2);
+  border: 1px dashed var(--rule);
+  min-height: 3rem;
+}
+
+.blog-content.editable:hover {
+  border-color: var(--ink-light);
+  background: rgba(26, 22, 18, 0.015);
+}
+
+.blog-content-empty {
+  font-family: var(--serif-body);
+  font-style: italic;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.blog-content-body {
+  font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
+
+.blog-content-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.blog-content-input {
+  font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  padding: var(--space-2);
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  resize: vertical;
+  width: 100%;
+  min-height: 10rem;
+}
+
+/* =============================================================================
+   CARD BLOG PILL — tiny classification badge in the Register's card-meta row
+   ============================================================================= */
+
+.card-blog-pill {
+  font-family: var(--sans-label);
+  font-size: 0.58rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 1px 6px;
+  border-radius: 2px;
+  color: var(--paper);
+  background: var(--ink);
+  white-space: nowrap;
+}
+
+.card-blog-pill.blog-pill-not_needed {
+  background: transparent;
+  color: var(--ink-light);
+  border: 1px solid var(--rule);
+}
+
+.card-blog-pill.blog-pill-wanted {
+  background: #b84a2a;
+}
+
+.card-blog-pill.blog-pill-drafted {
+  background: #a8831e;
+}
+
+.card-blog-pill.blog-pill-published {
+  background: #3c6b3c;
+}

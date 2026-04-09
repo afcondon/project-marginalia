@@ -22,7 +22,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Types (Attachment, Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allStatuses, statusLabel, statusToString, nextStatuses)
+import Types (Attachment, BlogStatus(..), Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allBlogStatuses, allStatuses, blogStatusLabel, blogStatusToString, statusLabel, statusToString, nextStatuses)
 import Web.Event.Event (Event)
 import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 
@@ -159,6 +159,7 @@ data EditableField
   | FRepo
   | FSourceUrl
   | FSourcePath
+  | FBlogContent
 
 derive instance Eq EditableField
 
@@ -169,6 +170,7 @@ fieldLabel = case _ of
   FRepo -> "repo"
   FSourceUrl -> "source url"
   FSourcePath -> "source path"
+  FBlogContent -> "blog post"
 
 type State =
   { projects :: Array Project
@@ -279,6 +281,8 @@ data Action
   | DossierSetTag String
   | DossierSubmitTag
   | DossierCancelTag
+  -- Blog-post classification
+  | SetBlogStatus (Maybe BlogStatus) MouseEvent
 
 -- =============================================================================
 -- Component
@@ -643,6 +647,7 @@ renderProjectCard state idx project =
             Nothing -> HH.text ""
             Just s -> HH.span [ HP.class_ (H.ClassName "card-slug") ]
               [ HH.text s ]
+        , renderCardBlogPill project.blogStatus
         ]
     , case project.description of
         Nothing -> HH.text ""
@@ -723,6 +728,20 @@ renderDomainLabel domain =
   HH.span [ HP.class_ (H.ClassName ("domain-label domain-" <> domain)) ]
     [ HH.text domain ]
 
+-- | Compact pill on a Register card showing the project's blog-post
+-- | classification. Nothing (unclassified) renders nothing — don't want
+-- | to crowd every card with an "unclassified" label. The other four
+-- | states render a tiny coloured pill with the label.
+renderCardBlogPill :: forall m. Maybe BlogStatus -> H.ComponentHTML Action () m
+renderCardBlogPill = case _ of
+  Nothing -> HH.text ""
+  Just bs ->
+    HH.span
+      [ HP.class_ (H.ClassName ("card-blog-pill blog-pill-" <> blogStatusToString bs))
+      , HP.title ("Blog post: " <> blogStatusLabel bs)
+      ]
+      [ HH.text (blogStatusLabel bs) ]
+
 renderLoading :: forall m. H.ComponentHTML Action () m
 renderLoading =
   HH.div [ HP.class_ (H.ClassName "loading") ]
@@ -802,6 +821,7 @@ renderDossier state detail =
             , marginaliaSection "Domain" (renderDomainEditor state detail)
             , marginaliaSection "Identifier" (renderIdentifierBlock detail)
             , marginaliaSection "Tags" (renderTagsEditor state detail)
+            , marginaliaSection "Blog" (renderBlogEditor state detail)
             , marginaliaSection "Parent" (renderParentBlock state detail)
             , marginaliaSection "Children" (renderChildrenBlock state detail)
             , marginaliaSection "History" (renderHistoryBlock detail)
@@ -1128,6 +1148,66 @@ renderTagsEditor state detail =
           ]
           [ HH.text "+ add tag" ]
     ]
+
+-- | Blog-post editor: row of 4 state buttons (NotNeeded/Wanted/Drafted/
+-- | Published) plus a click-to-edit markdown textarea that only appears
+-- | when the status is Drafted or Published. The buttons highlight the
+-- | current state; clicking a different button immediately PUTs the new
+-- | status to the server via SetBlogStatus.
+renderBlogEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderBlogEditor state detail =
+  HH.div [ HP.class_ (H.ClassName "blog-editor") ]
+    [ HH.div [ HP.class_ (H.ClassName "blog-status-row") ]
+        (map (renderBlogStatusButton detail.blogStatus) allBlogStatuses)
+    , case detail.blogStatus of
+        Just BlogDrafted   -> renderBlogContentEditor state detail
+        Just BlogPublished -> renderBlogContentEditor state detail
+        _                  -> HH.text ""
+    ]
+
+renderBlogStatusButton :: forall m. Maybe BlogStatus -> BlogStatus -> H.ComponentHTML Action () m
+renderBlogStatusButton currentStatus status =
+  let isCurrent = currentStatus == Just status
+      btnClass = "blog-status-btn blog-status-" <> blogStatusToString status
+        <> (if isCurrent then " current" else "")
+  in HH.button
+    [ HP.class_ (H.ClassName btnClass)
+    , HP.title (blogStatusLabel status)
+    , HP.disabled isCurrent
+    , HE.onClick \e -> SetBlogStatus (Just status) e
+    ]
+    [ HH.text (blogStatusLabel status) ]
+
+renderBlogContentEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderBlogContentEditor state detail =
+  case state.dossierEditField of
+    Just FBlogContent ->
+      HH.div [ HP.class_ (H.ClassName "blog-content-edit") ]
+        [ HH.textarea
+            [ HP.class_ (H.ClassName "blog-content-input")
+            , HP.value state.dossierEditValue
+            , HP.autofocus true
+            , HP.rows 12
+            , HP.placeholder "# Heading\n\nMarkdown body…"
+            , HE.onValueInput DossierSetEditValue
+            , HE.onBlur \_ -> DossierCommitEdit
+            ]
+        , HH.div [ HP.class_ (H.ClassName "dossier-edit-hint") ]
+            [ HH.text "Blur to save · Esc to cancel" ]
+        ]
+    _ ->
+      let currentContent = fromMaybe "" detail.blogContent
+      in HH.div
+        [ HP.class_ (H.ClassName "blog-content editable")
+        , HE.onClick \_ -> DossierStartEdit FBlogContent currentContent
+        , HP.title "Click to edit blog post"
+        ]
+        [ if String.null currentContent
+            then HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
+              [ HH.text "No draft yet. Click to start writing." ]
+            else HH.pre [ HP.class_ (H.ClassName "blog-content-body") ]
+              [ HH.text currentContent ]
+        ]
 
 -- | Parent block: shows the parent project (clickable) or "(none)".
 renderParentBlock :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
@@ -1775,6 +1855,20 @@ handleAction = case _ of
   DossierCancelTag ->
     H.modify_ \s -> s { dossierTagOpen = false, dossierTagDraft = "" }
 
+  SetBlogStatus mStatus ev -> do
+    liftEffect $ stopPropagation_ (toEvent ev)
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> case mStatus of
+        Nothing -> pure unit  -- UI never sends "clear to unclassified"
+        Just bs -> do
+          let input = emptyProjectInput { blogStatus = blogStatusToString bs }
+          _ <- liftAff $ API.updateProject detail.id input
+          mNew <- liftAff $ API.fetchProject detail.id
+          H.modify_ \s -> s { selectedProject = mNew }
+          handleAction LoadAllProjects
+
   ClearFilters -> do
     liftEffect $ setHash_ ""
     H.modify_ \s -> s
@@ -2007,6 +2101,8 @@ buildInput state =
   , sourcePath: state.formSourcePath
   , statusReason: ""
   , preferredView: ""
+  , blogStatus: ""
+  , blogContent: ""
   }
 
 -- | A minimal ProjectInput with all fields empty. Used for quick status changes.
@@ -2022,6 +2118,8 @@ emptyProjectInput =
   , sourcePath: ""
   , statusReason: ""
   , preferredView: ""
+  , blogStatus: ""
+  , blogContent: ""
   }
 
 -- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
@@ -2039,6 +2137,8 @@ detailToInput d =
   , sourcePath: fromMaybe "" d.sourcePath
   , statusReason: ""
   , preferredView: ""   -- blank means "don't update" (see buildUpdateBody)
+  , blogStatus: ""      -- blank means "don't update"
+  , blogContent: ""     -- blank means "don't update"
   }
 
 -- | Copy a detail into a ProjectInput with a single field overridden.
@@ -2052,6 +2152,7 @@ detailToInputWith field value d =
     FRepo        -> base { repo = value }
     FSourceUrl   -> base { sourceUrl = value }
     FSourcePath  -> base { sourcePath = value }
+    FBlogContent -> base { blogContent = value }
 
 -- | Cycle the currently-selected project in the detail panel by `delta`
 -- | (1 for next, -1 for previous), wrapping around the visible project list.
