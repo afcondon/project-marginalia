@@ -76,6 +76,37 @@ GET /api/ports/suggest            # the next free port starting at 3000
 ### Writing back
 
 ```
+POST /api/projects
+Body: { "name":        "project name"         (required)
+      , "domain":      "programming"          (required; one of:
+                                              programming, music, house,
+                                              woodworking, garden,
+                                              infrastructure)
+      , "status":      "idea"                 (optional, default "idea"; see
+                                              the status lifecycle below)
+      , "subdomain":   "halogen"              (optional)
+      , "description": "..."                  (optional — 1-sentence what-is-it)
+      , "parentId":    151                    (optional; parent project id)
+      , "sourceUrl":   "https://..."          (optional)
+      , "sourcePath":  "/absolute/path"       (optional; local filesystem)
+      , "repo":        "github-repo-name"     (optional)
+      }
+# Returns { "projects": [ { "id": N, "slug": "...", ... } ] } — one-element
+# array wrapping the created project. Slugs are auto-generated 4-word NATO
+# callsigns (e.g. sierra-bravo-alpha-foxtrot) and are the project's stable
+# identity; the numeric id is for convenience.
+#
+# Marginalia spans many domains — not just coding. If you're adding a house
+# remodel, a woodworking piece, a garden plot, a music album, or a piece
+# of infrastructure, pick the matching domain and skip repo/sourceUrl/etc.
+# if they don't apply.
+
+PUT /api/projects/:id
+Body: same shape as POST, partial — only include fields you want to change.
+# Empty-string fields are treated as "don't update", NOT "clear". To
+# change status in particular you usually want the lifecycle-validated
+# agent endpoint below instead.
+
 POST /api/projects/:id/servers
 Body: { "role": "api", "port": 3100, "url": "http://localhost:3100",
         "startCommand": "cd /absolute/path && node server/run.js",
@@ -99,7 +130,29 @@ Body: { "filename":    "report.md",
 
 POST /api/projects/:id/tags
 Body: { "tag": "library" }
+
+POST /api/agent/projects/:id/status
+Body: { "status": "active", "reason": "optional explanation" }
+# Lifecycle-validated status change. Returns 400 with the valid
+# next-statuses in the error message if the transition is illegal.
 ```
+
+### Status lifecycle
+
+Marginalia projects move through a DAG of statuses, not a free-for-all.
+Valid transitions (from → to):
+
+- `idea`    → someday, active, defunct
+- `someday` → active, idea, defunct
+- `active`  → done, blocked, defunct, evolved
+- `blocked` → active, defunct
+- `done`    → active
+- `defunct` → idea, someday
+- `evolved` → (terminal — the project has become another project)
+
+Use `POST /api/agent/projects/:id/status` when you want the server to
+enforce this DAG. Use `PUT /api/projects/:id` with a status field only
+when you explicitly want to bypass the validation (rare).
 
 ## The polymorphic start_command
 
