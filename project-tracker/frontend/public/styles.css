@@ -2933,3 +2933,270 @@ a.attachment-marg-filename:hover {
   padding: 0 1px;
 }
 
+/* =============================================================================
+   VIEW SWITCHER — dossier / magazine toggle in the top strip
+   ============================================================================= */
+
+.view-switcher {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-family: var(--serif-display);
+  font-size: 0.85rem;
+}
+
+.view-switcher-label {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-muted);
+  margin-right: var(--space-1);
+}
+
+.view-switcher-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+  padding: 2px 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.view-switcher-btn:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink-light);
+}
+
+.view-switcher-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent) !important;
+  font-style: normal;
+}
+
+.view-switcher-sep {
+  color: var(--ink-light);
+}
+
+/* =============================================================================
+   MAGAZINE VIEW — image-heavy alternate detail layout
+   -----------------------------------------------------------------------------
+   No right marginalia rail — the whole page is main content with metadata
+   compressed to a horizontal strip at the bottom. Image attachments get a
+   Pinterest-ish grid. Text treatment is centered and wider than the
+   dossier's reading column.
+   ============================================================================= */
+
+.magazine {
+  background: var(--paper);
+  min-height: 100vh;
+  margin: calc(var(--space-6) * -1) calc(var(--space-8) * -1) calc(var(--space-16) * -1);
+}
+
+.magazine-top {
+  /* inherits from .dossier-top */
+}
+
+.magazine-page {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-10) var(--space-10) var(--space-16);
+}
+
+.magazine-title {
+  font-family: var(--serif-display);
+  font-weight: 400;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  line-height: 1.1;
+  text-align: center;
+  color: var(--ink);
+  margin: var(--space-4) 0 var(--space-3);
+  cursor: pointer;
+  border-bottom: 2px dotted transparent;
+  padding-bottom: 4px;
+}
+
+.magazine-title:hover {
+  border-bottom-color: var(--ink-light);
+}
+
+.magazine-title-edit {
+  text-align: center;
+  margin: var(--space-4) 0 var(--space-3);
+}
+
+.magazine-title-input {
+  font-family: var(--serif-display);
+  font-weight: 400;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  line-height: 1.1;
+  text-align: center;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  color: var(--ink);
+  width: 100%;
+  outline: none;
+}
+
+.magazine-rule {
+  height: 0;
+  border-top: 3px double var(--ink);
+  margin: var(--space-4) auto var(--space-6);
+  width: 100%;
+}
+
+.magazine-description {
+  font-family: var(--serif-body);
+  font-size: 1.2rem;
+  line-height: 1.65;
+  text-align: center;
+  color: var(--ink);
+  max-width: 42em;
+  margin: 0 auto var(--space-10);
+  padding: var(--space-2) var(--space-6);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.magazine-description:hover {
+  background: rgba(26, 22, 18, 0.015);
+  border-left-color: var(--ink-light);
+}
+
+.magazine-description-empty {
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+.magazine-description-edit {
+  max-width: 46em;
+  margin: 0 auto var(--space-10);
+  padding: 0 var(--space-6);
+}
+
+.magazine-description-input {
+  font-family: var(--serif-body);
+  font-size: 1.2rem;
+  line-height: 1.65;
+  width: 100%;
+  background: rgba(26, 22, 18, 0.02);
+  border: none;
+  border-left: 2px solid var(--accent);
+  padding: var(--space-3) var(--space-4);
+  color: var(--ink);
+  resize: vertical;
+  outline: none;
+  text-align: left;
+}
+
+.magazine-attachments {
+  margin: var(--space-6) 0;
+}
+
+.magazine-attachments-empty {
+  text-align: center;
+  margin: var(--space-8) 0;
+  color: var(--ink-muted);
+}
+
+.magazine-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.magazine-image-tile {
+  display: block;
+  background: var(--ink);
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--rule);
+  transition: transform 0.2s;
+  text-decoration: none;
+}
+
+.magazine-image-tile:hover {
+  transform: scale(1.02);
+}
+
+.magazine-image-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(100%);
+  transition: filter 0.3s;
+  display: block;
+}
+
+.magazine-image-tile:hover img {
+  filter: grayscale(0%);
+}
+
+.magazine-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  justify-content: center;
+}
+
+.magazine-file-chip {
+  font-family: var(--serif-body);
+  font-size: 0.9rem;
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--ink-light);
+  padding: 0 2px;
+}
+
+.magazine-file-chip:hover {
+  border-bottom-color: var(--ink);
+}
+
+.magazine-notes {
+  margin: var(--space-12) auto 0;
+  max-width: 42em;
+}
+
+/* ----- Magazine metadata strip (bottom) ------------------------------ */
+
+.magazine-meta-strip {
+  margin-top: var(--space-16);
+  padding-top: var(--space-6);
+  border-top: 3px double var(--ink);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-6);
+}
+
+.magazine-meta-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.magazine-meta-label {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--ink-muted);
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 3px;
+}
+
+.magazine-meta-body {
+  font-family: var(--serif-body);
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+

@@ -145,7 +145,7 @@ getProject db projectId = do
        WHERE p.id = ?
        GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status,
                 p.evolved_into, p.description, p.source_url, p.source_path,
-                p.repo, p.created_at, p.updated_at"""
+                p.repo, p.preferred_view, p.created_at, p.updated_at"""
     idParam
   case firstRow projectRows of
     Nothing -> notFound
@@ -386,6 +386,7 @@ buildUpdateClauses obj = { clauses, params }
     , fieldClause "sourceUrl" "source_url"
     , fieldClause "sourcePath" "source_path"
     , fieldClause "repo" "repo"
+    , fieldClause "preferredView" "preferred_view"
     ]
   fieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
   fieldClause jsonKey sqlCol = case getFieldMaybe jsonKey obj of

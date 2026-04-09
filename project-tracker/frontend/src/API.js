@@ -16,6 +16,7 @@ export const buildCreateBody = (input) => {
   if (input.repo) body.repo = input.repo;
   if (input.sourceUrl) body.sourceUrl = input.sourceUrl;
   if (input.sourcePath) body.sourcePath = input.sourcePath;
+  if (input.preferredView) body.preferredView = input.preferredView;
   return JSON.stringify(body);
 };
 
@@ -48,5 +49,6 @@ export const buildUpdateBody = (input) => {
   if (input.sourceUrl) body.sourceUrl = input.sourceUrl;
   if (input.sourcePath) body.sourcePath = input.sourcePath;
   if (input.statusReason) body.statusReason = input.statusReason;
+  if (input.preferredView) body.preferredView = input.preferredView;
   return JSON.stringify(body);
 };

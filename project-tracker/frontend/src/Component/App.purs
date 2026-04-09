@@ -71,10 +71,23 @@ derive instance Eq View
 -- | How to render a project detail. Different domains may eventually get
 -- | different layouts (Dossier for WSJ-style fact-and-figure work, Magazine
 -- | for Pinterest-ish ideaboards, Workshop for photo-heavy projects, etc.).
--- | For now only Dossier is implemented; the sum is deliberately open.
-data DetailViewKind = DossierView
+-- | The persisted preference lives on the project row; this ADT is just the
+-- | rendering-time discriminator.
+data DetailViewKind = DossierView | MagazineView
 
 derive instance Eq DetailViewKind
+
+-- | Translate the persisted "preferred_view" string to a renderer kind.
+-- | Unknown / missing values default to DossierView.
+parseViewKind :: Maybe String -> DetailViewKind
+parseViewKind = case _ of
+  Just "magazine" -> MagazineView
+  _               -> DossierView
+
+viewKindToString :: DetailViewKind -> String
+viewKindToString = case _ of
+  DossierView  -> "dossier"
+  MagazineView -> "magazine"
 
 -- | Fields in the Dossier view that are editable via plain click-to-edit.
 -- | Title uses the existing rename flow (has directory-rename side effects).
@@ -195,6 +208,7 @@ data Action
   | DossierSetEditValue String
   | DossierCommitEdit
   | DossierCancelEdit
+  | DossierSetView DetailViewKind   -- switch between Dossier and Magazine
   | DossierOpenDomain
   | DossierPickDomain String
   | DossierOpenNote
@@ -282,8 +296,9 @@ render state =
             CreateView -> renderCreateDossier state
             DetailView _ -> case state.selectedProject of
               Nothing -> renderLoading
-              Just detail -> case state.detailViewKind of
-                DossierView -> renderDossier state detail
+              Just detail -> case parseViewKind detail.preferredView of
+                DossierView  -> renderDossier state detail
+                MagazineView -> renderMagazine state detail
             ListView -> renderProjectList state
         ]
     -- Keyboard shortcut hint (shown when no card is focused on the list)
@@ -722,10 +737,11 @@ renderDossier state detail =
         ]
     ]
 
--- | Top navigation strip: ← prev · close ×
+-- | Top navigation strip: ← prev · view switcher · close ×
 renderDossierTopStrip :: forall m. ProjectDetail -> H.ComponentHTML Action () m
 renderDossierTopStrip detail =
-  HH.div [ HP.class_ (H.ClassName "dossier-top") ]
+  let currentKind = parseViewKind detail.preferredView
+  in HH.div [ HP.class_ (H.ClassName "dossier-top") ]
     [ HH.div [ HP.class_ (H.ClassName "dossier-top-nav") ]
         [ HH.button
             [ HP.class_ (H.ClassName "dossier-nav-btn")
@@ -742,12 +758,40 @@ renderDossierTopStrip detail =
             ]
             [ HH.text "next ›" ]
         ]
+    , renderViewSwitcher currentKind
     , HH.button
         [ HP.class_ (H.ClassName "dossier-close")
         , HE.onClick \_ -> CloseDetail
         , HP.title "Close (Esc)"
         ]
         [ HH.text "close ×" ]
+    ]
+
+-- | The dossier / magazine view switcher. Renders both view names as
+-- | small-caps labels with the current one underlined. Clicking the
+-- | inactive one dispatches DossierSetView which persists the choice.
+renderViewSwitcher :: forall m. DetailViewKind -> H.ComponentHTML Action () m
+renderViewSwitcher current =
+  HH.div [ HP.class_ (H.ClassName "view-switcher") ]
+    [ HH.span [ HP.class_ (H.ClassName "view-switcher-label") ]
+        [ HH.text "view" ]
+    , HH.button
+        [ HP.class_ (H.ClassName
+            ("view-switcher-btn" <>
+              if current == DossierView then " view-switcher-active" else ""))
+        , HE.onClick \_ -> DossierSetView DossierView
+        , HP.title "Dossier view: WSJ-style facts and figures"
+        ]
+        [ HH.text "dossier" ]
+    , HH.span [ HP.class_ (H.ClassName "view-switcher-sep") ] [ HH.text "·" ]
+    , HH.button
+        [ HP.class_ (H.ClassName
+            ("view-switcher-btn" <>
+              if current == MagazineView then " view-switcher-active" else ""))
+        , HE.onClick \_ -> DossierSetView MagazineView
+        , HP.title "Magazine view: visual, Pinterest-ish for ideaboards"
+        ]
+        [ HH.text "magazine" ]
     ]
 
 -- | Breadcrumb pills above the title, showing parent chain. Click an
@@ -1189,6 +1233,204 @@ renderAttachmentMargRow att =
           [ HH.text ("📎 " <> att.filename) ]
     ]
 
+-- =============================================================================
+-- The Magazine — alternate detail view for image-heavy ideaboard projects
+-- =============================================================================
+-- | For projects where images are the primary content (house remodels,
+-- | woodworking inspiration, garden plans, furniture clippings) the dossier's
+-- | narrow text column is the wrong shape. Magazine view:
+-- |   - drops the right marginalia rail
+-- |   - features image attachments as a Pinterest-ish grid
+-- |   - compresses all metadata into a single horizontal strip at the bottom
+-- |   - keeps the notes stream below the images
+-- |
+-- | Text fields are still click-to-edit just as in the dossier — the
+-- | editing state machine is shared. Only the layout is different.
+
+renderMagazine :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderMagazine state detail =
+  HH.div [ HP.class_ (H.ClassName "magazine") ]
+    [ renderMagazineTopStrip detail
+    , HH.div [ HP.class_ (H.ClassName "magazine-page") ]
+        [ renderDossierBreadcrumb state detail
+        , renderMagazineTitle state detail
+        , HH.div [ HP.class_ (H.ClassName "magazine-rule") ] []
+        , renderMagazineDescription state detail
+        , renderMagazineAttachments detail
+        , renderMagazineNotes state detail
+        , renderMagazineMetaStrip state detail
+        ]
+    ]
+
+-- | Top strip for magazine view. Same shape as the dossier's, using the
+-- | same view switcher so you can flip back.
+renderMagazineTopStrip :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderMagazineTopStrip detail =
+  let currentKind = parseViewKind detail.preferredView
+  in HH.div [ HP.class_ (H.ClassName "dossier-top magazine-top") ]
+    [ HH.div [ HP.class_ (H.ClassName "dossier-top-nav") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "dossier-nav-btn")
+            , HE.onClick \_ -> PrevProject
+            ]
+            [ HH.text "‹ prev" ]
+        , HH.span [ HP.class_ (H.ClassName "dossier-page-num") ]
+            [ HH.text ("No. " <> show detail.id) ]
+        , HH.button
+            [ HP.class_ (H.ClassName "dossier-nav-btn")
+            , HE.onClick \_ -> NextProject
+            ]
+            [ HH.text "next ›" ]
+        ]
+    , renderViewSwitcher currentKind
+    , HH.button
+        [ HP.class_ (H.ClassName "dossier-close")
+        , HE.onClick \_ -> CloseDetail
+        ]
+        [ HH.text "close ×" ]
+    ]
+
+-- | Magazine title: larger and centered rather than left-aligned. Reuses
+-- | the dossier's rename flow.
+renderMagazineTitle :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderMagazineTitle state detail = case state.renameOpen of
+  Just pid | pid == detail.id ->
+    HH.div [ HP.class_ (H.ClassName "magazine-title-edit") ]
+      [ HH.form [ HE.onSubmit \_ -> SubmitRename detail.id ]
+          [ HH.input
+              [ HP.class_ (H.ClassName "magazine-title-input")
+              , HP.type_ HP.InputText
+              , HP.value state.renameValue
+              , HP.autofocus true
+              , HE.onValueInput SetRenameValue
+              ]
+          ]
+      ]
+  _ ->
+    HH.h1
+      [ HP.class_ (H.ClassName "magazine-title")
+      , HE.onClick \_ -> StartRename detail.id detail.name
+      , HP.title "Click to rename"
+      ]
+      [ HH.text detail.name ]
+
+-- | Magazine description: wider column than the dossier, centered.
+renderMagazineDescription :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderMagazineDescription state detail =
+  case state.dossierEditField of
+    Just FDescription ->
+      HH.div [ HP.class_ (H.ClassName "magazine-description-edit") ]
+        [ HH.textarea
+            [ HP.class_ (H.ClassName "magazine-description-input")
+            , HP.value state.dossierEditValue
+            , HP.autofocus true
+            , HP.rows 6
+            , HE.onValueInput DossierSetEditValue
+            , HE.onBlur \_ -> DossierCommitEdit
+            ]
+        ]
+    _ ->
+      let currentDesc = fromMaybe "" detail.description
+      in HH.div
+        [ HP.class_ (H.ClassName "magazine-description editable")
+        , HE.onClick \_ -> DossierStartEdit FDescription currentDesc
+        ]
+        [ if String.null currentDesc
+            then HH.p [ HP.class_ (H.ClassName "magazine-description-empty") ]
+              [ HH.text "Click to write a description." ]
+            else HH.p_ [ HH.text currentDesc ]
+        ]
+
+-- | Pinterest-style image grid. Non-image attachments render as small
+-- | file chips underneath the grid.
+renderMagazineAttachments :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderMagazineAttachments detail =
+  let images = Array.filter isImageAttachment detail.attachments
+      others = Array.filter (not <<< isImageAttachment) detail.attachments
+  in if Array.null detail.attachments
+    then HH.div [ HP.class_ (H.ClassName "magazine-attachments-empty") ]
+      [ HH.p [ HP.class_ (H.ClassName "text-muted") ]
+          [ HH.text "No images or attachments yet." ]
+      ]
+    else HH.div [ HP.class_ (H.ClassName "magazine-attachments") ]
+      [ if Array.null images then HH.text ""
+        else HH.div [ HP.class_ (H.ClassName "magazine-image-grid") ]
+          (map renderMagazineImage images)
+      , if Array.null others then HH.text ""
+        else HH.div [ HP.class_ (H.ClassName "magazine-file-row") ]
+          (map renderMagazineFileChip others)
+      ]
+
+isImageAttachment :: Attachment -> Boolean
+isImageAttachment att = case att.mimeType of
+  Just mt -> String.take 6 mt == "image/"
+  Nothing -> false
+
+renderMagazineImage :: forall m. Attachment -> H.ComponentHTML Action () m
+renderMagazineImage att = case att.url of
+  Nothing -> HH.text ""
+  Just url -> HH.a
+    [ HP.class_ (H.ClassName "magazine-image-tile")
+    , HP.href url
+    , HP.target "_blank"
+    , HP.title (fromMaybe att.filename att.description)
+    ]
+    [ HH.img
+        [ HP.src url
+        , HP.alt (fromMaybe att.filename att.description)
+        ]
+    ]
+
+renderMagazineFileChip :: forall m. Attachment -> H.ComponentHTML Action () m
+renderMagazineFileChip att =
+  case att.url of
+    Nothing -> HH.span [ HP.class_ (H.ClassName "magazine-file-chip") ]
+      [ HH.text ("📎 " <> att.filename) ]
+    Just url -> HH.a
+      [ HP.class_ (H.ClassName "magazine-file-chip")
+      , HP.href url
+      , HP.target "_blank"
+      ]
+      [ HH.text ("📎 " <> att.filename) ]
+
+-- | Notes in magazine view: same stream as dossier, lightly restyled.
+renderMagazineNotes :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderMagazineNotes state detail =
+  HH.section [ HP.class_ (H.ClassName "magazine-notes") ]
+    [ HH.h3 [ HP.class_ (H.ClassName "dossier-section-label") ]
+        [ HH.text "§ notes" ]
+    , HH.div [ HP.class_ (H.ClassName "dossier-notes-rule") ] []
+    , if Array.null detail.notes
+        then HH.p [ HP.class_ (H.ClassName "dossier-notes-empty") ]
+          [ HH.text "No notes yet." ]
+        else HH.ol [ HP.class_ (H.ClassName "dossier-notes-list") ]
+          (map renderDossierNote detail.notes)
+    , renderDossierNoteComposer state
+    ]
+
+-- | Metadata strip at the bottom of the magazine page. All the marginalia
+-- | content, condensed into one horizontal row of small-caps labeled blocks.
+renderMagazineMetaStrip :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderMagazineMetaStrip state detail =
+  HH.div [ HP.class_ (H.ClassName "magazine-meta-strip") ]
+    [ magazineMetaBlock "status" (renderStatusEditor state detail)
+    , magazineMetaBlock "domain" (renderDomainEditor state detail)
+    , magazineMetaBlock "tags" (renderTagsEditor state detail)
+    , magazineMetaBlock "parent" (renderParentBlock state detail)
+    , magazineMetaBlock "children" (renderChildrenBlock state detail)
+    , magazineMetaBlock "history" (renderHistoryBlock detail)
+    , magazineMetaBlock "identifier" (renderIdentifierBlock detail)
+    , magazineMetaBlock "external" (renderExternalEditor state detail)
+    , magazineMetaBlock "dependencies" (renderDependenciesBlock detail)
+    ]
+
+magazineMetaBlock :: forall m. String -> H.ComponentHTML Action () m -> H.ComponentHTML Action () m
+magazineMetaBlock label body =
+  HH.div [ HP.class_ (H.ClassName "magazine-meta-block") ]
+    [ HH.div [ HP.class_ (H.ClassName "magazine-meta-label") ] [ HH.text label ]
+    , HH.div [ HP.class_ (H.ClassName "magazine-meta-body") ] [ body ]
+    ]
+
 -- | Draft Dossier — the create flow. A slim dossier shell with just an
 -- | autofocused title input in the main column. On submit, the project
 -- | is created with defaults (domain=programming, status=idea) and we
@@ -1360,6 +1602,19 @@ handleAction = case _ of
 
   DossierCancelEdit ->
     H.modify_ \s -> s { dossierEditField = Nothing, dossierEditValue = "" }
+
+  DossierSetView newKind -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        -- Optimistic local update so the switch feels instant
+        let updated = detail { preferredView = Just (viewKindToString newKind) }
+        H.modify_ \s -> s { selectedProject = Just updated }
+        -- Persist via PUT (only the preferredView field is non-empty)
+        let input = emptyProjectInput { preferredView = viewKindToString newKind }
+        _ <- liftAff $ API.updateProject detail.id input
+        pure unit
 
   DossierOpenDomain ->
     H.modify_ \s -> s
@@ -1675,6 +1930,7 @@ buildInput state =
   , sourceUrl: state.formSourceUrl
   , sourcePath: state.formSourcePath
   , statusReason: ""
+  , preferredView: ""
   }
 
 -- | A minimal ProjectInput with all fields empty. Used for quick status changes.
@@ -1689,6 +1945,7 @@ emptyProjectInput =
   , sourceUrl: ""
   , sourcePath: ""
   , statusReason: ""
+  , preferredView: ""
   }
 
 -- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
@@ -1705,6 +1962,7 @@ detailToInput d =
   , sourceUrl: fromMaybe "" d.sourceUrl
   , sourcePath: fromMaybe "" d.sourcePath
   , statusReason: ""
+  , preferredView: ""   -- blank means "don't update" (see buildUpdateBody)
   }
 
 -- | Copy a detail into a ProjectInput with a single field overridden.

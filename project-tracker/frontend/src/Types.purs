@@ -160,6 +160,7 @@ type ProjectDetail =
   , sourceUrl :: Maybe String
   , sourcePath :: Maybe String
   , repo :: Maybe String
+  , preferredView :: Maybe String  -- "dossier" | "magazine" | Nothing for default
   , tags :: Array String
   , createdAt :: Maybe String
   , updatedAt :: Maybe String
@@ -203,6 +204,7 @@ type ProjectInput =
   , sourceUrl :: String
   , sourcePath :: String
   , statusReason :: String
+  , preferredView :: String   -- empty string means "don't update"
   }
 
 -- =============================================================================
@@ -401,6 +403,7 @@ decodeProjectDetail json = case toObject json of
        , sourceUrl: optString "sourceUrl" obj
        , sourcePath: optString "sourcePath" obj
        , repo: optString "repo" obj
+       , preferredView: optString "preferredView" obj
        , tags: decodeStringArray "tags" obj
        , createdAt: optString "createdAt" obj
        , updatedAt: optString "updatedAt" obj

@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS projects (
     source_url    TEXT,                   -- link to repo, plan doc, or reference
     source_path   TEXT,                   -- filesystem path to plan/doc if local
     repo          TEXT,                   -- git repo name if applicable
+    preferred_view TEXT,                  -- which detail renderer to use: 'dossier' | 'magazine' | NULL
     created_at    TIMESTAMP DEFAULT current_timestamp,
     updated_at    TIMESTAMP DEFAULT current_timestamp
 );

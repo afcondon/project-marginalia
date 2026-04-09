@@ -63,6 +63,7 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
     sourceUrl: project.source_url || null,
     sourcePath: project.source_path || null,
     repo: project.repo || null,
+    preferredView: project.preferred_view || null,
     tags: project.tags ? project.tags.split(', ').filter(t => t.trim()) : [],
     createdAt: project.created_at,
     updatedAt: project.updated_at,
