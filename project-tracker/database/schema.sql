@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS projects (
     domain        TEXT NOT NULL,          -- programming, house, garden, woodworking, music, infrastructure
     subdomain     TEXT,                   -- hylograph, minard, shapedsteer, furniture, eurorack, etc.
     status        TEXT NOT NULL DEFAULT 'idea',
-                                          -- idea | someday | active | blocked | done | defunct | evolved
+                                          -- idea | someday | active | dormant | blocked | done | defunct | evolved
     evolved_into  INTEGER /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,  -- for status='evolved', points to successor
     description   TEXT,                   -- what is this project?
     source_url    TEXT,                   -- link to repo, plan doc, or reference

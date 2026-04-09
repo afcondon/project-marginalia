@@ -43,6 +43,7 @@
   --color-idea:     #94a3b8;
   --color-someday:  #a78bfa;
   --color-active:   #34d399;
+  --color-dormant:  #b08968;  /* sepia — "still there, just quiet" */
   --color-blocked:  #f87171;
   --color-done:     #60a5fa;
   --color-defunct:   #d4d4d4;
@@ -387,6 +388,7 @@ body {
 .status-idea     { background: var(--color-idea);     color: #fff; }
 .status-someday  { background: var(--color-someday);  color: #fff; }
 .status-active   { background: var(--color-active);   color: #fff; }
+.status-dormant  { background: var(--color-dormant);  color: #fff; }
 .status-blocked  { background: var(--color-blocked);  color: #fff; }
 .status-done     { background: var(--color-done);     color: #fff; }
 .status-defunct  { background: var(--color-defunct);   color: #666; }
@@ -1183,6 +1185,7 @@ body {
 .status-pill.status-idea     { border-left-color: var(--color-idea); }
 .status-pill.status-someday  { border-left-color: var(--color-someday); }
 .status-pill.status-active   { border-left-color: var(--color-active); }
+.status-pill.status-dormant  { border-left-color: var(--color-dormant); }
 .status-pill.status-blocked  { border-left-color: var(--color-blocked); }
 .status-pill.status-done     { border-left-color: var(--color-done); }
 .status-pill.status-defunct  { border-left-color: var(--color-defunct); }
@@ -1192,6 +1195,7 @@ body {
 .status-pill.status-idea.filter-pill-active    { background: var(--color-idea);    color: #fff; border-color: var(--color-idea); }
 .status-pill.status-someday.filter-pill-active { background: var(--color-someday); color: #fff; border-color: var(--color-someday); }
 .status-pill.status-active.filter-pill-active  { background: var(--color-active);  color: #fff; border-color: var(--color-active); }
+.status-pill.status-dormant.filter-pill-active { background: var(--color-dormant); color: #fff; border-color: var(--color-dormant); }
 .status-pill.status-blocked.filter-pill-active { background: var(--color-blocked); color: #fff; border-color: var(--color-blocked); }
 .status-pill.status-done.filter-pill-active    { background: var(--color-done);    color: #fff; border-color: var(--color-done); }
 .status-pill.status-defunct.filter-pill-active { background: var(--color-defunct); color: #666; border-color: var(--color-defunct); }
@@ -1241,6 +1245,7 @@ body {
 .status-light-idea    { background-color: var(--color-idea); }
 .status-light-someday { background-color: var(--color-someday); }
 .status-light-active  { background-color: var(--color-active); }
+.status-light-dormant { background-color: var(--color-dormant); }
 .status-light-blocked { background-color: var(--color-blocked); }
 .status-light-done    { background-color: var(--color-done); }
 .status-light-defunct { background-color: var(--color-defunct); }
