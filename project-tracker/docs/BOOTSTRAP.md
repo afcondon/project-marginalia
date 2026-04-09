@@ -14,20 +14,27 @@ or phone-client testing.
 - `git`
 - Tailscale installed and logged into the tailnet
 
-## Clone + install
+## Clone + build
 
 ```bash
 cd ~/work
-git clone https://github.com/afcondon/project-marginalia.git marginalia
-cd marginalia
+git clone https://github.com/afcondon/project-marginalia.git marginalia-demo
+cd marginalia-demo/project-tracker
 npm install
+npm run bootstrap
 ```
 
-The PureScript toolchain (`spago`, `purs`) is needed only if you intend to
-rebuild the server or frontend on this machine. If you're just running
-pre-built bundles, you can skip installing them — the committed
-`frontend/public/bundle.js` is ready to serve as-is, and the server runs
-from the `output/` directory that ships in the repo.
+`npm install` pulls in the PureScript toolchain (`purescript` and `spago`
+are committed as devDependencies), and `npm run bootstrap` compiles the
+server's PureScript modules into `output/` and bundles the frontend to
+`frontend/public/bundle.js`. Both of those directories are gitignored —
+they don't travel with the clone — so the bootstrap step is required on
+every fresh machine. Incremental rebuilds after the first bootstrap are
+fast.
+
+The locally-installed toolchain lives at `node_modules/.bin/spago` and
+`node_modules/.bin/purs`; npm scripts pick them up automatically. You
+don't need a global install.
 
 ## Optional: `.env` for per-machine overrides
 
@@ -118,6 +125,18 @@ tailscale serve --bg --https=443 / http://127.0.0.1:3101
 tailscale serve --bg --https=443 /api/ http://127.0.0.1:3100
 tailscale serve --bg --https=443 /transcribe http://127.0.0.1:3200
 ```
+
+On macOS, the Tailscale CLI often isn't on `PATH` out of the box when
+Tailscale is installed from the Mac App Store or official installer
+(rather than Homebrew). The actual binary lives at
+`/Applications/Tailscale.app/Contents/MacOS/Tailscale`. Either add it to
+`PATH` in your shell profile, or create a symlink once:
+
+```bash
+sudo ln -sf /Applications/Tailscale.app/Contents/MacOS/Tailscale /usr/local/bin/tailscale
+```
+
+After that the `tailscale` commands above just work from any shell.
 
 After which `https://<hostname>.<tailnet>.ts.net/` reaches the frontend,
 and the frontend's bundle automatically uses the same origin for its API
