@@ -17,7 +17,11 @@ export NVM_DIR="$HOME/.nvm"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 start=$(date +%s)
-npx http-server frontend/public -p 3101 -c-1 --cors
+# Custom static-files-plus-reverse-proxy server (Node built-ins only).
+# Replaces http-server so the frontend can expose /api/* and /transcribe
+# as same-origin paths — necessary for Tailscale Serve deployments where
+# only one backend can be mounted at / per HTTPS port.
+node tools/frontend-server.mjs
 rc=$?
 backoff_record_outcome "$STATE" $(($(date +%s) - start))
 exit $rc
