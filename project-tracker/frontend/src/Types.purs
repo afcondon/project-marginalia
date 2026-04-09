@@ -25,6 +25,7 @@ data Status
   = Idea
   | Someday
   | Active
+  | Dormant
   | Blocked
   | Done
   | Defunct
@@ -41,6 +42,7 @@ statusFromString = case _ of
   "idea" -> Just Idea
   "someday" -> Just Someday
   "active" -> Just Active
+  "dormant" -> Just Dormant
   "blocked" -> Just Blocked
   "done" -> Just Done
   "defunct" -> Just Defunct
@@ -52,19 +54,21 @@ statusToString = case _ of
   Idea -> "idea"
   Someday -> "someday"
   Active -> "active"
+  Dormant -> "dormant"
   Blocked -> "blocked"
   Done -> "done"
   Defunct -> "defunct"
   Evolved -> "evolved"
 
 allStatuses :: Array Status
-allStatuses = [ Idea, Someday, Active, Blocked, Done, Defunct, Evolved ]
+allStatuses = [ Idea, Someday, Active, Dormant, Blocked, Done, Defunct, Evolved ]
 
 statusLabel :: Status -> String
 statusLabel = case _ of
   Idea -> "Idea"
   Someday -> "Someday"
   Active -> "Active"
+  Dormant -> "Dormant"
   Blocked -> "Blocked"
   Done -> "Done"
   Defunct -> "Defunct"
@@ -119,13 +123,22 @@ allBlogStatuses :: Array BlogStatus
 allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogDrafted, BlogPublished ]
 
 -- | Reachable next statuses for quick status transitions.
--- | Terminal statuses (Evolved) have no transitions.
+-- |
+-- | Dormant is the "paused indefinitely" state — work was done, the project
+-- | isn't dead, but you've stopped actively moving it forward. It's reachable
+-- | from Active (you stop) and Blocked (the blocker is long-term, give up
+-- | waiting). From Dormant you can either resume (→ Active) or acknowledge
+-- | that it's actually dead (→ Defunct). Deliberately NOT reachable from
+-- | Idea/Someday: a project has to have been active to become dormant.
+-- |
+-- | Evolved remains the one terminal state with no outgoing transitions.
 nextStatuses :: Status -> Array Status
 nextStatuses = case _ of
   Idea    -> [ Someday, Active, Defunct ]
   Someday -> [ Active, Idea, Defunct ]
-  Active  -> [ Done, Blocked, Defunct, Evolved ]
-  Blocked -> [ Active, Defunct ]
+  Active  -> [ Done, Dormant, Blocked, Defunct, Evolved ]
+  Dormant -> [ Active, Defunct ]
+  Blocked -> [ Active, Dormant, Defunct ]
   Done    -> [ Active ]
   Defunct -> [ Idea, Someday ]
   Evolved -> []

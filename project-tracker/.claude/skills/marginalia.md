@@ -171,11 +171,20 @@ Valid transitions (from → to):
 
 - `idea`    → someday, active, defunct
 - `someday` → active, idea, defunct
-- `active`  → done, blocked, defunct, evolved
-- `blocked` → active, defunct
+- `active`  → done, dormant, blocked, defunct, evolved
+- `dormant` → active, defunct
+- `blocked` → active, dormant, defunct
 - `done`    → active
 - `defunct` → idea, someday
 - `evolved` → (terminal — the project has become another project)
+
+**Dormant** is the "paused indefinitely" state: work was done, the
+project isn't dead, but it's stopped moving forward. Reachable from
+`active` (you stop working on it) or `blocked` (the blocker turned out
+to be long-term; give up waiting). From dormant you can either resume
+(→ `active`) or acknowledge it's actually dead (→ `defunct`).
+Deliberately NOT reachable from `idea`/`someday`: a project has to have
+been active to become dormant — otherwise it's just a `someday`.
 
 Use `POST /api/agent/projects/:id/status` when you want the server to
 enforce this DAG. Use `PUT /api/projects/:id` with a status field only

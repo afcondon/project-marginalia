@@ -57,13 +57,18 @@ foreign import extractRowStatus :: Foreign -> String
 -- Status lifecycle graph
 -- =============================================================================
 
--- | Valid next statuses for each current status.
+-- | Valid next statuses for each current status. Must match the frontend's
+-- | nextStatuses in Types.purs — both enforce the same lifecycle DAG, but
+-- | the server is authoritative (the agent status endpoint validates here
+-- | before any DB write). Dormant is the "paused indefinitely" state
+-- | reachable from active/blocked; see the longer comment in Types.purs.
 statusOptions :: String -> Array String
 statusOptions s = case s of
   "idea"    -> [ "someday", "active", "defunct" ]
   "someday" -> [ "active", "idea", "defunct" ]
-  "active"  -> [ "done", "blocked", "defunct", "evolved" ]
-  "blocked" -> [ "active", "defunct" ]
+  "active"  -> [ "done", "dormant", "blocked", "defunct", "evolved" ]
+  "dormant" -> [ "active", "defunct" ]
+  "blocked" -> [ "active", "dormant", "defunct" ]
   "done"    -> [ "active" ]
   "defunct" -> [ "idea", "someday" ]
   "evolved" -> []
@@ -79,6 +84,7 @@ allStatusOptions = FO.fromFoldable
   [ Tuple "idea"    (statusOptions "idea")
   , Tuple "someday" (statusOptions "someday")
   , Tuple "active"  (statusOptions "active")
+  , Tuple "dormant" (statusOptions "dormant")
   , Tuple "blocked" (statusOptions "blocked")
   , Tuple "done"    (statusOptions "done")
   , Tuple "defunct" (statusOptions "defunct")
