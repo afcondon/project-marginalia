@@ -89,6 +89,66 @@ viewKindToString = case _ of
   DossierView  -> "dossier"
   MagazineView -> "magazine"
 
+-- | Visual tier for a project card in the Register (index) view.
+-- | Each tier maps to a different footprint in the 4-column CSS grid:
+-- |   Lead     — 4 cols × 2 rows (a whole-page banner story)
+-- |   Feature  — 2 cols × 3 rows (a tall magazine feature)
+-- |   Portrait — 1 col  × 2 rows (a half-column sidebar piece)
+-- |   Regular  — 2 cols × 1 row  (a standard register entry)
+-- |   Small    — 1 col  × 1 row  (a stub / fill entry)
+-- | CSS `grid-auto-flow: dense` backfills small holes, so the mix of
+-- | footprints produces the newspaper-ish layout without us having to
+-- | solve any packing problem ourselves.
+data CardTier
+  = Lead
+  | Feature
+  | Portrait
+  | Regular
+  | Small
+
+derive instance Eq CardTier
+
+tierClass :: CardTier -> String
+tierClass = case _ of
+  Lead     -> "tier-lead"
+  Feature  -> "tier-feature"
+  Portrait -> "tier-portrait"
+  Regular  -> "tier-regular"
+  Small    -> "tier-small"
+
+-- | Decide what size a project card should be in the Register.
+-- |
+-- | Design note: we deliberately keep almost every project at Small or
+-- | Regular. The bigger tiers (Lead, Feature, Portrait) are reserved for:
+-- |   * the first card in the list (always Lead — use ordering to put a
+-- |     strong candidate there)
+-- |   * projects with a cover screenshot attachment (promoted to Feature
+-- |     because the image needs space to read)
+-- |   * manual overrides via "hero" tag (→ Lead) or "featured" (→ Feature)
+-- |
+-- | Between Regular and Small we use a light content signal (description
+-- | length or tag count) so project stubs that haven't been filled out
+-- | yet stay small and out of the way.
+pickTier :: Int -> Project -> CardTier
+pickTier idx project =
+  let
+    hasTag t = Array.elem t project.tags
+    hasCover = isJust project.coverUrl
+
+    descLen = case project.description of
+      Nothing -> 0
+      Just d  -> String.length d
+
+    baseline =
+      if descLen >= 150 || Array.length project.tags >= 2 then Regular
+      else Small
+  in
+    if idx == 0 then Lead
+    else if hasTag "hero" then Lead
+    else if hasCover then Feature
+    else if hasTag "featured" then Feature
+    else baseline
+
 -- | Fields in the Dossier view that are editable via plain click-to-edit.
 -- | Title uses the existing rename flow (has directory-rename side effects).
 -- | Status uses QuickStatusChange (has transition validation).
@@ -556,8 +616,13 @@ renderProjectCard :: forall m. State -> Int -> Project -> H.ComponentHTML Action
 renderProjectCard state idx project =
   let isFocused = state.focusIndex == idx
       focusClass = if isFocused then " card-focused" else ""
+      tier = pickTier idx project
+      tierCls = " " <> tierClass tier
+      coverCls = case project.coverUrl of
+        Nothing -> ""
+        Just _  -> " has-cover"
   in HH.div
-    [ HP.class_ (H.ClassName ("project-card card-domain-" <> project.domain <> focusClass))
+    [ HP.class_ (H.ClassName ("project-card card-domain-" <> project.domain <> tierCls <> coverCls <> focusClass))
     , HE.onClick \_ -> SelectProject project.id
     ]
     [ HH.div [ HP.class_ (H.ClassName "card-header") ]
@@ -587,6 +652,17 @@ renderProjectCard state idx project =
         then HH.text ""
         else HH.div [ HP.class_ (H.ClassName "card-tags") ]
           (map renderTag project.tags)
+    -- Cover image (if any) goes last so it can absorb whatever vertical
+    -- space is left after the text has laid out. It docks to the
+    -- bottom-right of the card via CSS.
+    , case project.coverUrl of
+        Nothing -> HH.text ""
+        Just url -> HH.div [ HP.class_ (H.ClassName "card-cover") ]
+          [ HH.img
+              [ HP.src url
+              , HP.alt (project.name <> " screenshot")
+              ]
+          ]
     ]
 
 -- | Port badges on cards — show every allocated port for this project as

@@ -80,6 +80,13 @@ main = launchAff_ do
   dbRef <- liftEffect $ Ref.new db
   liftEffect $ log $ "Connected to database: " <> dbPath
 
+  -- Idempotent column adds at boot. These let us evolve the schema without
+  -- a separate migration step: new columns land on the live DB the next
+  -- time the server restarts. DuckDB supports ADD COLUMN IF NOT EXISTS so
+  -- running these repeatedly is safe.
+  DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER"
+  liftEffect $ log "Schema migrations applied"
+
   liftEffect do
     _ <- serve { port: 3100 } { route, router: mkRouter dbRef }
     log "Project Tracker API server running on http://localhost:3100"

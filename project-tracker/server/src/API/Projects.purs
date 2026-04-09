@@ -87,7 +87,7 @@ getIntField key obj = case FO.lookup key obj of
 -- | List projects with optional filtering by domain, status, tag, and search text.
 listProjects :: Database -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff Response
 listProjects db mDomain mStatus mTag mAncestor mSearch = do
-  let baseSql = "SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id WHERE 1=1"
+  let baseSql = "SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags, a_cover.file_path AS cover_path FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id WHERE 1=1"
   let domainClause = case mDomain of
         Just _ -> " AND p.domain = ?"
         Nothing -> ""
@@ -103,7 +103,7 @@ listProjects db mDomain mStatus mTag mAncestor mSearch = do
   let searchClause = case mSearch of
         Just _ -> " AND (LOWER(p.name) LIKE '%' || LOWER(?) || '%' OR LOWER(p.description) LIKE '%' || LOWER(?) || '%')"
         Nothing -> ""
-  let groupClause = " GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"
+  let groupClause = " GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, a_cover.file_path"
   let orderClause = " ORDER BY p.updated_at DESC NULLS LAST"
   let sql = baseSql <> domainClause <> statusClause <> tagClause <> ancestorClause <> searchClause <> groupClause <> orderClause
   let params = buildFilterParams mDomain mStatus mTag mAncestor mSearch
@@ -145,7 +145,7 @@ getProject db projectId = do
        WHERE p.id = ?
        GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status,
                 p.evolved_into, p.description, p.source_url, p.source_path,
-                p.repo, p.preferred_view, p.created_at, p.updated_at"""
+                p.repo, p.preferred_view, p.cover_attachment_id, p.created_at, p.updated_at"""
     idParam
   case firstRow projectRows of
     Nothing -> notFound
@@ -224,12 +224,14 @@ createProject db bodyStr = case parseBody bodyStr of
     -- Use the same query shape as listProjects so the response includes slug + parent_id
     rows <- queryAllParams db
       """SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
-                STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags
+                STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags,
+                a_cover.file_path AS cover_path
          FROM projects p
          LEFT JOIN project_tags pt ON pt.project_id = p.id
          LEFT JOIN tags t ON t.id = pt.tag_id
+         LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id
          WHERE p.id = (SELECT MAX(id) FROM projects)
-         GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at"""
+         GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, a_cover.file_path"""
       []
     ok' jsonHeaders (buildProjectListJson rows)
 
@@ -387,11 +389,16 @@ buildUpdateClauses obj = { clauses, params }
     , fieldClause "sourcePath" "source_path"
     , fieldClause "repo" "repo"
     , fieldClause "preferredView" "preferred_view"
+    , intFieldClause "coverAttachmentId" "cover_attachment_id"
     ]
   fieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
   fieldClause jsonKey sqlCol = case getFieldMaybe jsonKey obj of
     Nothing -> Nothing
     Just val -> Just { clause: sqlCol <> " = ?", param: unsafeToForeign val }
+  intFieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
+  intFieldClause jsonKey sqlCol = case getIntField jsonKey obj of
+    Nothing -> Nothing
+    Just n -> Just { clause: sqlCol <> " = ?", param: unsafeToForeign n }
   present = Array.catMaybes fields
   clauses = map _.clause present
   params = map _.param present

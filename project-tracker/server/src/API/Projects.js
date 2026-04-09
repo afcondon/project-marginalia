@@ -9,6 +9,19 @@ export const getRowString_ = (key) => (row) => {
 // JSON response builders only — marshalling Foreign (DuckDB rows) to JSON strings.
 // All body parsing and SQL construction is in PureScript.
 
+// Canonical attachment store prefix. Files under this directory are served
+// via the frontend at /attachments/... (see the frontend static config).
+// Anything outside this prefix is returned as a plain file pointer with
+// no browser-accessible URL.
+const ATTACHMENT_PREFIX = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
+
+const filePathToUrl = (path) => {
+  if (!path) return null;
+  return path.startsWith(ATTACHMENT_PREFIX)
+    ? '/attachments/' + path.slice(ATTACHMENT_PREFIX.length)
+    : null;
+};
+
 // Build JSON array of projects (from project_with_tags view rows)
 export const buildProjectListJson = (rows) => {
   const projects = (rows || []).map(row => ({
@@ -21,7 +34,8 @@ export const buildProjectListJson = (rows) => {
     status: row.status,
     description: row.description || null,
     updatedAt: row.updated_at || null,
-    tags: row.tags ? row.tags.split(', ').filter(t => t.trim()) : []
+    tags: row.tags ? row.tags.split(', ').filter(t => t.trim()) : [],
+    coverUrl: filePathToUrl(row.cover_path)
   }));
   return JSON.stringify({ projects, count: projects.length });
 };
