@@ -169,22 +169,24 @@ Body: { "status": "active", "reason": "optional explanation" }
 Marginalia projects move through a DAG of statuses, not a free-for-all.
 Valid transitions (from → to):
 
-- `idea`    → someday, active, defunct
-- `someday` → active, idea, defunct
+- `idea`    → someday, active, dormant, defunct
+- `someday` → active, idea, dormant, defunct
 - `active`  → done, dormant, blocked, defunct, evolved
-- `dormant` → active, defunct
+- `dormant` → active, someday, defunct
 - `blocked` → active, dormant, defunct
 - `done`    → active
 - `defunct` → idea, someday
 - `evolved` → (terminal — the project has become another project)
 
-**Dormant** is the "paused indefinitely" state: work was done, the
-project isn't dead, but it's stopped moving forward. Reachable from
-`active` (you stop working on it) or `blocked` (the blocker turned out
-to be long-term; give up waiting). From dormant you can either resume
-(→ `active`) or acknowledge it's actually dead (→ `defunct`).
-Deliberately NOT reachable from `idea`/`someday`: a project has to have
-been active to become dormant — otherwise it's just a `someday`.
+**Dormant** is the "parked indefinitely" state: you're not actively
+moving the project forward, but you don't want to throw it away either.
+Distinct from `someday` (which implies positive intent to do later) and
+from `defunct` (which implies abandonment). Reachable from any non-
+terminal, non-`done` state: an `idea` can be parked before it ever gets
+started, an `active` project can be paused, a long-term `blocked` can
+turn into a shelving decision. From dormant you can resume
+(→ `active`), revive interest without commitment (→ `someday`), or
+acknowledge it's dead (→ `defunct`).
 
 Use `POST /api/agent/projects/:id/status` when you want the server to
 enforce this DAG. Use `PUT /api/projects/:id` with a status field only

@@ -60,14 +60,15 @@ foreign import extractRowStatus :: Foreign -> String
 -- | Valid next statuses for each current status. Must match the frontend's
 -- | nextStatuses in Types.purs — both enforce the same lifecycle DAG, but
 -- | the server is authoritative (the agent status endpoint validates here
--- | before any DB write). Dormant is the "paused indefinitely" state
--- | reachable from active/blocked; see the longer comment in Types.purs.
+-- | before any DB write). Dormant is the "parked indefinitely" state,
+-- | reachable from any non-terminal non-done state; see the longer
+-- | comment in Types.purs.
 statusOptions :: String -> Array String
 statusOptions s = case s of
-  "idea"    -> [ "someday", "active", "defunct" ]
-  "someday" -> [ "active", "idea", "defunct" ]
+  "idea"    -> [ "someday", "active", "dormant", "defunct" ]
+  "someday" -> [ "active", "idea", "dormant", "defunct" ]
   "active"  -> [ "done", "dormant", "blocked", "defunct", "evolved" ]
-  "dormant" -> [ "active", "defunct" ]
+  "dormant" -> [ "active", "someday", "defunct" ]
   "blocked" -> [ "active", "dormant", "defunct" ]
   "done"    -> [ "active" ]
   "defunct" -> [ "idea", "someday" ]

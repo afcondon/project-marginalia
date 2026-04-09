@@ -124,20 +124,23 @@ allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogDrafted, BlogPublished ]
 
 -- | Reachable next statuses for quick status transitions.
 -- |
--- | Dormant is the "paused indefinitely" state — work was done, the project
--- | isn't dead, but you've stopped actively moving it forward. It's reachable
--- | from Active (you stop) and Blocked (the blocker is long-term, give up
--- | waiting). From Dormant you can either resume (→ Active) or acknowledge
--- | that it's actually dead (→ Defunct). Deliberately NOT reachable from
--- | Idea/Someday: a project has to have been active to become dormant.
+-- | Dormant is the "parked indefinitely" state — you're not actively moving
+-- | the project forward, but you don't want to throw it away either. It's
+-- | distinct from Someday (which implies positive intent to do later) and
+-- | from Defunct (which implies abandonment). Reachable from any non-
+-- | terminal state that isn't Done: an idea can be parked before it ever
+-- | gets started, an active project can be paused, a blocker can turn
+-- | into a long-term shelving decision. From Dormant you can resume
+-- | (→ Active), revive interest without commitment (→ Someday), or
+-- | acknowledge it's actually dead (→ Defunct).
 -- |
 -- | Evolved remains the one terminal state with no outgoing transitions.
 nextStatuses :: Status -> Array Status
 nextStatuses = case _ of
-  Idea    -> [ Someday, Active, Defunct ]
-  Someday -> [ Active, Idea, Defunct ]
+  Idea    -> [ Someday, Active, Dormant, Defunct ]
+  Someday -> [ Active, Idea, Dormant, Defunct ]
   Active  -> [ Done, Dormant, Blocked, Defunct, Evolved ]
-  Dormant -> [ Active, Defunct ]
+  Dormant -> [ Active, Someday, Defunct ]
   Blocked -> [ Active, Dormant, Defunct ]
   Done    -> [ Active ]
   Defunct -> [ Idea, Someday ]
