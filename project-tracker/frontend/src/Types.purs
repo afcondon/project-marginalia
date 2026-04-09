@@ -70,6 +70,54 @@ statusLabel = case _ of
   Defunct -> "Defunct"
   Evolved -> "Evolved"
 
+-- =============================================================================
+-- BlogStatus — per-project blog post classification
+-- =============================================================================
+-- |
+-- | A project's relationship with a future blog post. The NULL / Nothing
+-- | case means the project has never been classified (initial state for
+-- | everything until someone makes a decision about it). Content for
+-- | drafted/published posts lives in a sibling `blogContent` field on
+-- | `ProjectDetail`, not inside the constructor — the list view
+-- | intentionally doesn't fetch content.
+
+data BlogStatus
+  = BlogNotNeeded
+  | BlogWanted
+  | BlogDrafted
+  | BlogPublished
+
+derive instance Eq BlogStatus
+derive instance Ord BlogStatus
+derive instance Generic BlogStatus _
+instance Show BlogStatus where
+  show = genericShow
+
+blogStatusFromString :: String -> Maybe BlogStatus
+blogStatusFromString = case _ of
+  "not_needed" -> Just BlogNotNeeded
+  "wanted"     -> Just BlogWanted
+  "drafted"    -> Just BlogDrafted
+  "published"  -> Just BlogPublished
+  _            -> Nothing
+
+blogStatusToString :: BlogStatus -> String
+blogStatusToString = case _ of
+  BlogNotNeeded -> "not_needed"
+  BlogWanted    -> "wanted"
+  BlogDrafted   -> "drafted"
+  BlogPublished -> "published"
+
+blogStatusLabel :: BlogStatus -> String
+blogStatusLabel = case _ of
+  BlogNotNeeded -> "Not needed"
+  BlogWanted    -> "Wanted"
+  BlogDrafted   -> "Drafted"
+  BlogPublished -> "Published"
+
+allBlogStatuses :: Array BlogStatus
+allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogDrafted, BlogPublished ]
+
 -- | Reachable next statuses for quick status transitions.
 -- | Terminal statuses (Evolved) have no transitions.
 nextStatuses :: Status -> Array Status
@@ -98,6 +146,7 @@ type Project =
   , updatedAt :: Maybe String
   , tags :: Array String
   , coverUrl :: Maybe String
+  , blogStatus :: Maybe BlogStatus
   }
 
 -- =============================================================================
@@ -162,6 +211,8 @@ type ProjectDetail =
   , sourcePath :: Maybe String
   , repo :: Maybe String
   , preferredView :: Maybe String  -- "dossier" | "magazine" | Nothing for default
+  , blogStatus :: Maybe BlogStatus
+  , blogContent :: Maybe String
   , tags :: Array String
   , createdAt :: Maybe String
   , updatedAt :: Maybe String
@@ -206,6 +257,8 @@ type ProjectInput =
   , sourcePath :: String
   , statusReason :: String
   , preferredView :: String   -- empty string means "don't update"
+  , blogStatus :: String      -- empty string means "don't update"
+  , blogContent :: String     -- empty string means "don't update"
   }
 
 -- =============================================================================
@@ -254,6 +307,13 @@ reqStatus key obj = do
     Nothing -> Left (AtKey key (TypeMismatch "Status"))
     Just st -> Right st
 
+-- Helper: decode an optional BlogStatus field. Missing, null, or unrecognised
+-- values all map to Nothing (which means "unclassified").
+optBlogStatus :: String -> FO.Object Json -> Maybe BlogStatus
+optBlogStatus key obj = do
+  s <- optString key obj
+  blogStatusFromString s
+
 -- Helper: decode a string array field
 decodeStringArray :: String -> FO.Object Json -> Array String
 decodeStringArray key obj = case getField key obj of
@@ -281,6 +341,7 @@ decodeProject json = case toObject json of
        , updatedAt: optString "updatedAt" obj
        , tags: decodeStringArray "tags" obj
        , coverUrl: optString "coverUrl" obj
+       , blogStatus: optBlogStatus "blogStatus" obj
        }
 
 decodeProjectList :: Json -> Either JsonDecodeError (Array Project)
@@ -406,6 +467,8 @@ decodeProjectDetail json = case toObject json of
        , sourcePath: optString "sourcePath" obj
        , repo: optString "repo" obj
        , preferredView: optString "preferredView" obj
+       , blogStatus: optBlogStatus "blogStatus" obj
+       , blogContent: optString "blogContent" obj
        , tags: decodeStringArray "tags" obj
        , createdAt: optString "createdAt" obj
        , updatedAt: optString "updatedAt" obj
