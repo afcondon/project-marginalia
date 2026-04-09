@@ -14,7 +14,8 @@ export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1090
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-cd /Users/afc/work/afc-work/agent-teams/project-tracker
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
 start=$(date +%s)
 npx http-server frontend/public -p 3101 -c-1 --cors
 rc=$?

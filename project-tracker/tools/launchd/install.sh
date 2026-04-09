@@ -18,6 +18,10 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Project root is two levels up (tools/launchd/install.sh -> project-root).
+# Resolving it here means `install.sh` works from any clone location without
+# any path editing — fresh clones on new machines just run it in place.
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 LOGS_DIR="$HOME/Library/Logs/marginalia"
 
@@ -57,8 +61,14 @@ for svc in "${SERVICES[@]}"; do
   # Unload if already loaded (ignore errors — it might not be loaded)
   launchctl unload "$plist_dst" 2>/dev/null || true
 
-  # Copy the plist
-  cp "$plist_src" "$plist_dst"
+  # Template substitution: the committed plists use __PROJECT_ROOT__ and
+  # __HOME__ placeholders so the same files work on any clone regardless
+  # of where it lives on disk. We sed them into the installed copy. Using
+  # a bash parameter for HOME so env differences don't leak through.
+  sed \
+    -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" \
+    -e "s|__HOME__|$HOME|g" \
+    "$plist_src" > "$plist_dst"
 
   # Reset any stale backoff state so a fresh install starts immediately
   rm -f "$LOGS_DIR/${svc}.failures"

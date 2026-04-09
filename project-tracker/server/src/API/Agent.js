@@ -3,6 +3,22 @@
 // All business logic (status lifecycle, validation) lives in PureScript.
 // These functions only marshal Foreign (DuckDB rows) -> JSON strings.
 
+// Canonical attachment store. See Projects.js for the longer comment —
+// this duplication exists because PureScript FFI modules each get their
+// own foreign.js in output/, and cross-module JS imports don't survive
+// that copy step. Ten lines is cheaper than a bundler layer.
+const _defaultStore = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
+const _rawStore = process.env.MARGINALIA_ATTACHMENT_STORE || _defaultStore;
+const ATTACHMENT_STORE =
+  _rawStore.endsWith('/') ? _rawStore : _rawStore + '/';
+
+const filePathToAttachmentUrl = (filePath) => {
+  if (!filePath) return null;
+  return filePath.startsWith(ATTACHMENT_STORE)
+    ? '/attachments/' + filePath.slice(ATTACHMENT_STORE.length)
+    : null;
+};
+
 // Build compact project list for agent consumption.
 // statusOptionsMap: plain JS object keyed by status string -> array of strings.
 // Passed from PureScript via allStatusOptions.
@@ -101,21 +117,16 @@ export const buildAgentNoteJson = (row) => {
 };
 
 // Build attachment creation response from the newly inserted row.
-// Mirrors the url-derivation logic in Projects.js: paths under the canonical
-// attachment store get a /attachments/ URL; others return url=null.
+// URL derivation lives in Config.js and honours MARGINALIA_ATTACHMENT_STORE.
 export const buildAgentAttachmentJson = (row) => {
-  const PREFIX = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
   const filePath = row.file_path || '';
-  const url = filePath.startsWith(PREFIX)
-    ? '/attachments/' + filePath.slice(PREFIX.length)
-    : null;
   return JSON.stringify({
     id: Number(row.id),
     projectId: Number(row.project_id),
     filename: row.filename,
     mimeType: row.mime_type,
     filePath: filePath || null,
-    url: url,
+    url: filePathToAttachmentUrl(filePath),
     description: row.description || null,
     createdAt: row.created_at
   });

@@ -7,17 +7,22 @@ import API.Dependencies as Dependencies
 import API.Projects as Projects
 import API.Servers as Servers
 import API.Stats as Stats
+import Control.Monad.Error.Class (try)
+import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Database.DuckDB as DB
 import Effect (Effect)
 import Effect.Aff (launchAff_)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
+import Effect.Exception (message)
 import Effect.Ref as Ref
 import Foreign.Object as Object
 import Data.Maybe (fromMaybe)
 import HTTPurple (Method(..), serve, ok, ok', toString)
 import HTTPurple.Headers (headers)
+import Node.Encoding (Encoding(..))
+import Node.FS.Sync (readTextFile)
 import Routing.Duplex (RouteDuplex', root, path, int, segment, suffix)
 import Routing.Duplex.Generic (noArgs, product, sum)
 
@@ -74,16 +79,34 @@ route = root $ sum
 dbPath :: String
 dbPath = "./database/tracker.duckdb"
 
+schemaPath :: String
+schemaPath = "./database/schema.sql"
+
 main :: Effect Unit
 main = launchAff_ do
   db <- DB.openDB dbPath
   dbRef <- liftEffect $ Ref.new db
   liftEffect $ log $ "Connected to database: " <> dbPath
 
-  -- Idempotent column adds at boot. These let us evolve the schema without
-  -- a separate migration step: new columns land on the live DB the next
-  -- time the server restarts. DuckDB supports ADD COLUMN IF NOT EXISTS so
-  -- running these repeatedly is safe.
+  -- Apply the full schema from database/schema.sql on every startup. It's
+  -- built entirely out of CREATE TABLE IF NOT EXISTS / CREATE VIEW IF NOT
+  -- EXISTS / CREATE INDEX IF NOT EXISTS statements plus idempotent ALTERs,
+  -- so re-running it on an existing DB is a no-op. This means a fresh
+  -- clone on a new machine just needs to start the server — no separate
+  -- migrate step — and new tables added to schema.sql land automatically.
+  mSchemaSrc <- liftEffect $ try $ readTextFile UTF8 schemaPath
+  case mSchemaSrc of
+    Left err -> liftEffect $ log $
+      "Warning: could not read " <> schemaPath <> ": " <> message err
+        <> " (server will rely on pre-existing schema)"
+    Right sql -> do
+      DB.exec db sql
+      liftEffect $ log "Schema applied from schema.sql"
+
+  -- Idempotent column adds at boot for schemas created before a column
+  -- existed. These are also present in schema.sql so they're belt-and-
+  -- braces when the file-read succeeds; they still work standalone if the
+  -- schema.sql read fails above. DuckDB supports ADD COLUMN IF NOT EXISTS.
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER"
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_status TEXT"
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT"

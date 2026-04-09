@@ -99,8 +99,16 @@ export const stopAndTranscribe_ = () => {
       _mediaRecorder = null;
       _audioChunks = [];
 
+      // Two deployment shapes, same bundle:
+      //   * localhost: whisper sidecar is a separate process on :3200
+      //   * remote: proxied at same origin via Tailscale Serve as /transcribe
+      const whisperUrl =
+        (window.location.hostname === 'localhost' ||
+         window.location.hostname === '127.0.0.1')
+          ? 'http://localhost:3200/transcribe'
+          : window.location.origin + '/transcribe';
       try {
-        const resp = await fetch("http://localhost:3200/transcribe", {
+        const resp = await fetch(whisperUrl, {
           method: "POST",
           body: blob,
           headers: { "Content-Type": "audio/webm" },

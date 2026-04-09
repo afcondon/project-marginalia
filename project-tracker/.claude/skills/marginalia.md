@@ -22,6 +22,18 @@ If the API isn't responding, the tracker isn't running. Start it with:
 cd ~/work/afc-work/agent-teams/project-tracker && node server/run.js
 ```
 
+### On a different machine
+
+Fresh clones on a different Mac (e.g. a MacMini running fictional demo
+data) follow the same API shape. Two things change:
+
+- **Attachment store**: defaults to `/Volumes/Crucial4TB/Documents/Notes Attachments/`. Override per-clone via a `.env` file at the repo root: `MARGINALIA_ATTACHMENT_STORE=/path/with/trailing/slash/`. The server reads this at startup via `tools/launchd/start-api.sh`.
+- **Frontend URL resolution**: the committed bundle detects `window.location.hostname` at load time. On `localhost` it hits `localhost:3100`; on any other hostname it uses same-origin (expected to be reverse-proxied via Tailscale Serve to the API on port 3100 and whisper on 3200).
+
+See `docs/BOOTSTRAP.md` for the full fresh-install recipe including
+`scripts/seed-demo-data.mjs` which POSTs ~25 fictional projects for
+first-run demos and testing.
+
 ## Core endpoints
 
 ### Discover projects

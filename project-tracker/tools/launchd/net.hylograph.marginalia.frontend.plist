@@ -7,11 +7,11 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/afc/work/afc-work/agent-teams/project-tracker/tools/launchd/start-frontend.sh</string>
+        <string>__PROJECT_ROOT__/tools/launchd/start-frontend.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/afc/work/afc-work/agent-teams/project-tracker</string>
+    <string>__PROJECT_ROOT__</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -23,17 +23,17 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/afc/Library/Logs/marginalia/frontend.log</string>
+    <string>__HOME__/Library/Logs/marginalia/frontend.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/afc/Library/Logs/marginalia/frontend.log</string>
+    <string>__HOME__/Library/Logs/marginalia/frontend.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>HOME</key>
-        <string>/Users/afc</string>
+        <string>__HOME__</string>
     </dict>
 </dict>
 </plist>

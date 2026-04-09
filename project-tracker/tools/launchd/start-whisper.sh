@@ -12,7 +12,8 @@ backoff_before_start "$STATE"
 
 export PATH="/Library/Frameworks/Python.framework/Versions/3.13/bin:$PATH"
 
-cd /Users/afc/work/afc-work/agent-teams/project-tracker
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
 start=$(date +%s)
 python3 tools/whisper-server.py
 rc=$?
