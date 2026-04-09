@@ -36,8 +36,11 @@ GET /api/projects?ancestor=125            # all descendants of project 125
 
 Returns an envelope with `projects` (array) and `count`. Each project has
 `id`, `slug`, `parentId`, `name`, `domain`, `subdomain`, `status`, `description`,
-`tags`, `updatedAt`. The `slug` is a NATO-callsign four-word identifier
-(`oscar-romeo-delta-uniform`) that's stable across renames.
+`tags`, `updatedAt`, `coverUrl`, `blogStatus`. The `slug` is a NATO-callsign
+four-word identifier (`oscar-romeo-delta-uniform`) that's stable across renames.
+`coverUrl` is the hero screenshot for this project (null if none set).
+`blogStatus` is the project's blog-post classification (see "Blog posts"
+section below for values); null means unclassified.
 
 ### Full detail for one project
 
@@ -46,7 +49,9 @@ GET /api/projects/:id
 ```
 
 Returns name, description, tags, notes, dependencies, attachments, slug,
-parent, source_path, source_url, repo, evolved_into, full status history.
+parent, source_path, source_url, repo, evolved_into, full status history,
+plus `coverAttachmentId`, `blogStatus`, and `blogContent` (the markdown
+body of the blog post, populated when blogStatus is `drafted` or `published`).
 
 ### Port registry — the key endpoint for this skill
 
@@ -106,6 +111,16 @@ Body: same shape as POST, partial — only include fields you want to change.
 # Empty-string fields are treated as "don't update", NOT "clear". To
 # change status in particular you usually want the lifecycle-validated
 # agent endpoint below instead.
+#
+# Additional updatable fields beyond the POST shape:
+#   "coverAttachmentId": 43        (int; id of an existing attachment to
+#                                    use as the hero screenshot on the
+#                                    Register index view)
+#   "blogStatus":        "wanted"  (one of: "not_needed" | "wanted" |
+#                                    "drafted" | "published"; see
+#                                    "Blog posts" section below)
+#   "blogContent":       "# ..."   (markdown body; only meaningful when
+#                                    blogStatus is "drafted" or "published")
 
 POST /api/projects/:id/servers
 Body: { "role": "api", "port": 3100, "url": "http://localhost:3100",
@@ -153,6 +168,72 @@ Valid transitions (from → to):
 Use `POST /api/agent/projects/:id/status` when you want the server to
 enforce this DAG. Use `PUT /api/projects/:id` with a status field only
 when you explicitly want to bypass the validation (rare).
+
+## Blog posts
+
+Every project carries a `blogStatus` field that classifies its
+relationship with a future blog post. This is orthogonal to the
+project's own status (idea/active/done/…) — a done project might still
+want a blog post, an active project might not need one.
+
+Values (stored as a string, deserialized into a four-constructor ADT
+on the frontend):
+
+| Value         | Meaning                                                        |
+|---------------|----------------------------------------------------------------|
+| `null`        | Unclassified — the initial state for every project             |
+| `not_needed`  | Explicitly no blog post (e.g. infrastructure, throwaway stubs) |
+| `wanted`      | A blog post is wanted but nothing's been written yet           |
+| `drafted`     | Draft in progress — `blogContent` holds the current markdown   |
+| `published`   | Finished post — `blogContent` holds the published markdown     |
+
+The companion `blogContent` field (on the detail response only, not the
+list) is a markdown body. It's only meaningful when `blogStatus` is
+`drafted` or `published`; for other states it's null.
+
+### Setting blog status
+
+```
+PUT /api/projects/42
+Body: { "blogStatus": "wanted" }
+```
+
+Or with content:
+
+```
+PUT /api/projects/42
+Body: { "blogStatus": "drafted",
+        "blogContent": "# Title\n\nDraft body…" }
+```
+
+The PUT endpoint treats missing fields as "don't update" (see the
+regular PUT notes), so you can update `blogStatus` and `blogContent`
+independently or together. An empty-string `blogStatus` is treated as
+"don't update" — the API does not currently offer a way to clear
+`blogStatus` back to null once set, only to move it among the four
+concrete values.
+
+### Bulk classification
+
+The dossier view (frontend detail page) has a four-button widget for
+setting blog status interactively, plus an inline markdown editor that
+appears when the status is `drafted` or `published`. For bulk
+classification across many projects, drive the PUT endpoint directly —
+e.g. mark all programming-domain projects as `wanted` in one pass:
+
+```python
+import json, urllib.request
+for p in json.load(urllib.request.urlopen('http://localhost:3100/api/projects'))['projects']:
+    if p['domain'] != 'programming': continue
+    body = json.dumps({'blogStatus': 'wanted'}).encode()
+    req = urllib.request.Request(
+        f'http://localhost:3100/api/projects/{p["id"]}',
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        method='PUT',
+    )
+    urllib.request.urlopen(req).read()
+```
 
 ## The polymorphic start_command
 

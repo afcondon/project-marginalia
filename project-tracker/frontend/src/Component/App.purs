@@ -1754,6 +1754,7 @@ handleAction = case _ of
           , dossierEditValue = ""
           }
         handleAction LoadAllProjects
+        handleAction LoadProjects
       _ -> pure unit
 
   DossierCancelEdit ->
@@ -1791,6 +1792,7 @@ handleAction = case _ of
         H.modify_ \s -> s
           { selectedProject = mNew, dossierDomainOpen = false }
         handleAction LoadAllProjects
+        handleAction LoadProjects
 
   DossierOpenNote -> do
     H.modify_ \s -> s
@@ -1851,6 +1853,8 @@ handleAction = case _ of
               , dossierTagOpen = false
               , dossierTagDraft = ""
               }
+            handleAction LoadProjects
+            handleAction LoadAllProjects
 
   DossierCancelTag ->
     H.modify_ \s -> s { dossierTagOpen = false, dossierTagDraft = "" }
@@ -1868,6 +1872,7 @@ handleAction = case _ of
           mNew <- liftAff $ API.fetchProject detail.id
           H.modify_ \s -> s { selectedProject = mNew }
           handleAction LoadAllProjects
+          handleAction LoadProjects
 
   ClearFilters -> do
     liftEffect $ setHash_ ""
@@ -2032,6 +2037,7 @@ handleAction = case _ of
       -- Clear the input but keep the form open for rapid splitting
       H.modify_ \s -> s { addChildName = "" }
       handleAction LoadAllProjects
+      handleAction LoadProjects
       -- Refresh the detail panel so the new child shows in the list
       case state.selectedProject of
         Just detail | detail.id == parentId -> do
