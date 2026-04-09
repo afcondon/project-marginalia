@@ -1,6 +1,27 @@
 // FFI for API module
 // JSON body builders and array helpers
 
+// Resolved once at module load. Two deployment shapes we care about:
+//
+//   1. Dev on MBP: frontend served by http-server at http://localhost:3101/,
+//      API running separately at http://localhost:3100/. Cross-origin but
+//      CORS is enabled. Hostname is "localhost" or "127.0.0.1".
+//
+//   2. Deployed behind Tailscale Serve: a single origin on the tailnet's
+//      HTTPS endpoint, with `/` → frontend and `/api/` → API via Tailscale
+//      Serve path routing. The bundle uses relative-ish URLs (same-origin)
+//      so it just works without CORS.
+//
+// The decision is made at module load based on window.location.hostname,
+// so the same bundle file ships to both deployments without a build step.
+export const computedBaseUrl = (() => {
+  const loc = window.location;
+  if (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') {
+    return 'http://localhost:3100';
+  }
+  return loc.origin;
+})();
+
 export const arrayLength = (arr) => arr.length;
 
 export const unsafeIndex = (arr) => (i) => arr[i];

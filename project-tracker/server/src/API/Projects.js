@@ -9,16 +9,25 @@ export const getRowString_ = (key) => (row) => {
 // JSON response builders only — marshalling Foreign (DuckDB rows) to JSON strings.
 // All body parsing and SQL construction is in PureScript.
 
-// Canonical attachment store prefix. Files under this directory are served
-// via the frontend at /attachments/... (see the frontend static config).
-// Anything outside this prefix is returned as a plain file pointer with
-// no browser-accessible URL.
-const ATTACHMENT_PREFIX = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
+// Canonical attachment store. Paths under this prefix are served to the
+// browser at /attachments/... via a symlink in the frontend's public dir.
+// Overridable via MARGINALIA_ATTACHMENT_STORE so fresh clones on other
+// machines (e.g. the MacMini demo instance) can point at a local directory
+// instead of the Crucial4TB external drive. Default preserves the author's
+// MacBook Pro behaviour exactly.
+//
+// Duplicated inline in Agent.js — PureScript FFI files get copied to the
+// compiled output tree, so cross-file JS imports don't survive compilation.
+// Ten lines of duplication is cheaper than a bundler pipeline.
+const _defaultStore = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
+const _rawStore = process.env.MARGINALIA_ATTACHMENT_STORE || _defaultStore;
+const ATTACHMENT_STORE =
+  _rawStore.endsWith('/') ? _rawStore : _rawStore + '/';
 
-const filePathToUrl = (path) => {
-  if (!path) return null;
-  return path.startsWith(ATTACHMENT_PREFIX)
-    ? '/attachments/' + path.slice(ATTACHMENT_PREFIX.length)
+const filePathToAttachmentUrl = (filePath) => {
+  if (!filePath) return null;
+  return filePath.startsWith(ATTACHMENT_STORE)
+    ? '/attachments/' + filePath.slice(ATTACHMENT_STORE.length)
     : null;
 };
 
@@ -35,7 +44,7 @@ export const buildProjectListJson = (rows) => {
     description: row.description || null,
     updatedAt: row.updated_at || null,
     tags: row.tags ? row.tags.split(', ').filter(t => t.trim()) : [],
-    coverUrl: filePathToUrl(row.cover_path),
+    coverUrl: filePathToAttachmentUrl(row.cover_path),
     blogStatus: row.blog_status || null
   }));
   return JSON.stringify({ projects, count: projects.length });
@@ -94,21 +103,13 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
       blocking,
       blockedBy
     },
-    attachments: (attachments || []).map(a => {
-      // Convert filesystem path to a URL relative to the frontend's static root.
-      // The frontend serves /attachments/* via a symlink to the canonical
-      // attachment store on Crucial4TB.
-      const PREFIX = '/Volumes/Crucial4TB/Documents/Notes Attachments/';
-      const path = a.file_path || '';
-      const url = path.startsWith(PREFIX) ? '/attachments/' + path.slice(PREFIX.length) : null;
-      return {
-        id: Number(a.id),
-        filename: a.filename,
-        mimeType: a.mime_type,
-        url: url,
-        description: a.description || null,
-        createdAt: a.created_at
-      };
-    })
+    attachments: (attachments || []).map(a => ({
+      id: Number(a.id),
+      filename: a.filename,
+      mimeType: a.mime_type,
+      url: filePathToAttachmentUrl(a.file_path),
+      description: a.description || null,
+      createdAt: a.created_at
+    }))
   });
 };

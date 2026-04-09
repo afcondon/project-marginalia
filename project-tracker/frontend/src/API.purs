@@ -36,8 +36,14 @@ import Types (Project, ProjectDetail, ProjectInput, Server, Stats, decodeProject
 -- Configuration
 -- =============================================================================
 
+-- | API base URL. Resolved once at JS module load based on window.location
+-- | (see API.js). On localhost this is http://localhost:3100 for the MBP
+-- | dev setup; on any other hostname it's the same origin as the page so
+-- | everything routes through the host's reverse proxy (Tailscale Serve).
+foreign import computedBaseUrl :: String
+
 baseUrl :: String
-baseUrl = "http://localhost:3100"
+baseUrl = computedBaseUrl
 
 -- =============================================================================
 -- Helpers
