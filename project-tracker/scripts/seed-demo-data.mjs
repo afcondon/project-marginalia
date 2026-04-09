@@ -104,6 +104,16 @@ const PROJECTS = [
       'A weekend walkthrough of Peter Shirley\'s "Ray Tracing in One Weekend" in Haskell. Finished chapter 9 (dielectrics) before abandoning because the floating-point arithmetic was more instructive than the rendering.',
     tags: ['haskell', 'graphics', 'learning'],
   },
+  {
+    name: 'generative-sdf-fonts',
+    domain: 'programming',
+    subdomain: 'graphics',
+    status: 'dormant',
+    description:
+      'Signed-distance-field font renderer in WebGL. Got as far as a working atlas generator and a single variable-weight axis working in the browser. Paused when the 3D project took over; the code compiles and there\'s a note with the parking decision.',
+    tags: ['webgl', 'typography', 'sdf', 'graphics'],
+    blogStatus: 'wanted',
+  },
 
   // -------------------- MUSIC --------------------
   {
@@ -201,6 +211,15 @@ const PROJECTS = [
     description:
       'The southwest-facing section of the porch railing has rotted at the newel post. Blocked on sourcing matching oak mouldings — tried two local yards and neither had the profile.',
     tags: ['porch', 'carpentry', 'repair'],
+  },
+  {
+    name: 'Attic conversion feasibility',
+    domain: 'house',
+    subdomain: 'renovation',
+    status: 'dormant',
+    description:
+      'Explored turning the attic into an office. Got far enough to sketch the dormer, measure headroom at the ridge, and confirm the joists would need sistering. Not dead but parked — won\'t look at it again until the kitchen re-tile is finished and the budget resets.',
+    tags: ['attic', 'renovation', 'big-job'],
   },
 
   // -------------------- WOODWORKING --------------------
