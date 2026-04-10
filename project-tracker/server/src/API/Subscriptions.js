@@ -24,11 +24,12 @@ export const buildSubscriptionListJson = (rows) => {
     .filter(s => s.active && s.amount != null)
     .reduce((sum, s) => {
       switch (s.frequency) {
-        case 'weekly':    return sum + s.amount * 4.33;
-        case 'monthly':   return sum + s.amount;
-        case 'quarterly': return sum + s.amount / 3;
-        case 'annual':    return sum + s.amount / 12;
-        default:          return sum + s.amount;
+        case 'weekly':      return sum + s.amount * 4.33;
+        case 'fortnightly': return sum + s.amount * 26 / 12;  // 26 fortnights/yr
+        case 'monthly':     return sum + s.amount;
+        case 'quarterly':   return sum + s.amount / 3;
+        case 'annual':      return sum + s.amount / 12;
+        default:            return sum + s.amount;
       }
     }, 0);
 
