@@ -157,3 +157,32 @@ export const buildAgentSearchJson = (query) => (nameRows) => (descRows) => {
 
 // Extract status string from a project row (used by PureScript via FFI).
 export const extractRowStatus = (row) => row.status || "";
+
+// Write an uploaded file buffer to the attachment store.
+// Returns { filename, filePath, mimeType } or throws on failure.
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+const mimeToExt = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'application/pdf': '.pdf',
+};
+
+export const saveUploadedFileImpl = (buffer) => (mimeType) => () => {
+  const ext = mimeToExt[mimeType] || '.bin';
+  const filename = `capture-${Date.now()}${ext}`;
+  const filePath = path.join(ATTACHMENT_STORE, filename);
+
+  // Ensure the attachment store directory exists
+  fs.mkdirSync(ATTACHMENT_STORE, { recursive: true });
+  fs.writeFileSync(filePath, buffer);
+
+  return { filename, filePath, mimeType };
+};

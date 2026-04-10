@@ -96,6 +96,7 @@ data Action
   | SetUrlText String
   | SetUrlComment String
   | SaveUrl
+  | TakePhoto
   | CancelCapture
 
 -- =============================================================================
@@ -176,6 +177,7 @@ renderHome state =
         [ captureButton "dictate" "Dictate" StartDictate (hasProject state)
         , captureButton "write" "Write" StartWrite (hasProject state)
         , captureButton "url" "URL" StartUrl (hasProject state)
+        , captureButton "photo" "Photo" TakePhoto (hasProject state)
         ]
     , if Array.null state.recentCaptures
         then HH.text ""
@@ -517,6 +519,20 @@ handleAction = case _ of
                 , recentCaptures = Array.cons cap (Array.take 9 s.recentCaptures)
                 }
             else H.modify_ \s -> s { saving = false, error = Just "Failed to save URL" }
+
+  TakePhoto -> do
+    state <- H.get
+    case state.currentProject of
+      Nothing -> pure unit
+      Just p -> do
+        H.modify_ \s -> s { error = Nothing }
+        filename <- liftAff $ toAffE $ API.pickAndUploadPhoto p.id
+        if String.null filename
+          then pure unit -- user cancelled
+          else do
+            let cap = { projectName: p.name, content: filename, captureType: "photo", timestamp: "just now" }
+            H.modify_ \s -> s
+              { recentCaptures = Array.cons cap (Array.take 9 s.recentCaptures) }
 
   CancelCapture ->
     H.modify_ \s -> s { captureMode = Nothing, recording = false, noteText = "", urlText = "", urlComment = "", transcript = "" }
