@@ -26,31 +26,31 @@ export const startRecording_ = () => {
 export const stopAndTranscribe_ = () => {
   return new Promise((resolve, reject) => {
     if (!_mediaRecorder || _mediaRecorder.state !== "recording") {
+      console.error("[capture] stopAndTranscribe: not recording");
       reject(new Error("Not recording"));
       return;
     }
     _mediaRecorder.onstop = async () => {
       const blob = new Blob(_audioChunks, { type: "audio/webm" });
+      console.log("[capture] recorded blob:", blob.size, "bytes");
       _mediaRecorder.stream.getTracks().forEach(t => t.stop());
       _mediaRecorder = null;
       _audioChunks = [];
 
-      // Same-origin: the frontend proxy routes /transcribe to whisper.
-      // On localhost dev, fall back to port 3200 directly.
-      const whisperUrl =
-        (window.location.hostname === 'localhost' ||
-         window.location.hostname === '127.0.0.1')
-          ? 'http://localhost:3200/transcribe'
-          : window.location.origin + '/transcribe';
+      const whisperUrl = window.location.origin + '/transcribe';
+      console.log("[capture] POSTing to", whisperUrl);
       try {
         const resp = await fetch(whisperUrl, {
           method: "POST",
           body: blob,
           headers: { "Content-Type": "audio/webm" },
         });
+        console.log("[capture] whisper response:", resp.status);
         const data = await resp.json();
+        console.log("[capture] transcript:", JSON.stringify(data));
         resolve(data.text || "");
       } catch (e) {
+        console.error("[capture] transcription error:", e);
         reject(e);
       }
     };
