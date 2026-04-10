@@ -13,3 +13,4 @@ package-lock.json
 spago.lock
 *.pdf
 capture/public/bundle.js
+finance/public/bundle.js

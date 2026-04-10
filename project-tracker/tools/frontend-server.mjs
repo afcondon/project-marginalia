@@ -26,6 +26,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '..');
 const STATIC_ROOT = path.join(PROJECT_ROOT, 'frontend', 'public');
 const CAPTURE_ROOT = path.join(PROJECT_ROOT, 'capture', 'public');
+const FINANCE_ROOT = path.join(PROJECT_ROOT, 'finance', 'public');
 const PORT = parseInt(process.env.MARGINALIA_FRONTEND_PORT || '3101', 10);
 
 const API_TARGET = { host: '127.0.0.1', port: 3100 };
@@ -195,6 +196,27 @@ const server = http.createServer((req, res) => {
       }
     }
     streamFile(path.join(CAPTURE_ROOT, 'index.html'), res);
+    return;
+  }
+  // Finance visualization app — served under /finance/
+  if (url === '/finance' || url === '/finance/') {
+    streamFile(path.join(FINANCE_ROOT, 'index.html'), res);
+    return;
+  }
+  if (url.startsWith('/finance/')) {
+    const subPath = url.slice('/finance/'.length).split('?')[0];
+    const resolved = path.normalize(path.join(FINANCE_ROOT, subPath));
+    if (resolved.startsWith(FINANCE_ROOT)) {
+      fs.stat(resolved, (err, stat) => {
+        if (err || !stat.isFile()) {
+          streamFile(path.join(FINANCE_ROOT, 'index.html'), res);
+        } else {
+          streamFile(resolved, res);
+        }
+      });
+      return;
+    }
+    streamFile(path.join(FINANCE_ROOT, 'index.html'), res);
     return;
   }
   // Serve index.html at the root

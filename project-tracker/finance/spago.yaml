@@ -1,0 +1,25 @@
+package:
+  name: marginalia-finance
+  description: "Finance section visualization — sparkline timeline + cost breakdown"
+  bundle:
+    module: Finance.Main
+    outfile: public/bundle.js
+    platform: browser
+  dependencies:
+    - aff
+    - affjax
+    - affjax-web
+    - argonaut-core
+    - arrays
+    - console
+    - effect
+    - either
+    - foldable-traversable
+    - halogen
+    - halogen-svg-elems
+    - integers
+    - maybe
+    - numbers
+    - prelude
+    - strings
+    - tuples

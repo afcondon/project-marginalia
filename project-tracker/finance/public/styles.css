@@ -1,0 +1,256 @@
+/* =============================================================================
+   Finance Visualization — The Cambrian Explosion
+   =============================================================================
+   Sparkline timeline + cost breakdown for recurring subscriptions.
+   Newspaper aesthetic: serif headlines, sans-serif data labels, paper palette.
+   ============================================================================= */
+
+:root {
+  --paper: #f5f0e8;
+  --ink: #1a1612;
+  --ink-muted: #8a8078;
+  --ink-light: #b3aa9e;
+  --rule: #d4cec4;
+  --accent: #8b2020;
+
+  --serif-display: 'Old Standard TT', serif;
+  --serif-body: 'Source Serif 4', 'Source Serif Pro', Georgia, serif;
+  --sans-label: 'Libre Franklin', -apple-system, sans-serif;
+
+  /* Category colors */
+  --cat-streaming: #d4437a;
+  --cat-tools: #4a90d9;
+  --cat-insurance: #c9963a;
+  --cat-domain: #7a7a7a;
+  --cat-utility: #3da35d;
+  --cat-membership: #a78bfa;
+  --cat-default: #8a8078;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans-label);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.finance-app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 2.5rem;
+}
+
+/* ----- Section header ---------------------------------------------------- */
+
+.finance-masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 0.75rem;
+  margin-bottom: 2rem;
+}
+
+.finance-title {
+  font-family: var(--serif-display);
+  font-size: 2.2rem;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.finance-subtitle {
+  font-family: var(--sans-label);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-muted);
+}
+
+/* ----- Summary strip (RHS totals) ---------------------------------------- */
+
+.finance-layout {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 2.5rem;
+}
+
+.finance-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-top: 0.5rem;
+}
+
+.summary-block {
+  border-left: 2px solid var(--rule);
+  padding-left: 1rem;
+}
+
+.summary-label {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-light);
+  margin-bottom: 0.25rem;
+}
+
+.summary-value {
+  font-family: var(--serif-display);
+  font-size: 1.8rem;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.summary-value-small {
+  font-family: var(--serif-display);
+  font-size: 1.2rem;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.summary-unit {
+  font-family: var(--sans-label);
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-left: 0.25rem;
+}
+
+/* ----- Sparkline timeline ------------------------------------------------ */
+
+.timeline-area {
+  min-height: 300px;
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.timeline-label {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-muted);
+}
+
+/* Each subscription row in the timeline */
+.sub-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 80px;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(212, 206, 196, 0.3);
+}
+
+.sub-row:hover {
+  background: rgba(26, 22, 18, 0.015);
+}
+
+.sub-row-name {
+  font-family: var(--serif-body);
+  font-size: 0.88rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sub-row-category {
+  font-family: var(--sans-label);
+  font-size: 0.58rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-light);
+}
+
+.sub-row-amount {
+  font-family: var(--serif-display);
+  font-size: 0.95rem;
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.sub-row-freq {
+  font-family: var(--sans-label);
+  font-size: 0.6rem;
+  color: var(--ink-muted);
+}
+
+/* SVG sparkline area */
+.sub-row-spark {
+  height: 24px;
+}
+
+.sub-row-spark svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Category color coding via bar accent */
+.sub-row.cat-streaming  { border-left: 3px solid var(--cat-streaming); padding-left: 0.5rem; }
+.sub-row.cat-tools      { border-left: 3px solid var(--cat-tools); padding-left: 0.5rem; }
+.sub-row.cat-insurance  { border-left: 3px solid var(--cat-insurance); padding-left: 0.5rem; }
+.sub-row.cat-domain     { border-left: 3px solid var(--cat-domain); padding-left: 0.5rem; }
+.sub-row.cat-utility    { border-left: 3px solid var(--cat-utility); padding-left: 0.5rem; }
+.sub-row.cat-membership { border-left: 3px solid var(--cat-membership); padding-left: 0.5rem; }
+
+/* ----- Bottom total bar -------------------------------------------------- */
+
+.finance-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: 1rem;
+  margin-top: 1.5rem;
+  border-top: 2px solid var(--ink);
+}
+
+.footer-total {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.footer-label {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-muted);
+}
+
+.footer-value {
+  font-family: var(--serif-display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Loading state */
+.finance-loading {
+  font-family: var(--serif-body);
+  font-style: italic;
+  color: var(--ink-muted);
+  padding: 2rem 0;
+}
