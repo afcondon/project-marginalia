@@ -289,6 +289,36 @@ FROM projects
 GROUP BY domain, status;
 
 -- =============================================================================
+-- SUBSCRIPTIONS (Finance section)
+-- =============================================================================
+
+-- Recurring subscriptions, bills, and memberships. Powers the Finance
+-- section of the newspaper — "what's due this week" stories, monthly
+-- burn totals, cancellation deadline alerts.
+CREATE SEQUENCE IF NOT EXISTS seq_subscriptions START 1;
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id            INTEGER PRIMARY KEY DEFAULT nextval('seq_subscriptions'),
+    name          TEXT NOT NULL,               -- "Netflix", "Tailscale", "Claude Pro"
+    category      TEXT,                        -- "streaming", "tools", "insurance", "domain", "utility", "membership"
+    amount        DECIMAL(10,2),               -- 14.99
+    currency      TEXT NOT NULL DEFAULT 'EUR',
+    frequency     TEXT NOT NULL DEFAULT 'monthly',  -- "monthly", "annual", "quarterly", "weekly"
+    next_due      DATE,                        -- when the next charge hits
+    auto_renew    BOOLEAN DEFAULT true,
+    cancel_url    TEXT,                        -- direct link to cancellation page
+    notes         TEXT,
+    project_id    INTEGER,                    -- optional FK to a Marginalia project
+    active        BOOLEAN DEFAULT true,       -- false = cancelled / lapsed
+    created_at    TIMESTAMP DEFAULT current_timestamp,
+    updated_at    TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_next_due ON subscriptions(next_due);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_category ON subscriptions(category);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(active);
+
+-- =============================================================================
 -- METADATA
 -- =============================================================================
 

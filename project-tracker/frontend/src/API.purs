@@ -15,6 +15,9 @@ module API
   , renameProject
   , addNote
   , addTag
+  , fetchSubscriptions
+  , SubscriptionResponse
+  , SubscriptionRecord
   ) where
 
 import Prelude
@@ -302,3 +305,38 @@ foreign import buildNoteBody :: String -> String
 foreign import buildTagBody :: String -> String
 foreign import buildChildBody :: Int -> String -> String -> String
 foreign import buildRenameBody :: String -> Boolean -> String
+
+-- =============================================================================
+-- Subscriptions (Finance section)
+-- =============================================================================
+
+-- | Raw subscription response parsed via FFI. The App component
+-- | destructures this into state.subscriptions + state.subscriptionMonthlyBurn.
+foreign import parseSubscriptionResponse_ :: String -> SubscriptionResponse
+
+type SubscriptionResponse =
+  { subscriptions :: Array SubscriptionRecord
+  , count :: Int
+  , monthlyBurn :: Number
+  }
+
+type SubscriptionRecord =
+  { id :: Int
+  , name :: String
+  , category :: String
+  , amount :: Number
+  , currency :: String
+  , frequency :: String
+  , nextDue :: String
+  , autoRenew :: Boolean
+  , notes :: String
+  , projectId :: Int
+  , active :: Boolean
+  }
+
+fetchSubscriptions :: Aff (Maybe SubscriptionResponse)
+fetchSubscriptions = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/subscriptions")
+  case result of
+    Left _ -> pure Nothing
+    Right response -> pure (Just (parseSubscriptionResponse_ response.body))
