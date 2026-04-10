@@ -319,6 +319,30 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_category ON subscriptions(category)
 CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(active);
 
 -- =============================================================================
+-- EXERCISE LOG (Sports section)
+-- =============================================================================
+
+-- One row per workout session. The Sports section viz groups these by
+-- month × activity and counts sessions, same dot-block pattern as Finance.
+-- Later: import from Hevy CSV (weights) and Apple Health XML (cardio/other).
+CREATE SEQUENCE IF NOT EXISTS seq_exercise START 1;
+
+CREATE TABLE IF NOT EXISTS exercise_log (
+    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_exercise'),
+    activity    TEXT NOT NULL,           -- swimming, weights, walking, yoga, cycling, running
+    date        DATE NOT NULL,
+    duration    INTEGER,                 -- minutes
+    distance    DECIMAL(10,2),           -- km, nullable
+    calories    INTEGER,                 -- nullable
+    notes       TEXT,
+    source      TEXT DEFAULT 'manual',   -- manual, hevy, apple_health
+    created_at  TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_exercise_date ON exercise_log(date);
+CREATE INDEX IF NOT EXISTS idx_exercise_activity ON exercise_log(activity);
+
+-- =============================================================================
 -- METADATA
 -- =============================================================================
 

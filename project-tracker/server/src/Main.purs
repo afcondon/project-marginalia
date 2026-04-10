@@ -4,6 +4,7 @@ import Prelude
 
 import API.Agent as Agent
 import API.Dependencies as Dependencies
+import API.Exercise as Exercise
 import API.Projects as Projects
 import API.Servers as Servers
 import API.Stats as Stats
@@ -56,6 +57,9 @@ data Route
   | Subscriptions
   | SubscriptionById Int
   | SubscriptionsUpcoming
+  -- Sports section
+  | ExerciseLog
+  | ExerciseSummary
 
 derive instance Generic Route _
 
@@ -80,6 +84,8 @@ route = root $ sum
   , "Subscriptions": path "api/subscriptions" noArgs
   , "SubscriptionById": path "api/subscriptions" (int segment)
   , "SubscriptionsUpcoming": path "api/subscriptions/upcoming" noArgs
+  , "ExerciseLog": path "api/exercise" noArgs
+  , "ExerciseSummary": path "api/exercise/summary" noArgs
   , "Dependencies": path "api/dependencies" noArgs
   , "DependencyById": path "api/dependencies" (int segment `product` int segment)
   }
@@ -311,5 +317,21 @@ main = launchAff_ do
         Get -> do
           let days = fromMaybe "7" (Object.lookup "days" query)
           Subscriptions.upcomingSubscriptions db days
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Sports section — exercise log
+      ExerciseLog -> case method of
+        Get -> do
+          let mActivity = Object.lookup "activity" query
+          Exercise.listExercise db mActivity
+        Post -> do
+          bodyStr <- toString body
+          Exercise.createExercise db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ExerciseSummary -> case method of
+        Get -> Exercise.monthlySummary db
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
