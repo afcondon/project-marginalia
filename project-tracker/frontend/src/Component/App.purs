@@ -7,9 +7,10 @@ module Component.App where
 import Prelude
 
 import API as API
+import API (SubscriptionRecord) as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
-import Data.Int (fromString) as Int
+import Data.Int (floor, fromString) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.String as String
 import Data.Tuple (Tuple(..))
@@ -172,11 +173,20 @@ fieldLabel = case _ of
   FSourcePath -> "source path"
   FBlogContent -> "blog post"
 
+-- | Which newspaper section is active. Nothing = the default project Register.
+-- | Named sections pull from different data sources — Finance from the
+-- | subscriptions table, etc. The Register layout and card renderer change
+-- | based on the active section.
+type Section = String  -- "finance" for now; more later
+
 type State =
   { projects :: Array Project
   , selectedProject :: Maybe ProjectDetail
   , stats :: Maybe Stats
   , view :: View
+  , section :: Maybe Section  -- Nothing = projects, Just "finance" = subscriptions
+  , subscriptions :: Array API.SubscriptionRecord
+  , subscriptionMonthlyBurn :: Number
   , filterDomain :: Maybe String
   , filterStatus :: Maybe String
   , filterTag :: Maybe String
@@ -227,6 +237,8 @@ data Action
   | LoadAllProjects
   | LoadPorts
   | LoadStats
+  | SetSection (Maybe Section)  -- switch newspaper section
+  | LoadSubscriptions
   | SetFilterDomain String
   | SetFilterStatus String
   | SetFilterTag String
@@ -304,6 +316,9 @@ initialState =
   , selectedProject: Nothing
   , stats: Nothing
   , view: ListView
+  , section: Nothing
+  , subscriptions: []
+  , subscriptionMonthlyBurn: 0.0
   , filterDomain: Nothing
   , filterStatus: Nothing
   , filterTag: Nothing
@@ -363,7 +378,9 @@ render state =
               Just detail -> case parseViewKind detail.preferredView of
                 DossierView  -> renderDossier state detail
                 MagazineView -> renderMagazine state detail
-            ListView -> renderProjectList state
+            ListView -> case state.section of
+              Just "finance" -> renderFinanceSection state
+              _              -> renderProjectList state
         ]
     -- Keyboard shortcut hint (shown when no card is focused on the list)
     , if state.view == ListView && state.focusIndex < 0
@@ -506,7 +523,28 @@ renderStatusFilterLight state status =
 renderDomainFilterBar :: forall m. State -> H.ComponentHTML Action () m
 renderDomainFilterBar state =
   HH.div [ HP.class_ (H.ClassName "header-domains") ]
-    (renderDomainPills state <> renderDepthPills state)
+    (renderSectionPills state <> renderDomainPills state <> renderDepthPills state)
+
+-- | Section pills — newspaper sections beyond the project domains.
+-- | Currently just FINANCE; more to come (Weather, Culture, Sports...).
+renderSectionPills :: forall m. State -> Array (H.ComponentHTML Action () m)
+renderSectionPills state =
+  [ renderSectionPill state "finance" "FINANCE" (Array.length state.subscriptions) ]
+
+renderSectionPill :: forall m. State -> String -> String -> Int -> H.ComponentHTML Action () m
+renderSectionPill state sectionId label count =
+  let isActive = state.section == Just sectionId
+      activeClass = if isActive then " filter-pill-active section-pill-active" else ""
+  in HH.button
+    [ HP.class_ (H.ClassName ("filter-pill section-pill section-" <> sectionId <> activeClass))
+    , HE.onClick \_ -> SetSection (if isActive then Nothing else Just sectionId)
+    ]
+    [ HH.text label
+    , if count > 0
+        then HH.span [ HP.class_ (H.ClassName "pill-count") ]
+          [ HH.text (" (" <> show count <> ")") ]
+        else HH.text ""
+    ]
 
 -- | Always-visible P0/P1/P2 radio buttons.
 -- | P0 = leaves (no children), P1 = parents (have children but no grandchildren),
@@ -611,6 +649,64 @@ renderProjectList state =
           else HH.div [ HP.class_ (H.ClassName "project-cards") ]
                 (Array.mapWithIndex (\i p -> renderProjectCard state i p) state.projects)
     ]
+
+-- =============================================================================
+-- Finance Section — subscription cards
+-- =============================================================================
+
+renderFinanceSection :: forall m. State -> H.ComponentHTML Action () m
+renderFinanceSection state =
+  HH.div [ HP.class_ (H.ClassName "finance-section") ]
+    [ HH.div [ HP.class_ (H.ClassName "finance-header") ]
+        [ HH.span [ HP.class_ (H.ClassName "finance-burn") ]
+            [ HH.text ("~" <> show (Int.floor state.subscriptionMonthlyBurn) <> "/mo") ]
+        , HH.span [ HP.class_ (H.ClassName "finance-count") ]
+            [ HH.text (show (Array.length state.subscriptions) <> " active") ]
+        ]
+    , if Array.null state.subscriptions
+        then HH.div [ HP.class_ (H.ClassName "empty-state") ]
+          [ HH.text "No subscriptions tracked yet." ]
+        else HH.div [ HP.class_ (H.ClassName "project-cards") ]
+          (Array.mapWithIndex (\i s -> renderSubscriptionCard i s) state.subscriptions)
+    ]
+
+renderSubscriptionCard :: forall m. Int -> API.SubscriptionRecord -> H.ComponentHTML Action () m
+renderSubscriptionCard _idx sub =
+  let catClass = " sub-cat-" <> sub.category
+      urgencyClass = ""  -- TODO: highlight if next_due is within 7 days
+      tierCls = if sub.amount >= 30.0 then " tier-regular" else " tier-small"
+  in HH.div
+    [ HP.class_ (H.ClassName ("project-card subscription-card" <> catClass <> tierCls <> urgencyClass)) ]
+    [ HH.div [ HP.class_ (H.ClassName "card-header") ]
+        [ HH.h3 [ HP.class_ (H.ClassName "card-title") ]
+            [ HH.text sub.name ]
+        , HH.div [ HP.class_ (H.ClassName "sub-amount") ]
+            [ HH.text (show sub.amount <> " " <> sub.currency)
+            , HH.span [ HP.class_ (H.ClassName "sub-frequency") ]
+                [ HH.text ("/" <> freqAbbrev sub.frequency) ]
+            ]
+        ]
+    , HH.div [ HP.class_ (H.ClassName "card-meta") ]
+        [ HH.span [ HP.class_ (H.ClassName "sub-category") ]
+            [ HH.text sub.category ]
+        , if String.null sub.nextDue
+            then HH.text ""
+            else HH.span [ HP.class_ (H.ClassName "sub-next-due") ]
+              [ HH.text ("due " <> String.take 10 sub.nextDue) ]
+        ]
+    , if String.null sub.notes
+        then HH.text ""
+        else HH.p [ HP.class_ (H.ClassName "card-description") ]
+          [ HH.text sub.notes ]
+    ]
+
+freqAbbrev :: String -> String
+freqAbbrev = case _ of
+  "monthly"   -> "mo"
+  "annual"    -> "yr"
+  "quarterly" -> "qtr"
+  "weekly"    -> "wk"
+  _           -> "?"
 
 -- =============================================================================
 -- Project Card (Task 2: status dot + popover; Task 3: quick edit button)
@@ -1681,9 +1777,26 @@ handleAction = case _ of
     mStats <- liftAff API.fetchStats
     H.modify_ \s -> s { stats = mStats }
 
+  SetSection mSec -> do
+    H.modify_ \s -> s { section = mSec }
+    case mSec of
+      Just "finance" -> handleAction LoadSubscriptions
+      _ -> pure unit
+
+  LoadSubscriptions -> do
+    mResp <- liftAff API.fetchSubscriptions
+    case mResp of
+      Nothing -> pure unit
+      Just resp ->
+        H.modify_ \s -> s
+          { subscriptions = resp.subscriptions
+          , subscriptionMonthlyBurn = resp.monthlyBurn
+          }
+
   SetFilterDomain val -> do
     let mDomain = if String.null val then Nothing else Just val
-    H.modify_ \s -> s { filterDomain = mDomain }
+    -- Switching to a domain clears the Finance section
+    H.modify_ \s -> s { filterDomain = mDomain, section = Nothing }
     handleAction LoadProjects
 
   SetFilterStatus val -> do

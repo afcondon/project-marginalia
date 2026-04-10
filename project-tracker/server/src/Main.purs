@@ -7,6 +7,7 @@ import API.Dependencies as Dependencies
 import API.Projects as Projects
 import API.Servers as Servers
 import API.Stats as Stats
+import API.Subscriptions as Subscriptions
 import Control.Monad.Error.Class (try)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -51,6 +52,10 @@ data Route
   | AgentSearch
   | Dependencies
   | DependencyById Int Int
+  -- Finance section
+  | Subscriptions
+  | SubscriptionById Int
+  | SubscriptionsUpcoming
 
 derive instance Generic Route _
 
@@ -72,6 +77,9 @@ route = root $ sum
   , "AgentProjectAttachment": path "api/agent/projects" (suffix (int segment) "attachments")
   , "AgentProjectAttachmentUpload": path "api/agent/projects" (suffix (suffix (int segment) "attachments") "upload")
   , "AgentSearch": path "api/agent/search" noArgs
+  , "Subscriptions": path "api/subscriptions" noArgs
+  , "SubscriptionById": path "api/subscriptions" (int segment)
+  , "SubscriptionsUpcoming": path "api/subscriptions/upcoming" noArgs
   , "Dependencies": path "api/dependencies" noArgs
   , "DependencyById": path "api/dependencies" (int segment `product` int segment)
   }
@@ -276,5 +284,32 @@ main = launchAff_ do
 
       DependencyById blockerId blockedId -> case method of
         Delete -> Dependencies.deleteDependency db blockerId blockedId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Finance section — subscriptions
+      Subscriptions -> case method of
+        Get -> do
+          let mCategory = Object.lookup "category" query
+          Subscriptions.listSubscriptions db mCategory
+        Post -> do
+          bodyStr <- toString body
+          Subscriptions.createSubscription db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SubscriptionById subId -> case method of
+        Get -> Subscriptions.getSubscription db subId
+        Put -> do
+          bodyStr <- toString body
+          Subscriptions.updateSubscription db subId bodyStr
+        Delete -> Subscriptions.deleteSubscription db subId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SubscriptionsUpcoming -> case method of
+        Get -> do
+          let days = fromMaybe "7" (Object.lookup "days" query)
+          Subscriptions.upcomingSubscriptions db days
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""

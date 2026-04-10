@@ -3442,3 +3442,83 @@ a.attachment-marg-filename:hover {
 .card-blog-pill.blog-pill-published {
   background: #3c6b3c;
 }
+
+/* =============================================================================
+   FINANCE SECTION — subscription cards in the newspaper grid
+   ============================================================================= */
+
+/* Section pill styling — FINANCE gets a distinct accent */
+.section-pill.section-finance {
+  border-left: 2px solid #2a6e4e;
+  font-weight: 600;
+}
+
+.section-pill.section-finance.section-pill-active {
+  background: #2a6e4e;
+  color: var(--paper);
+  border-color: #2a6e4e;
+}
+
+/* Finance section header — monthly burn + count */
+.finance-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: var(--space-4);
+}
+
+.finance-burn {
+  font-family: var(--serif-display);
+  font-size: 2rem;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.finance-count {
+  font-family: var(--sans-label);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+}
+
+/* Subscription cards — reuse the .project-card grid placement but with
+   their own internal layout emphasizing amount + due date. */
+.subscription-card {
+  border-left: 3px solid #2a6e4e !important;
+}
+
+.subscription-card .sub-amount {
+  font-family: var(--serif-display);
+  font-size: 1.3rem;
+  font-weight: 400;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.subscription-card .sub-frequency {
+  font-family: var(--sans-label);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+.subscription-card .sub-category {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+}
+
+.subscription-card .sub-next-due {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  color: var(--ink-light);
+}

@@ -49,6 +49,33 @@ export const buildNoteBody = (content) =>
 export const buildTagBody = (tag) =>
   JSON.stringify({ tag });
 
+// Parse the subscription list response. Returns a plain JS object that
+// PureScript can destructure via its SubscriptionResponse row type.
+export const parseSubscriptionResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      subscriptions: (d.subscriptions || []).map(s => ({
+        id: s.id || 0,
+        name: s.name || '',
+        category: s.category || '',
+        amount: s.amount || 0,
+        currency: s.currency || 'EUR',
+        frequency: s.frequency || 'monthly',
+        nextDue: s.nextDue || '',
+        autoRenew: s.autoRenew !== false,
+        notes: s.notes || '',
+        projectId: s.projectId || 0,
+        active: s.active !== false,
+      })),
+      count: d.count || 0,
+      monthlyBurn: d.monthlyBurn || 0,
+    };
+  } catch {
+    return { subscriptions: [], count: 0, monthlyBurn: 0 };
+  }
+};
+
 // Build JSON body for creating a child project under a parent
 export const buildChildBody = (parentId) => (name) => (domain) =>
   JSON.stringify({ parentId, name, domain, status: "idea" });
