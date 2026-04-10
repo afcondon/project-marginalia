@@ -8,7 +8,9 @@
     "build:server": "spago build -p project-tracker-server",
     "build:frontend": "spago build -p project-tracker-frontend",
     "bundle:frontend": "spago bundle -p project-tracker-frontend",
-    "bootstrap": "spago build && spago bundle -p project-tracker-frontend",
+    "bootstrap": "spago build && spago bundle -p project-tracker-frontend && spago bundle -p marginalia-capture",
+    "build:capture": "spago build -p marginalia-capture",
+    "bundle:capture": "spago bundle -p marginalia-capture",
     "serve:api": "node server/run.js",
     "serve:frontend": "npx http-server frontend/public -p 3100"
   },

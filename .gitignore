@@ -12,3 +12,4 @@ project-tracker/frontend/public/attachments
 package-lock.json
 spago.lock
 *.pdf
+capture/public/bundle.js

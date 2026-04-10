@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '..');
 const STATIC_ROOT = path.join(PROJECT_ROOT, 'frontend', 'public');
+const CAPTURE_ROOT = path.join(PROJECT_ROOT, 'capture', 'public');
 const PORT = parseInt(process.env.MARGINALIA_FRONTEND_PORT || '3101', 10);
 
 const API_TARGET = { host: '127.0.0.1', port: 3100 };
@@ -169,18 +170,46 @@ const server = http.createServer((req, res) => {
     proxy(req, res, WHISPER_TARGET);
     return;
   }
+  // Capture PWA — served under /capture/ from a separate static root.
+  // The PWA's manifest.json sets start_url to /capture/ so iOS
+  // Add-to-Home-Screen launches directly into the capture app.
+  if (url === '/capture' || url === '/capture/') {
+    streamFile(path.join(CAPTURE_ROOT, 'index.html'), res);
+    return;
+  }
+  if (url.startsWith('/capture/')) {
+    const captureFile = resolveStaticPath(url.replace('/capture/', '/'));
+    if (captureFile) {
+      const resolved = path.join(CAPTURE_ROOT, url.slice('/capture/'.length).split('?')[0]);
+      const normalized = path.normalize(resolved);
+      if (normalized.startsWith(CAPTURE_ROOT)) {
+        fs.stat(normalized, (err, stat) => {
+          if (err || !stat.isFile()) {
+            // SPA fallback — serve index.html for unmatched routes
+            streamFile(path.join(CAPTURE_ROOT, 'index.html'), res);
+          } else {
+            streamFile(normalized, res);
+          }
+        });
+        return;
+      }
+    }
+    streamFile(path.join(CAPTURE_ROOT, 'index.html'), res);
+    return;
+  }
   // Serve index.html at the root
   if (url === '/' || url === '') {
     streamFile(path.join(STATIC_ROOT, 'index.html'), res);
     return;
   }
-  // Everything else: static files
+  // Everything else: static files from the desktop frontend
   serveStatic(req, res);
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`marginalia frontend-server listening on http://0.0.0.0:${PORT}`);
   console.log(`  static:  ${STATIC_ROOT}`);
+  console.log(`  capture: ${CAPTURE_ROOT} -> /capture/`);
   console.log(`  /api/*   -> http://${API_TARGET.host}:${API_TARGET.port}`);
   console.log(`  /transcribe -> http://${WHISPER_TARGET.host}:${WHISPER_TARGET.port}`);
 });
