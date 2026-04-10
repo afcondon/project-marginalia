@@ -10,10 +10,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STATE="$HOME/Library/Logs/marginalia/whisper.failures"
 backoff_before_start "$STATE"
 
-export PATH="/Library/Frameworks/Python.framework/Versions/3.13/bin:$PATH"
+export PATH="/opt/homebrew/bin:$PATH"
 
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Activate the whisper venv (created via: python3 -m venv tools/whisper-venv)
+# shellcheck disable=SC1091
+. "$PROJECT_ROOT/tools/whisper-venv/bin/activate"
+
 start=$(date +%s)
 python3 tools/whisper-server.py
 rc=$?

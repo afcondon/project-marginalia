@@ -14,6 +14,9 @@ database/*.duckdb.wal
 .psc-ide-port
 .vscode/
 
+# Python
+tools/whisper-venv/
+
 # OS
 .DS_Store
 

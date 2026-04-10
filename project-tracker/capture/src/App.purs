@@ -11,9 +11,11 @@ import Prelude
 import Capture.API as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
+import Data.Either (Either(..))
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.String as String
 import Effect (Effect)
+import Effect.Aff (try)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (liftEffect)
 import Halogen as H
@@ -86,6 +88,7 @@ data Action
   | StopDictate
   | SaveDictation
   | RetryDictation
+  | SetTranscript String
   | StartWrite
   | SetNoteText String
   | SaveNote
@@ -93,6 +96,7 @@ data Action
   | SetUrlText String
   | SetUrlComment String
   | SaveUrl
+  | TakePhoto
   | CancelCapture
 
 -- =============================================================================
@@ -173,6 +177,7 @@ renderHome state =
         [ captureButton "dictate" "Dictate" StartDictate (hasProject state)
         , captureButton "write" "Write" StartWrite (hasProject state)
         , captureButton "url" "URL" StartUrl (hasProject state)
+        , captureButton "photo" "Photo" TakePhoto (hasProject state)
         ]
     , if Array.null state.recentCaptures
         then HH.text ""
@@ -295,8 +300,12 @@ renderDictating _state =
 renderDictateReview :: forall m. State -> String -> H.ComponentHTML Action () m
 renderDictateReview state transcript =
   HH.div [ HP.class_ (H.ClassName "capture-flow capture-dictate-review") ]
-    [ HH.div [ HP.class_ (H.ClassName "dictate-transcript") ]
-        [ HH.text transcript ]
+    [ HH.textarea
+        [ HP.class_ (H.ClassName "dictate-transcript")
+        , HP.value transcript
+        , HP.rows 5
+        , HE.onValueInput SetTranscript
+        ]
     , HH.div [ HP.class_ (H.ClassName "capture-actions") ]
         [ HH.button
             [ HP.class_ (H.ClassName "capture-save")
@@ -418,12 +427,23 @@ handleAction = case _ of
       H.modify_ \s -> s { captureMode = Just Dictating, recording = true, error = Nothing }
 
   StopDictate -> do
-    text <- liftAff $ toAffE stopAndTranscribe_
-    H.modify_ \s -> s
-      { captureMode = Just (DictateReview text)
-      , recording = false
-      , transcript = text
-      }
+    result <- liftAff $ try $ toAffE stopAndTranscribe_
+    case result of
+      Right text ->
+        H.modify_ \s -> s
+          { captureMode = Just (DictateReview text)
+          , recording = false
+          , transcript = text
+          }
+      Left _ ->
+        H.modify_ \s -> s
+          { captureMode = Nothing
+          , recording = false
+          , error = Just "Transcription failed — is whisper running?"
+          }
+
+  SetTranscript v ->
+    H.modify_ \s -> s { transcript = v, captureMode = Just (DictateReview v) }
 
   SaveDictation -> do
     state <- H.get
@@ -499,6 +519,20 @@ handleAction = case _ of
                 , recentCaptures = Array.cons cap (Array.take 9 s.recentCaptures)
                 }
             else H.modify_ \s -> s { saving = false, error = Just "Failed to save URL" }
+
+  TakePhoto -> do
+    state <- H.get
+    case state.currentProject of
+      Nothing -> pure unit
+      Just p -> do
+        H.modify_ \s -> s { error = Nothing }
+        filename <- liftAff $ toAffE $ API.pickAndUploadPhoto p.id
+        if String.null filename
+          then pure unit -- user cancelled
+          else do
+            let cap = { projectName: p.name, content: filename, captureType: "photo", timestamp: "just now" }
+            H.modify_ \s -> s
+              { recentCaptures = Array.cons cap (Array.take 9 s.recentCaptures) }
 
   CancelCapture ->
     H.modify_ \s -> s { captureMode = Nothing, recording = false, noteText = "", urlText = "", urlComment = "", transcript = "" }

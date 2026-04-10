@@ -7,6 +7,7 @@
 module Capture.API
   ( fetchProjects
   , addNote
+  , pickAndUploadPhoto
   , ProjectSummary
   ) where
 
@@ -22,6 +23,8 @@ import Data.Either (Either(..))
 import Data.Int (floor)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Traversable (traverse)
+import Control.Promise (Promise)
+import Effect (Effect)
 import Effect.Aff (Aff)
 import Foreign.Object as FO
 
@@ -89,3 +92,14 @@ quote :: String -> String
 quote s = "\"" <> escapeJson s <> "\""
 
 foreign import escapeJson :: String -> String
+
+-- =============================================================================
+-- Upload a photo (camera capture or file picker)
+-- =============================================================================
+
+foreign import pickAndUploadPhotoImpl :: Int -> Effect (Promise String)
+
+-- | Opens camera/file picker, uploads the selected photo, returns the
+-- | filename on success or "" on cancel/failure.
+pickAndUploadPhoto :: Int -> Effect (Promise String)
+pickAndUploadPhoto = pickAndUploadPhotoImpl

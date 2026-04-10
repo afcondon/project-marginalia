@@ -19,8 +19,10 @@ import Effect.Exception (message)
 import Effect.Ref as Ref
 import Foreign.Object as Object
 import Data.Maybe (fromMaybe)
-import HTTPurple (Method(..), serve, ok, ok', toString)
+import HTTPurple (Method(..), serve, ok, ok', toBuffer, toString)
 import HTTPurple.Headers (headers)
+import HTTPurple.Lookup ((!!))
+
 import Node.Encoding (Encoding(..))
 import Node.FS.Sync (readTextFile)
 import Routing.Duplex (RouteDuplex', root, path, int, segment, suffix)
@@ -45,6 +47,7 @@ data Route
   | AgentProjectStatus Int
   | AgentProjectNote Int
   | AgentProjectAttachment Int
+  | AgentProjectAttachmentUpload Int
   | AgentSearch
   | Dependencies
   | DependencyById Int Int
@@ -67,6 +70,7 @@ route = root $ sum
   , "AgentProjectStatus": path "api/agent/projects" (suffix (int segment) "status")
   , "AgentProjectNote": path "api/agent/projects" (suffix (int segment) "notes")
   , "AgentProjectAttachment": path "api/agent/projects" (suffix (int segment) "attachments")
+  , "AgentProjectAttachmentUpload": path "api/agent/projects" (suffix (suffix (int segment) "attachments") "upload")
   , "AgentSearch": path "api/agent/search" noArgs
   , "Dependencies": path "api/dependencies" noArgs
   , "DependencyById": path "api/dependencies" (int segment `product` int segment)
@@ -129,6 +133,7 @@ main = launchAff_ do
     log "  POST   /api/agent/projects/:id/status      - Update status (validated)"
     log "  POST   /api/agent/projects/:id/notes       - Add a note"
     log "  POST   /api/agent/projects/:id/attachments - Register an attachment reference"
+    log "  POST   /api/agent/projects/:id/attachments/upload - Upload a file"
     log "  GET    /api/agent/search?q=...             - Text search"
     log ""
     log "Dependency endpoints:"
@@ -141,7 +146,7 @@ main = launchAff_ do
     , "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS"
     , "Access-Control-Allow-Headers": "Content-Type"
     }
-  mkRouter dbRef { route: r, query, method, body } = do
+  mkRouter dbRef { route: r, query, method, body, headers: reqHeaders } = do
     db <- liftEffect $ Ref.read dbRef
     case r of
       Projects -> case method of
@@ -240,6 +245,15 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Agent.agentAddAttachment db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      AgentProjectAttachmentUpload projectId -> case method of
+        Post -> do
+          buf <- toBuffer body
+          let contentType = fromMaybe "application/octet-stream" (reqHeaders !! "content-type")
+          let description = fromMaybe "" (Object.lookup "description" query)
+          Agent.agentUploadAttachment db projectId buf contentType description
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

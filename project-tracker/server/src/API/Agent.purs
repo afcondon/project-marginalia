@@ -12,6 +12,7 @@ module API.Agent
   , agentUpdateStatus
   , agentAddNote
   , agentAddAttachment
+  , agentUploadAttachment
   , agentSearch
   ) where
 
@@ -25,11 +26,14 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Tuple (Tuple(..))
 import Database.DuckDB (Database, Rows, queryAllParams, run, firstRow)
+import Effect (Effect)
 import Effect.Aff (Aff)
+import Effect.Class (liftEffect)
 import Foreign (Foreign, unsafeToForeign)
 import Foreign.Object as FO
 import HTTPurple (Response, ok', badRequest', notFound)
 import HTTPurple.Headers (ResponseHeaders, headers)
+import Node.Buffer (Buffer)
 
 -- =============================================================================
 -- Shared headers
@@ -52,6 +56,7 @@ foreign import buildAgentNoteJson :: Foreign -> String
 foreign import buildAgentAttachmentJson :: Foreign -> String
 foreign import buildAgentSearchJson :: String -> Rows -> Rows -> String
 foreign import extractRowStatus :: Foreign -> String
+foreign import saveUploadedFileImpl :: Buffer -> String -> Effect { filename :: String, filePath :: String, mimeType :: String }
 
 -- =============================================================================
 -- Status lifecycle graph
@@ -376,6 +381,47 @@ agentAddAttachment db projectId bodyStr = case parseBody bodyStr of
             case firstRow attRows of
               Nothing  -> ok' jsonHeaders "{}"
               Just att -> ok' jsonHeaders (buildAgentAttachmentJson att)
+
+-- =============================================================================
+-- POST /api/agent/projects/:id/attachments/upload
+-- =============================================================================
+
+-- | Upload a file and attach it to a project.
+-- |
+-- | The request body is the raw file bytes, Content-Type header determines
+-- | the MIME type, and an optional ?description= query param adds a caption.
+-- | The file is written to $MARGINALIA_ATTACHMENT_STORE with a generated
+-- | timestamp-based filename.
+agentUploadAttachment :: Database -> Int -> Buffer -> String -> String -> Aff Response
+agentUploadAttachment db projectId buf contentType description = do
+  -- Verify project exists
+  let idParam = [ unsafeToForeign projectId ]
+  projectRows <- queryAllParams db
+    "SELECT id FROM projects WHERE id = ?"
+    idParam
+  case firstRow projectRows of
+    Nothing -> notFound
+    Just _  -> do
+      -- Write file to disk
+      result <- liftEffect $ saveUploadedFileImpl buf contentType
+
+      -- Insert attachment row
+      run db
+        "INSERT INTO attachments (project_id, filename, mime_type, file_path, description) VALUES (?, ?, ?, ?, ?)"
+        [ unsafeToForeign projectId
+        , unsafeToForeign result.filename
+        , unsafeToForeign result.mimeType
+        , unsafeToForeign result.filePath
+        , unsafeToForeign description
+        ]
+
+      -- Return the inserted row
+      attRows <- queryAllParams db
+        "SELECT * FROM attachments WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+        idParam
+      case firstRow attRows of
+        Nothing  -> ok' jsonHeaders "{}"
+        Just att -> ok' jsonHeaders (buildAgentAttachmentJson att)
 
 -- =============================================================================
 -- GET /api/agent/search

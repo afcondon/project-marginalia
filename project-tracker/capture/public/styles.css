@@ -183,6 +183,7 @@ html, body {
 .capture-btn-dictate { border-left: 3px solid var(--accent); }
 .capture-btn-write   { border-left: 3px solid var(--ink-muted); }
 .capture-btn-url     { border-left: 3px solid var(--color-programming); }
+.capture-btn-photo   { border-left: 3px solid var(--color-woodworking); }
 
 /* =============================================================================
    Recent Captures
