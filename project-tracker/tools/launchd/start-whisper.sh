@@ -15,9 +15,16 @@ export PATH="/opt/homebrew/bin:$PATH"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Activate the whisper venv (created via: python3 -m venv tools/whisper-venv)
-# shellcheck disable=SC1091
-. "$PROJECT_ROOT/tools/whisper-venv/bin/activate"
+# Activate the whisper venv if it exists (MacMini uses a venv; MBP has
+# whisper installed globally under Python 3.13 framework). Skip silently
+# if no venv is present.
+if [ -f "$PROJECT_ROOT/tools/whisper-venv/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  . "$PROJECT_ROOT/tools/whisper-venv/bin/activate"
+fi
+
+# Also try the Python 3.13 framework path (MBP install)
+export PATH="/Library/Frameworks/Python.framework/Versions/3.13/bin:$PATH"
 
 start=$(date +%s)
 python3 tools/whisper-server.py
