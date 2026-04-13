@@ -22,6 +22,9 @@ module API
   , fetchBlogDrafts
   , BlogDraftsResponse
   , BlogDraftRecord
+  , uploadBlogAsset
+  , fetchBlogAssets
+  , BlogAssetRecord
   ) where
 
 import Prelude
@@ -391,3 +394,45 @@ fetchBlogDrafts = do
   case result of
     Left _ -> pure Nothing
     Right response -> pure (Just (parseBlogDraftsResponse_ response.body))
+
+-- =============================================================================
+-- Blog Assets
+-- =============================================================================
+
+foreign import parseBlogAssetsResponse_ :: String -> Array BlogAssetRecord
+foreign import buildAssetUploadBody :: String -> String -> String
+
+type BlogAssetRecord =
+  { filename :: String
+  , size :: Int
+  , url :: String
+  , markdown :: String
+  }
+
+-- | Upload a base64-encoded image as a blog asset.
+-- | Returns Left error or Right { filename, markdown }.
+uploadBlogAsset :: Int -> String -> String -> Aff (Either String { filename :: String, markdown :: String })
+uploadBlogAsset projectId filename base64Data = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/assets"
+  let body = buildAssetUploadBody filename base64Data
+  result <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  case result of
+    Left err -> pure (Left (AX.printError err))
+    Right response -> case jsonParser response.body of
+      Left _ -> pure (Left "failed to parse response")
+      Right json -> case J.toObject json of
+        Nothing -> pure (Left "response was not an object")
+        Just obj -> case FO.lookup "error" obj of
+          Just errJson -> pure (Left (fromMaybe "unknown error" (J.toString errJson)))
+          Nothing -> do
+            let fn = fromMaybe "" (J.toString =<< FO.lookup "filename" obj)
+            let md = fromMaybe "" (J.toString =<< FO.lookup "markdown" obj)
+            pure (Right { filename: fn, markdown: md })
+
+fetchBlogAssets :: Int -> Aff (Array BlogAssetRecord)
+fetchBlogAssets projectId = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/assets"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left _ -> pure []
+    Right response -> pure (parseBlogAssetsResponse_ response.body)

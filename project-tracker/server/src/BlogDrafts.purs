@@ -9,12 +9,16 @@
 module BlogDrafts
   ( EnsureOutcome(..)
   , OpenOutcome(..)
+  , SaveAssetOutcome(..)
+  , AssetInfo
   , MigrationSummary
   , readDraft
   , ensureDraft
   , openInVSCode
   , overrideBlogContent
   , migrateLegacyDrafts
+  , saveBlogAsset
+  , listBlogAssets
   ) where
 
 import Prelude
@@ -38,6 +42,8 @@ foreign import writeDraftIfMissing_ :: String -> String -> Effect Foreign
 foreign import openInVSCode_ :: String -> Effect Foreign
 foreign import overrideBlogContent_ :: Foreign -> Nullable String -> Foreign
 foreign import getRowString_ :: String -> Foreign -> String
+foreign import saveBlogAsset_ :: String -> String -> String -> Effect Foreign
+foreign import listBlogAssets_ :: String -> Effect (Array Foreign)
 
 -- =============================================================================
 -- Outcome ADTs
@@ -94,6 +100,31 @@ openInVSCode absPath = do
 -- | file-sourced blog content instead of the DB column.
 overrideBlogContent :: Foreign -> Maybe String -> Foreign
 overrideBlogContent row mContent = overrideBlogContent_ row (toNullable mContent)
+
+-- =============================================================================
+-- Blog assets — images for embedding in drafts
+-- =============================================================================
+
+data SaveAssetOutcome
+  = AssetSaved { filename :: String }
+  | AssetError String
+
+type AssetInfo = { filename :: String, size :: Int }
+
+-- | Save a base64-encoded image to `<slug>/<filename>`.
+saveBlogAsset :: String -> String -> String -> Effect SaveAssetOutcome
+saveBlogAsset slug filename base64Data = do
+  raw <- saveBlogAsset_ slug filename base64Data
+  let r = unsafeFromForeign raw :: { kind :: String, filename :: String, absPath :: String, error :: String }
+  pure case r.kind of
+    "ok" -> AssetSaved { filename: r.filename }
+    _    -> AssetError r.error
+
+-- | List asset files in `<slug>/`.
+listBlogAssets :: String -> Effect (Array AssetInfo)
+listBlogAssets slug = do
+  raws <- listBlogAssets_ slug
+  pure (map (\raw -> unsafeFromForeign raw :: AssetInfo) raws)
 
 -- =============================================================================
 -- Startup migration

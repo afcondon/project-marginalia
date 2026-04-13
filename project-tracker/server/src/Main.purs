@@ -61,6 +61,7 @@ data Route
   | SubscriptionsUpcoming
   -- Letters section (blog drafts)
   | BlogDrafts
+  | BlogAssets Int
   -- Sports section
   | ExerciseLog
   | ExerciseSummary
@@ -87,6 +88,7 @@ route = root $ sum
   , "AgentProjectAttachmentUpload": path "api/agent/projects" (suffix (suffix (int segment) "attachments") "upload")
   , "AgentSearch": path "api/agent/search" noArgs
   , "BlogDrafts": path "api/blog/drafts" noArgs
+  , "BlogAssets": path "api/projects" (suffix (suffix (int segment) "blog") "assets")
   , "Subscriptions": path "api/subscriptions" noArgs
   , "SubscriptionById": path "api/subscriptions" (int segment)
   , "SubscriptionsUpcoming": path "api/subscriptions/upcoming" noArgs
@@ -318,6 +320,14 @@ main = launchAff_ do
       -- Letters section — blog drafts
       BlogDrafts -> case method of
         Get -> Projects.listBlogDrafts db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      BlogAssets projectId -> case method of
+        Get -> Projects.listBlogAssets db projectId
+        Post -> do
+          bodyStr <- toString body
+          Projects.saveBlogAsset db projectId bodyStr
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

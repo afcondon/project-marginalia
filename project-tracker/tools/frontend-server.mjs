@@ -20,6 +20,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,9 @@ const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '..');
 const STATIC_ROOT = path.join(PROJECT_ROOT, 'frontend', 'public');
 const CAPTURE_ROOT = path.join(PROJECT_ROOT, 'capture', 'public');
 const FINANCE_ROOT = path.join(PROJECT_ROOT, 'finance', 'public');
+const _defaultBlogDrafts = path.join(os.homedir(), 'Documents', 'marginalia-blog-drafts');
+const _rawBlogDrafts = process.env.MARGINALIA_BLOG_DRAFTS || _defaultBlogDrafts;
+const BLOG_DRAFTS_ROOT = _rawBlogDrafts.endsWith('/') ? _rawBlogDrafts.slice(0, -1) : _rawBlogDrafts;
 const PORT = parseInt(process.env.MARGINALIA_FRONTEND_PORT || '3101', 10);
 
 const API_TARGET = { host: '127.0.0.1', port: 3100 };
@@ -217,6 +221,26 @@ const server = http.createServer((req, res) => {
       return;
     }
     streamFile(path.join(FINANCE_ROOT, 'index.html'), res);
+    return;
+  }
+  // Blog assets — serve images from $MARGINALIA_BLOG_DRAFTS/<slug>/
+  // Path: /blog-assets/<slug>/<filename>
+  if (url.startsWith('/blog-assets/')) {
+    const subPath = url.slice('/blog-assets/'.length).split('?')[0];
+    const resolved = path.normalize(path.join(BLOG_DRAFTS_ROOT, subPath));
+    if (resolved.startsWith(BLOG_DRAFTS_ROOT)) {
+      fs.stat(resolved, (err, stat) => {
+        if (err || !stat.isFile()) {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end('not found\n');
+        } else {
+          streamFile(resolved, res);
+        }
+      });
+      return;
+    }
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('bad request\n');
     return;
   }
   // Serve index.html at the root

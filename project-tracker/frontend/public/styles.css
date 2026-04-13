@@ -3811,3 +3811,81 @@ a.attachment-marg-filename:hover {
 .letters-group-wanted_priority .letters-row {
   border-left: 2px solid #c45a1a;
 }
+
+/* Expanded row */
+.letters-row-expanded {
+  background: var(--hover-bg);
+}
+
+.letters-row {
+  cursor: pointer;
+}
+
+.letters-expand-row td {
+  padding: 0;
+  border-bottom: 2px solid var(--ink-faint);
+}
+
+.letters-expand-panel {
+  padding: var(--space-3) var(--space-4);
+  background: var(--hover-bg);
+}
+
+.letters-paste-zone {
+  border: 2px dashed var(--rule);
+  border-radius: 4px;
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  font-family: var(--sans-label);
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  margin-bottom: var(--space-3);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.letters-paste-zone:hover {
+  border-color: var(--ink-light);
+}
+
+/* Asset thumbnail grid */
+.letters-asset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.letters-asset-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper);
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  max-width: 120px;
+}
+
+.letters-asset-thumb:hover {
+  border-color: var(--ink-light);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.letters-asset-thumb img {
+  max-width: 100px;
+  max-height: 80px;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.letters-asset-name {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100px;
+}

@@ -98,6 +98,25 @@ export const parseBlogDraftsResponse_ = (str) => {
   }
 };
 
+// Parse the blog assets response.
+export const parseBlogAssetsResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return (d.assets || []).map(a => ({
+      filename: a.filename || '',
+      size: a.size || 0,
+      url: a.url || '',
+      markdown: a.markdown || '',
+    }));
+  } catch {
+    return [];
+  }
+};
+
+// Build JSON body for uploading a blog asset (base64-encoded image).
+export const buildAssetUploadBody = (filename) => (data) =>
+  JSON.stringify({ filename, data });
+
 // Build JSON body for creating a child project under a parent
 export const buildChildBody = (parentId) => (name) => (domain) =>
   JSON.stringify({ parentId, name, domain, status: "idea" });

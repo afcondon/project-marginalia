@@ -141,3 +141,50 @@ export const stopAndTranscribe_ = () => {
 export const isRecording_ = () => {
   return _mediaRecorder !== null && _mediaRecorder.state === "recording";
 };
+
+// ============================================================================
+// Clipboard image paste — reads image data from a ClipboardEvent
+// ============================================================================
+
+// Read clipboard image data as base64. Called from a paste event handler.
+// Returns a Promise that resolves to { filename, base64 } or null if no image.
+export const readClipboardImage_ = (event) => {
+  return new Promise((resolve) => {
+    const items = event.clipboardData && event.clipboardData.items;
+    if (!items) { resolve(null); return; }
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const blob = item.getAsFile();
+        if (!blob) { resolve(null); return; }
+        const ext = item.type.split('/')[1] || 'png';
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const filename = 'screenshot-' + ts + '.' + ext;
+        const reader = new FileReader();
+        reader.onload = () => {
+          // Strip the data:image/...;base64, prefix
+          const base64 = reader.result.split(',')[1] || '';
+          resolve({ filename, base64 });
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+        return;
+      }
+    }
+    resolve(null);
+  });
+};
+
+// Global paste listener — fires callback with { filename, base64 } when
+// the user pastes an image anywhere on the page. Returns an unsubscribe effect.
+export const onPaste_ = (callback) => () => {
+  const handler = (e) => {
+    readClipboardImage_(e).then((result) => {
+      if (result) {
+        e.preventDefault();
+        callback(result)();
+      }
+    });
+  };
+  window.addEventListener('paste', handler);
+  return () => window.removeEventListener('paste', handler);
+};

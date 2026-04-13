@@ -12,6 +12,8 @@ module API.Projects
   , renameProject
   , openBlogDraft
   , listBlogDrafts
+  , saveBlogAsset
+  , listBlogAssets
   ) where
 
 import Prelude
@@ -412,6 +414,61 @@ listBlogDrafts db = do
 -- | Build the Letters Page JSON response. Reads each project's draft file
 -- | from disk (via BlogDrafts.readDraft) to include word counts and filenames.
 foreign import buildBlogDraftsJson_ :: Rows -> Effect String
+
+-- =============================================================================
+-- POST /api/projects/:id/blog/assets — upload an image for a blog draft
+-- GET  /api/projects/:id/blog/assets — list assets for a blog draft
+-- =============================================================================
+
+saveBlogAsset :: Database -> Int -> String -> Aff Response
+saveBlogAsset db projectId bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
+  Just obj -> do
+    rows <- queryAllParams db
+      "SELECT slug FROM projects WHERE id = ?"
+      [ unsafeToForeign projectId ]
+    case firstRow rows of
+      Nothing -> notFound
+      Just row -> do
+        let slug = getRowString_ "slug" row
+        case getFieldMaybe "filename" obj, getFieldMaybe "data" obj of
+          Just filename, Just base64Data -> do
+            outcome <- liftEffect $ BlogDrafts.saveBlogAsset slug filename base64Data
+            case outcome of
+              BlogDrafts.AssetSaved info ->
+                let markdown = "![" <> info.filename <> "](" <> slug <> "/" <> info.filename <> ")"
+                in ok' jsonHeaders
+                  ("{\"ok\": true, \"filename\": \"" <> info.filename <> "\", \"markdown\": \"" <> markdown <> "\"}")
+              BlogDrafts.AssetError err ->
+                badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+          _, _ -> badRequest' jsonHeaders """{"error": "Missing 'filename' and/or 'data' fields"}"""
+
+listBlogAssets :: Database -> Int -> Aff Response
+listBlogAssets db projectId = do
+  rows <- queryAllParams db
+    "SELECT slug FROM projects WHERE id = ?"
+    [ unsafeToForeign projectId ]
+  case firstRow rows of
+    Nothing -> notFound
+    Just row -> do
+      let slug = getRowString_ "slug" row
+      assets <- liftEffect $ BlogDrafts.listBlogAssets slug
+      ok' jsonHeaders (buildAssetsJson slug assets)
+
+buildAssetsJson :: String -> Array BlogDrafts.AssetInfo -> String
+buildAssetsJson slug assets =
+  let entries = map (\a ->
+        "{\"filename\": \"" <> a.filename
+        <> "\", \"size\": " <> show a.size
+        <> ", \"url\": \"/blog-assets/" <> slug <> "/" <> a.filename
+        <> "\", \"markdown\": \"![" <> a.filename <> "](" <> slug <> "/" <> a.filename <> ")\"}"
+      ) assets
+  in "{\"assets\": [" <> joinArray entries <> "], \"count\": " <> show (Array.length assets) <> "}"
+
+joinArray :: Array String -> String
+joinArray arr = case Array.uncons arr of
+  Nothing -> ""
+  Just { head: h, tail: t } -> Array.foldl (\acc s -> acc <> ", " <> s) h t
 
 addTag :: Database -> Int -> String -> Aff Response
 addTag db projectId bodyStr = case parseBody bodyStr of

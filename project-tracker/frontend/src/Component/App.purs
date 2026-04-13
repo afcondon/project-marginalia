@@ -7,7 +7,7 @@ module Component.App where
 import Prelude
 
 import API as API
-import API (SubscriptionRecord, BlogDraftRecord) as API
+import API (SubscriptionRecord, BlogDraftRecord, BlogAssetRecord) as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -47,6 +47,10 @@ foreign import altKey_ :: Event -> Effect Boolean
 foreign import startRecording_ :: Effect (Promise Boolean)
 foreign import stopAndTranscribe_ :: Effect (Promise String)
 foreign import isRecording_ :: Effect Boolean
+
+-- Clipboard image paste — fires callback when user pastes an image anywhere
+type ClipboardImageData = { filename :: String, base64 :: String }
+foreign import onPaste_ :: (ClipboardImageData -> Effect Unit) -> Effect (Effect Unit)
 
 type KeyEvent =
   { key :: String
@@ -188,6 +192,9 @@ type State =
   , subscriptions :: Array API.SubscriptionRecord
   , subscriptionMonthlyBurn :: Number
   , blogDrafts :: Array API.BlogDraftRecord
+  , lettersExpanded :: Maybe Int          -- project id of expanded row (or Nothing)
+  , lettersAssets :: Array API.BlogAssetRecord  -- assets for the expanded row
+  , lettersUploading :: Boolean           -- true while an upload is in flight
   , filterDomain :: Maybe String
   , filterStatus :: Maybe String
   , filterTag :: Maybe String
@@ -303,6 +310,9 @@ data Action
   | CopyImageMarkdown String   -- markdown string to copy, e.g. "![alt](url)"
   -- Letters Page: inline blog status changes (promote/demote)
   | LettersSetStatus Int String  -- project id, new blog_status string
+  | LettersToggleExpand Int String  -- project id, slug — expand/collapse row
+  | LettersPasteImage { filename :: String, base64 :: String }  -- clipboard paste
+  | LettersCopyMarkdown String  -- copy asset markdown to clipboard
 
 -- =============================================================================
 -- Component
@@ -328,6 +338,9 @@ initialState =
   , subscriptions: []
   , subscriptionMonthlyBurn: 0.0
   , blogDrafts: []
+  , lettersExpanded: Nothing
+  , lettersAssets: []
+  , lettersUploading: false
   , filterDomain: Nothing
   , filterStatus: Nothing
   , filterTag: Nothing
@@ -742,16 +755,16 @@ renderLettersSection state =
         then HH.div [ HP.class_ (H.ClassName "empty-state") ]
           [ HH.text "No blog posts tracked yet. Set a project's blog status to get started." ]
         else HH.div_
-          [ renderLettersGroup "Drafted"  "drafted"         drafted
-          , renderLettersGroup "Priority" "wanted_priority" priority
-          , renderLettersGroup "Wanted"   "wanted"          wanted
-          , renderLettersGroup "Published" "published"      published
-          , renderLettersGroup "Not Needed" "not_needed"    notNeeded
+          [ renderLettersGroup state "Drafted"  "drafted"         drafted
+          , renderLettersGroup state "Priority" "wanted_priority" priority
+          , renderLettersGroup state "Wanted"   "wanted"          wanted
+          , renderLettersGroup state "Published" "published"      published
+          , renderLettersGroup state "Not Needed" "not_needed"    notNeeded
           ]
     ]
 
-renderLettersGroup :: forall m. String -> String -> Array API.BlogDraftRecord -> H.ComponentHTML Action () m
-renderLettersGroup label statusKey drafts =
+renderLettersGroup :: forall m. State -> String -> String -> Array API.BlogDraftRecord -> H.ComponentHTML Action () m
+renderLettersGroup state label statusKey drafts =
   if Array.null drafts
     then HH.text ""
     else HH.div [ HP.class_ (H.ClassName ("letters-group letters-group-" <> statusKey)) ]
@@ -771,23 +784,66 @@ renderLettersGroup label statusKey drafts =
                   ]
               ]
           , HH.tbody_
-              (map (renderLettersRow statusKey) drafts)
+              (Array.concatMap (renderLettersRowWithExpand state statusKey) drafts)
           ]
       ]
 
-renderLettersRow :: forall m. String -> API.BlogDraftRecord -> H.ComponentHTML Action () m
-renderLettersRow groupStatus draft =
-  HH.tr [ HP.class_ (H.ClassName ("letters-row" <> if draft.hasFile then "" else " letters-row-nofile")) ]
-    [ HH.td [ HP.class_ (H.ClassName "letters-name") ]
-        [ HH.text draft.name ]
-    , HH.td [ HP.class_ (H.ClassName "letters-domain") ]
-        [ HH.text draft.domain ]
-    , HH.td [ HP.class_ (H.ClassName "letters-file") ]
-        [ HH.text (if draft.hasFile then draft.filename else "\x2014") ]
-    , HH.td [ HP.class_ (H.ClassName "letters-words") ]
-        [ HH.text (if draft.hasFile then show draft.wordCount else "\x2014") ]
-    , HH.td [ HP.class_ (H.ClassName "letters-actions") ]
-        (letterActions groupStatus draft)
+-- | Render a table row + optional expanded panel below it.
+-- | Returns 1 or 2 <tr> elements (data row + expansion row).
+renderLettersRowWithExpand :: forall m. State -> String -> API.BlogDraftRecord -> Array (H.ComponentHTML Action () m)
+renderLettersRowWithExpand state groupStatus draft =
+  let isExpanded = state.lettersExpanded == Just draft.id
+      expandClass = if isExpanded then " letters-row-expanded" else ""
+      dataRow = HH.tr
+        [ HP.class_ (H.ClassName ("letters-row" <> (if draft.hasFile then "" else " letters-row-nofile") <> expandClass))
+        , HE.onClick \_ -> LettersToggleExpand draft.id draft.slug
+        ]
+        [ HH.td [ HP.class_ (H.ClassName "letters-name") ]
+            [ HH.text draft.name ]
+        , HH.td [ HP.class_ (H.ClassName "letters-domain") ]
+            [ HH.text draft.domain ]
+        , HH.td [ HP.class_ (H.ClassName "letters-file") ]
+            [ HH.text (if draft.hasFile then draft.filename else "\x2014") ]
+        , HH.td [ HP.class_ (H.ClassName "letters-words") ]
+            [ HH.text (if draft.hasFile then show draft.wordCount else "\x2014") ]
+        , HH.td [ HP.class_ (H.ClassName "letters-actions") ]
+            (letterActions groupStatus draft)
+        ]
+  in if isExpanded
+    then [ dataRow, renderLettersExpanded state draft ]
+    else [ dataRow ]
+
+-- | Expanded panel: paste zone + asset thumbnails, shown as a full-width row.
+renderLettersExpanded :: forall m. State -> API.BlogDraftRecord -> H.ComponentHTML Action () m
+renderLettersExpanded state draft =
+  HH.tr [ HP.class_ (H.ClassName "letters-expand-row") ]
+    [ HH.td [ HP.colSpan 5 ]
+        [ HH.div [ HP.class_ (H.ClassName "letters-expand-panel") ]
+            [ HH.div [ HP.class_ (H.ClassName "letters-paste-zone") ]
+                [ HH.text
+                    (if state.lettersUploading
+                      then "Uploading\x2026"
+                      else "Paste screenshot (Cmd+V) to attach to this post")
+                ]
+            , if Array.null state.lettersAssets
+                then HH.text ""
+                else HH.div [ HP.class_ (H.ClassName "letters-asset-grid") ]
+                  (map renderLettersAsset state.lettersAssets)
+            ]
+        ]
+    ]
+
+renderLettersAsset :: forall m. API.BlogAssetRecord -> H.ComponentHTML Action () m
+renderLettersAsset asset =
+  HH.button
+    [ HP.class_ (H.ClassName "letters-asset-thumb")
+    , HE.onClick \_ -> LettersCopyMarkdown asset.markdown
+    , HP.title ("Click to copy: " <> asset.markdown)
+    , HP.type_ HP.ButtonButton
+    ]
+    [ HH.img [ HP.src asset.url, HP.alt asset.filename ]
+    , HH.span [ HP.class_ (H.ClassName "letters-asset-name") ]
+        [ HH.text asset.filename ]
     ]
 
 -- | Inline promote/demote buttons based on current status group.
@@ -1900,6 +1956,10 @@ handleAction = case _ of
     { emitter: keyEmitter, listener: keyListener } <- liftEffect HS.create
     _ <- liftEffect $ onKeyDown_ (\ke -> HS.notify keyListener (KeyDown ke))
     void $ H.subscribe keyEmitter
+    -- Subscribe to paste events (for blog asset upload)
+    { emitter: pasteEmitter, listener: pasteListener } <- liftEffect HS.create
+    _ <- liftEffect $ onPaste_ (\imgData -> HS.notify pasteListener (LettersPasteImage imgData))
+    void $ H.subscribe pasteEmitter
     -- Read initial hash for deep linking
     hash <- liftEffect getHash_
     when (not (String.null hash)) do
@@ -2169,6 +2229,33 @@ handleAction = case _ of
     _ <- liftAff $ API.updateProject projectId input
     -- Refresh the letters table
     handleAction LoadBlogDrafts
+
+  LettersToggleExpand projectId _slug -> do
+    st <- H.get
+    if st.lettersExpanded == Just projectId
+      then H.modify_ \s -> s { lettersExpanded = Nothing, lettersAssets = [] }
+      else do
+        assets <- liftAff $ API.fetchBlogAssets projectId
+        H.modify_ \s -> s { lettersExpanded = Just projectId, lettersAssets = assets }
+
+  LettersPasteImage imgData -> do
+    st <- H.get
+    case st.lettersExpanded of
+      Nothing -> pure unit
+      Just projectId -> do
+        H.modify_ \s -> s { lettersUploading = true }
+        result <- liftAff $ API.uploadBlogAsset projectId imgData.filename imgData.base64
+        case result of
+          Left err ->
+            H.modify_ \s -> s { lettersUploading = false, error = Just ("Upload failed: " <> err) }
+          Right info -> do
+            liftEffect $ copyToClipboard info.markdown
+            -- Refresh assets list
+            assets <- liftAff $ API.fetchBlogAssets projectId
+            H.modify_ \s -> s { lettersUploading = false, lettersAssets = assets }
+
+  LettersCopyMarkdown md ->
+    liftEffect $ copyToClipboard md
 
   ClearFilters -> do
     liftEffect $ setHash_ ""

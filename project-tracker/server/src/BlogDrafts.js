@@ -118,6 +118,62 @@ export const openInVSCode_ = (absPath) => () => {
   }
 };
 
+// =============================================================================
+// Blog assets — images saved to $BLOG_DRAFTS/<slug>/ for embedding in drafts
+// =============================================================================
+
+const assetDir = (slug) => path.join(BLOG_DRAFTS_DIR, slug);
+
+// Safe filename: timestamp + optional suffix. Only allow [a-z0-9_-.]
+const SAFE_FN_RE = /^[a-z0-9_.-]+$/i;
+const isSafeFilename = (s) =>
+  typeof s === 'string' && s.length > 0 && s.length <= 200
+  && SAFE_FN_RE.test(s) && !s.includes('..');
+
+// Save base64-encoded image data to <slug>/<filename>. Creates the
+// directory if needed. Returns { kind, filename, absPath, error }.
+export const saveBlogAsset_ = (slug) => (filename) => (base64Data) => () => {
+  if (!isSafeSlug(slug)) {
+    return { kind: 'error', filename: '', absPath: '', error: 'invalid slug' };
+  }
+  if (!isSafeFilename(filename)) {
+    return { kind: 'error', filename: '', absPath: '', error: 'invalid filename' };
+  }
+  const dir = assetDir(slug);
+  const absPath = path.join(dir, filename);
+  // Belt-and-braces: ensure resolved path is inside the drafts dir.
+  const resolved = path.resolve(absPath);
+  if (!resolved.startsWith(path.resolve(BLOG_DRAFTS_DIR))) {
+    return { kind: 'error', filename: '', absPath: '', error: 'path escape' };
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const buf = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(absPath, buf);
+    return { kind: 'ok', filename, absPath, error: '' };
+  } catch (e) {
+    return { kind: 'error', filename: '', absPath: '', error: String((e && e.message) || e) };
+  }
+};
+
+// List image files in <slug>/ directory. Returns an array of
+// { filename, size } objects, or an empty array if the dir is missing.
+export const listBlogAssets_ = (slug) => () => {
+  if (!isSafeSlug(slug)) return [];
+  const dir = assetDir(slug);
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    return entries
+      .filter(e => e.isFile())
+      .map(e => {
+        const stat = fs.statSync(path.join(dir, e.name));
+        return { filename: e.name, size: stat.size };
+      });
+  } catch {
+    return [];
+  }
+};
+
 // Mutate a project row in place, overwriting blog_content with the given
 // value (or null). Called between the DB read and the JSON builder in
 // getProject so buildProjectDetailJson picks up the file contents without
