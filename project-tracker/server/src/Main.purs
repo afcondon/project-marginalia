@@ -9,6 +9,7 @@ import API.Projects as Projects
 import API.Servers as Servers
 import API.Stats as Stats
 import API.Subscriptions as Subscriptions
+import BlogDrafts as BlogDrafts
 import Control.Monad.Error.Class (try)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -39,6 +40,7 @@ data Route
   | ProjectById Int
   | ProjectTags Int
   | ProjectRename Int
+  | ProjectBlogOpen Int
   | ProjectServers Int
   | Ports
   | PortsSuggest
@@ -57,6 +59,8 @@ data Route
   | Subscriptions
   | SubscriptionById Int
   | SubscriptionsUpcoming
+  -- Letters section (blog drafts)
+  | BlogDrafts
   -- Sports section
   | ExerciseLog
   | ExerciseSummary
@@ -69,6 +73,7 @@ route = root $ sum
   , "ProjectById": path "api/projects" (int segment)
   , "ProjectTags": path "api/projects" (suffix (int segment) "tags")
   , "ProjectRename": path "api/projects" (suffix (int segment) "rename")
+  , "ProjectBlogOpen": path "api/projects" (suffix (suffix (int segment) "blog") "open")
   , "ProjectServers": path "api/projects" (suffix (int segment) "servers")
   , "Ports": path "api/ports" noArgs
   , "PortsSuggest": path "api/ports/suggest" noArgs
@@ -81,6 +86,7 @@ route = root $ sum
   , "AgentProjectAttachment": path "api/agent/projects" (suffix (int segment) "attachments")
   , "AgentProjectAttachmentUpload": path "api/agent/projects" (suffix (suffix (int segment) "attachments") "upload")
   , "AgentSearch": path "api/agent/search" noArgs
+  , "BlogDrafts": path "api/blog/drafts" noArgs
   , "Subscriptions": path "api/subscriptions" noArgs
   , "SubscriptionById": path "api/subscriptions" (int segment)
   , "SubscriptionsUpcoming": path "api/subscriptions/upcoming" noArgs
@@ -130,6 +136,16 @@ main = launchAff_ do
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT"
   liftEffect $ log "Schema migrations applied"
 
+  -- One-time hoist of existing DB blog_content values into <slug>.md
+  -- files on disk. Idempotent: after the first successful pass the
+  -- blog_content column is NULLed for every migrated row, so subsequent
+  -- boots find zero rows to process.
+  summary <- BlogDrafts.migrateLegacyDrafts db
+  liftEffect $ log $ "Blog drafts migration: "
+    <> show summary.written <> " written, "
+    <> show summary.skipped <> " skipped, "
+    <> show summary.errored <> " errored"
+
   liftEffect do
     _ <- serve { port: 3100 } { route, router: mkRouter dbRef }
     log "Project Tracker API server running on http://localhost:3100"
@@ -139,6 +155,7 @@ main = launchAff_ do
     log "  GET    /api/projects/:id                 - Get project with details"
     log "  POST   /api/projects                     - Create a project"
     log "  PUT    /api/projects/:id                 - Update a project"
+    log "  POST   /api/projects/:id/blog/open         - Open blog draft in VS Code"
     log "  GET    /api/stats                        - Domain/status statistics"
     log ""
     log "Agent endpoints:"
@@ -196,6 +213,11 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Projects.renameProject db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectBlogOpen projectId -> case method of
+        Post -> Projects.openBlogDraft db projectId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -290,6 +312,12 @@ main = launchAff_ do
 
       DependencyById blockerId blockedId -> case method of
         Delete -> Dependencies.deleteDependency db blockerId blockedId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Letters section — blog drafts
+      BlogDrafts -> case method of
+        Get -> Projects.listBlogDrafts db
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

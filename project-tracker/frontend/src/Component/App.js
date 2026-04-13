@@ -1,6 +1,20 @@
 // FFI for App component
 export const stopPropagation_ = (event) => () => { event.stopPropagation(); };
 
+// Copy a string to the clipboard. Fire-and-forget: the Promise is not
+// awaited and its rejection is swallowed so a failed copy never throws
+// into the Halogen event loop. Requires a secure context (localhost or
+// HTTPS); on a plain-HTTP LAN IP this will silently log a warning.
+export const copyToClipboard = (s) => () => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(s).catch((err) => {
+      console.warn("clipboard.writeText failed:", (err && err.message) || err);
+    });
+  } else {
+    console.warn("clipboard API unavailable (non-secure context?)");
+  }
+};
+
 // Hash routing
 export const getHash_ = () => window.location.hash.slice(1);
 export const setHash_ = (hash) => () => { window.location.hash = hash; };

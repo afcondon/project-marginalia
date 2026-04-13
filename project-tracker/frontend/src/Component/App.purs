@@ -7,9 +7,10 @@ module Component.App where
 import Prelude
 
 import API as API
-import API (SubscriptionRecord) as API
+import API (SubscriptionRecord, BlogDraftRecord) as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
+import Data.Either (Either(..))
 import Data.Int (floor, fromString) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.String as String
@@ -32,6 +33,7 @@ import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 -- =============================================================================
 
 foreign import stopPropagation_ :: Event -> Effect Unit
+foreign import copyToClipboard :: String -> Effect Unit
 foreign import getHash_ :: Effect String
 foreign import setHash_ :: String -> Effect Unit
 foreign import onHashChange_ :: (String -> Effect Unit) -> Effect (Effect Unit)
@@ -160,7 +162,6 @@ data EditableField
   | FRepo
   | FSourceUrl
   | FSourcePath
-  | FBlogContent
 
 derive instance Eq EditableField
 
@@ -171,7 +172,6 @@ fieldLabel = case _ of
   FRepo -> "repo"
   FSourceUrl -> "source url"
   FSourcePath -> "source path"
-  FBlogContent -> "blog post"
 
 -- | Which newspaper section is active. Nothing = the default project Register.
 -- | Named sections pull from different data sources — Finance from the
@@ -187,6 +187,7 @@ type State =
   , section :: Maybe Section  -- Nothing = projects, Just "finance" = subscriptions
   , subscriptions :: Array API.SubscriptionRecord
   , subscriptionMonthlyBurn :: Number
+  , blogDrafts :: Array API.BlogDraftRecord
   , filterDomain :: Maybe String
   , filterStatus :: Maybe String
   , filterTag :: Maybe String
@@ -239,6 +240,7 @@ data Action
   | LoadStats
   | SetSection (Maybe Section)  -- switch newspaper section
   | LoadSubscriptions
+  | LoadBlogDrafts
   | SetFilterDomain String
   | SetFilterStatus String
   | SetFilterTag String
@@ -295,6 +297,12 @@ data Action
   | DossierCancelTag
   -- Blog-post classification
   | SetBlogStatus (Maybe BlogStatus) MouseEvent
+  -- Blog draft editing via VS Code. File on disk is source of truth.
+  | OpenBlogInVSCode Int
+  | ReloadBlogDraft Int
+  | CopyImageMarkdown String   -- markdown string to copy, e.g. "![alt](url)"
+  -- Letters Page: inline blog status changes (promote/demote)
+  | LettersSetStatus Int String  -- project id, new blog_status string
 
 -- =============================================================================
 -- Component
@@ -319,6 +327,7 @@ initialState =
   , section: Nothing
   , subscriptions: []
   , subscriptionMonthlyBurn: 0.0
+  , blogDrafts: []
   , filterDomain: Nothing
   , filterStatus: Nothing
   , filterTag: Nothing
@@ -380,6 +389,7 @@ render state =
                 MagazineView -> renderMagazine state detail
             ListView -> case state.section of
               Just "finance" -> renderFinanceSection state
+              Just "letters" -> renderLettersSection state
               _              -> renderProjectList state
         ]
     -- Keyboard shortcut hint (shown when no card is focused on the list)
@@ -529,7 +539,9 @@ renderDomainFilterBar state =
 -- | Currently just FINANCE; more to come (Weather, Culture, Sports...).
 renderSectionPills :: forall m. State -> Array (H.ComponentHTML Action () m)
 renderSectionPills state =
-  [ renderSectionPill state "finance" "FINANCE" (Array.length state.subscriptions) ]
+  [ renderSectionPill state "finance" "FINANCE" (Array.length state.subscriptions)
+  , renderSectionPill state "letters" "LETTERS" (Array.length state.blogDrafts)
+  ]
 
 renderSectionPill :: forall m. State -> String -> String -> Int -> H.ComponentHTML Action () m
 renderSectionPill state sectionId label count =
@@ -707,6 +719,107 @@ freqAbbrev = case _ of
   "quarterly" -> "qtr"
   "weekly"    -> "wk"
   _           -> "?"
+
+-- =============================================================================
+-- Letters Section — blog draft queue
+-- =============================================================================
+
+renderLettersSection :: forall m. State -> H.ComponentHTML Action () m
+renderLettersSection state =
+  let drafted  = Array.filter (\d -> d.blogStatus == "drafted") state.blogDrafts
+      priority = Array.filter (\d -> d.blogStatus == "wanted_priority") state.blogDrafts
+      wanted   = Array.filter (\d -> d.blogStatus == "wanted") state.blogDrafts
+      published = Array.filter (\d -> d.blogStatus == "published") state.blogDrafts
+      notNeeded = Array.filter (\d -> d.blogStatus == "not_needed") state.blogDrafts
+  in HH.div [ HP.class_ (H.ClassName "letters-section") ]
+    [ HH.div [ HP.class_ (H.ClassName "letters-header") ]
+        [ HH.span [ HP.class_ (H.ClassName "letters-title") ]
+            [ HH.text "The Letters Page" ]
+        , HH.span [ HP.class_ (H.ClassName "letters-count") ]
+            [ HH.text (show (Array.length state.blogDrafts) <> " entries") ]
+        ]
+    , if Array.null state.blogDrafts
+        then HH.div [ HP.class_ (H.ClassName "empty-state") ]
+          [ HH.text "No blog posts tracked yet. Set a project's blog status to get started." ]
+        else HH.div_
+          [ renderLettersGroup "Drafted"  "drafted"         drafted
+          , renderLettersGroup "Priority" "wanted_priority" priority
+          , renderLettersGroup "Wanted"   "wanted"          wanted
+          , renderLettersGroup "Published" "published"      published
+          , renderLettersGroup "Not Needed" "not_needed"    notNeeded
+          ]
+    ]
+
+renderLettersGroup :: forall m. String -> String -> Array API.BlogDraftRecord -> H.ComponentHTML Action () m
+renderLettersGroup label statusKey drafts =
+  if Array.null drafts
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName ("letters-group letters-group-" <> statusKey)) ]
+      [ HH.h3 [ HP.class_ (H.ClassName "letters-group-label") ]
+          [ HH.text label
+          , HH.span [ HP.class_ (H.ClassName "letters-group-count") ]
+              [ HH.text (" (" <> show (Array.length drafts) <> ")") ]
+          ]
+      , HH.table [ HP.class_ (H.ClassName "letters-table") ]
+          [ HH.thead_
+              [ HH.tr_
+                  [ HH.th_ [ HH.text "Project" ]
+                  , HH.th_ [ HH.text "Domain" ]
+                  , HH.th_ [ HH.text "File" ]
+                  , HH.th [ HP.class_ (H.ClassName "letters-col-words") ] [ HH.text "Words" ]
+                  , HH.th_ [ HH.text "" ]
+                  ]
+              ]
+          , HH.tbody_
+              (map (renderLettersRow statusKey) drafts)
+          ]
+      ]
+
+renderLettersRow :: forall m. String -> API.BlogDraftRecord -> H.ComponentHTML Action () m
+renderLettersRow groupStatus draft =
+  HH.tr [ HP.class_ (H.ClassName ("letters-row" <> if draft.hasFile then "" else " letters-row-nofile")) ]
+    [ HH.td [ HP.class_ (H.ClassName "letters-name") ]
+        [ HH.text draft.name ]
+    , HH.td [ HP.class_ (H.ClassName "letters-domain") ]
+        [ HH.text draft.domain ]
+    , HH.td [ HP.class_ (H.ClassName "letters-file") ]
+        [ HH.text (if draft.hasFile then draft.filename else "\x2014") ]
+    , HH.td [ HP.class_ (H.ClassName "letters-words") ]
+        [ HH.text (if draft.hasFile then show draft.wordCount else "\x2014") ]
+    , HH.td [ HP.class_ (H.ClassName "letters-actions") ]
+        (letterActions groupStatus draft)
+    ]
+
+-- | Inline promote/demote buttons based on current status group.
+-- | Wanted: promote to Priority, demote to Not Needed
+-- | Priority: demote to Wanted
+-- | Drafted/Published/Not Needed: Edit/Start button only (no triage arrows)
+letterActions :: forall m. String -> API.BlogDraftRecord -> Array (H.ComponentHTML Action () m)
+letterActions groupStatus draft = case groupStatus of
+  "wanted" ->
+    [ arrowBtn "\x2191" "Promote to Priority" (LettersSetStatus draft.id "wanted_priority") "letters-promote"
+    , arrowBtn "\x2193" "Demote to Not Needed" (LettersSetStatus draft.id "not_needed") "letters-demote"
+    , editBtn
+    ]
+  "wanted_priority" ->
+    [ arrowBtn "\x2193" "Demote to Wanted" (LettersSetStatus draft.id "wanted") "letters-demote"
+    , arrowBtn "\x00d7" "Not Needed" (LettersSetStatus draft.id "not_needed") "letters-remove"
+    , editBtn
+    ]
+  _ -> [ editBtn ]
+  where
+  editBtn = HH.button
+    [ HP.class_ (H.ClassName "blog-action-btn")
+    , HE.onClick \_ -> OpenBlogInVSCode draft.id
+    , HP.title "Open draft in VS Code"
+    ]
+    [ HH.text (if draft.hasFile then "Edit" else "Start") ]
+  arrowBtn label title action cls = HH.button
+    [ HP.class_ (H.ClassName ("letters-arrow-btn " <> cls))
+    , HE.onClick \_ -> action
+    , HP.title title
+    ]
+    [ HH.text label ]
 
 -- =============================================================================
 -- Project Card (Task 2: status dot + popover; Task 3: quick edit button)
@@ -1255,10 +1368,7 @@ renderBlogEditor state detail =
   HH.div [ HP.class_ (H.ClassName "blog-editor") ]
     [ HH.div [ HP.class_ (H.ClassName "blog-status-row") ]
         (map (renderBlogStatusButton detail.blogStatus) allBlogStatuses)
-    , case detail.blogStatus of
-        Just BlogDrafted   -> renderBlogContentEditor state detail
-        Just BlogPublished -> renderBlogContentEditor state detail
-        _                  -> HH.text ""
+    , renderBlogContentEditor state detail
     ]
 
 renderBlogStatusButton :: forall m. Maybe BlogStatus -> BlogStatus -> H.ComponentHTML Action () m
@@ -1274,36 +1384,78 @@ renderBlogStatusButton currentStatus status =
     ]
     [ HH.text (blogStatusLabel status) ]
 
+-- | Read-only preview of the draft plus action buttons. The textarea is
+-- | gone: drafts are edited in VS Code (click "Edit in VS Code") and the
+-- | file on disk is the source of truth. "Reload" refetches the project
+-- | after the user saves in the editor.
 renderBlogContentEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderBlogContentEditor state detail =
-  case state.dossierEditField of
-    Just FBlogContent ->
-      HH.div [ HP.class_ (H.ClassName "blog-content-edit") ]
-        [ HH.textarea
-            [ HP.class_ (H.ClassName "blog-content-input")
-            , HP.value state.dossierEditValue
-            , HP.autofocus true
-            , HP.rows 12
-            , HP.placeholder "# Heading\n\nMarkdown body…"
-            , HE.onValueInput DossierSetEditValue
-            , HE.onBlur \_ -> DossierCommitEdit
+renderBlogContentEditor _state detail =
+  let mContent = detail.blogContent
+      hasContent = case mContent of
+        Just s  -> not (String.null s)
+        Nothing -> false
+      editLabel = if hasContent then "Edit in VS Code" else "Start draft in VS Code"
+  in HH.div [ HP.class_ (H.ClassName "blog-content-view") ]
+    [ HH.div [ HP.class_ (H.ClassName "blog-actions-row") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "blog-action-btn")
+            , HE.onClick \_ -> OpenBlogInVSCode detail.id
+            , HP.title "Open the draft file in VS Code"
             ]
-        , HH.div [ HP.class_ (H.ClassName "dossier-edit-hint") ]
-            [ HH.text "Blur to save · Esc to cancel" ]
+            [ HH.text editLabel ]
+        , HH.button
+            [ HP.class_ (H.ClassName "blog-action-btn secondary")
+            , HE.onClick \_ -> ReloadBlogDraft detail.id
+            , HP.title "Re-read the draft file from disk"
+            ]
+            [ HH.text "Reload" ]
         ]
-    _ ->
-      let currentContent = fromMaybe "" detail.blogContent
-      in HH.div
-        [ HP.class_ (H.ClassName "blog-content editable")
-        , HE.onClick \_ -> DossierStartEdit FBlogContent currentContent
-        , HP.title "Click to edit blog post"
-        ]
-        [ if String.null currentContent
-            then HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
-              [ HH.text "No draft yet. Click to start writing." ]
-            else HH.pre [ HP.class_ (H.ClassName "blog-content-body") ]
-              [ HH.text currentContent ]
-        ]
+    , case mContent of
+        Nothing ->
+          HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
+            [ HH.text "No draft yet. Click ‘Start draft in VS Code’." ]
+        Just "" ->
+          HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
+            [ HH.text "Draft file is empty." ]
+        Just body ->
+          HH.pre [ HP.class_ (H.ClassName "blog-content-body") ]
+            [ HH.text body ]
+    , renderBlogImageStrip detail
+    ]
+
+-- | Horizontal strip of image thumbnails from the project's attachments.
+-- | Click a thumbnail to copy `![alt](url)` to the clipboard so it can
+-- | be pasted into the draft in VS Code. Rendered only when the project
+-- | actually has image attachments.
+renderBlogImageStrip :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderBlogImageStrip detail =
+  let images = Array.filter isImageAttachment detail.attachments
+  in if Array.null images
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName "blog-image-strip") ]
+      [ HH.div [ HP.class_ (H.ClassName "blog-image-strip-label") ]
+          [ HH.text "Images — click to copy markdown" ]
+      , HH.div [ HP.class_ (H.ClassName "blog-image-strip-row") ]
+          (map renderBlogImageThumb images)
+      ]
+
+renderBlogImageThumb :: forall m. Attachment -> H.ComponentHTML Action () m
+renderBlogImageThumb att = case att.url of
+  Nothing -> HH.text ""
+  Just url ->
+    let alt = fromMaybe att.filename att.description
+        md  = "![" <> alt <> "](" <> url <> ")"
+    in HH.button
+      [ HP.class_ (H.ClassName "blog-image-thumb")
+      , HE.onClick \_ -> CopyImageMarkdown md
+      , HP.title ("Copy " <> md)
+      , HP.type_ HP.ButtonButton
+      ]
+      [ HH.img
+          [ HP.src url
+          , HP.alt alt
+          ]
+      ]
 
 -- | Parent block: shows the parent project (clickable) or "(none)".
 renderParentBlock :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
@@ -1781,6 +1933,7 @@ handleAction = case _ of
     H.modify_ \s -> s { section = mSec }
     case mSec of
       Just "finance" -> handleAction LoadSubscriptions
+      Just "letters" -> handleAction LoadBlogDrafts
       _ -> pure unit
 
   LoadSubscriptions -> do
@@ -1792,6 +1945,13 @@ handleAction = case _ of
           { subscriptions = resp.subscriptions
           , subscriptionMonthlyBurn = resp.monthlyBurn
           }
+
+  LoadBlogDrafts -> do
+    mResp <- liftAff API.fetchBlogDrafts
+    case mResp of
+      Nothing -> pure unit
+      Just resp ->
+        H.modify_ \s -> s { blogDrafts = resp.drafts }
 
   SetFilterDomain val -> do
     let mDomain = if String.null val then Nothing else Just val
@@ -1986,6 +2146,29 @@ handleAction = case _ of
           H.modify_ \s -> s { selectedProject = mNew }
           handleAction LoadAllProjects
           handleAction LoadProjects
+
+  OpenBlogInVSCode projectId -> do
+    res <- liftAff $ API.openBlogInVSCode projectId
+    case res of
+      Left err ->
+        H.modify_ \s -> s { error = Just ("Open in VS Code failed: " <> err) }
+      Right _ -> do
+        -- Refetch so a freshly-created template file shows up in the preview.
+        mNew <- liftAff $ API.fetchProject projectId
+        H.modify_ \s -> s { selectedProject = mNew, error = Nothing }
+
+  ReloadBlogDraft projectId -> do
+    mNew <- liftAff $ API.fetchProject projectId
+    H.modify_ \s -> s { selectedProject = mNew }
+
+  CopyImageMarkdown md ->
+    liftEffect $ copyToClipboard md
+
+  LettersSetStatus projectId newStatus -> do
+    let input = emptyProjectInput { blogStatus = newStatus }
+    _ <- liftAff $ API.updateProject projectId input
+    -- Refresh the letters table
+    handleAction LoadBlogDrafts
 
   ClearFilters -> do
     liftEffect $ setHash_ ""
@@ -2221,7 +2404,6 @@ buildInput state =
   , statusReason: ""
   , preferredView: ""
   , blogStatus: ""
-  , blogContent: ""
   }
 
 -- | A minimal ProjectInput with all fields empty. Used for quick status changes.
@@ -2238,7 +2420,6 @@ emptyProjectInput =
   , statusReason: ""
   , preferredView: ""
   , blogStatus: ""
-  , blogContent: ""
   }
 
 -- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
@@ -2257,7 +2438,6 @@ detailToInput d =
   , statusReason: ""
   , preferredView: ""   -- blank means "don't update" (see buildUpdateBody)
   , blogStatus: ""      -- blank means "don't update"
-  , blogContent: ""     -- blank means "don't update"
   }
 
 -- | Copy a detail into a ProjectInput with a single field overridden.
@@ -2271,7 +2451,6 @@ detailToInputWith field value d =
     FRepo        -> base { repo = value }
     FSourceUrl   -> base { sourceUrl = value }
     FSourcePath  -> base { sourcePath = value }
-    FBlogContent -> base { blogContent = value }
 
 -- | Cycle the currently-selected project in the detail panel by `delta`
 -- | (1 for next, -1 for previous), wrapping around the visible project list.

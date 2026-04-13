@@ -10,6 +10,8 @@ module API.Projects
   , updateProject
   , addTag
   , renameProject
+  , openBlogDraft
+  , listBlogDrafts
   ) where
 
 import Prelude
@@ -25,6 +27,7 @@ import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, fir
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
+import BlogDrafts as BlogDrafts
 import Filesystem (RenameOutcome(..)) as FS
 import Filesystem (renameProjectDirectory) as FS
 import Foreign (Foreign, unsafeToForeign)
@@ -152,6 +155,12 @@ getProject db projectId = do
   case firstRow projectRows of
     Nothing -> notFound
     Just project -> do
+      -- Blog drafts are file-sourced: read <slug>.md from disk and splice
+      -- its contents into the row so buildProjectDetailJson sees it as
+      -- blog_content. The DB column is ignored for reads.
+      let slug = getRowString_ "slug" project
+      mDraft <- liftEffect $ BlogDrafts.readDraft slug
+      let projectWithDraft = BlogDrafts.overrideBlogContent project mDraft
       notes <- queryAllParams db
         "SELECT id, content, author, created_at FROM project_notes WHERE project_id = ? ORDER BY created_at DESC"
         idParam
@@ -167,7 +176,7 @@ getProject db projectId = do
       attachments <- queryAllParams db
         "SELECT id, filename, mime_type, file_path, description, created_at FROM attachments WHERE project_id = ? ORDER BY created_at DESC"
         idParam
-      ok' jsonHeaders (buildProjectDetailJson project notes deps attachments)
+      ok' jsonHeaders (buildProjectDetailJson projectWithDraft notes deps attachments)
 
 -- =============================================================================
 -- POST /api/projects
@@ -341,6 +350,69 @@ renameProject db projectId bodyStr = case parseBody bodyStr of
 -- | Read a string field from a Foreign row. Returns "" if missing or null.
 foreign import getRowString_ :: String -> Foreign -> String
 
+-- =============================================================================
+-- POST /api/projects/:id/blog/open — open blog draft in VS Code
+-- =============================================================================
+-- |
+-- | Looks up the project's slug, ensures `<slug>.md` exists under the
+-- | configured drafts dir (creating it with a template if needed), then
+-- | shells out to `open -a "Visual Studio Code" <path>`.
+-- |
+-- | The browser UI calls this after the user clicks "Edit in VS Code";
+-- | writes happen exclusively in VS Code; the UI refetches on demand via
+-- | the standard GET handler which re-reads the file.
+openBlogDraft :: Database -> Int -> Aff Response
+openBlogDraft db projectId = do
+  rows <- queryAllParams db
+    "SELECT slug, name FROM projects WHERE id = ?"
+    [ unsafeToForeign projectId ]
+  case firstRow rows of
+    Nothing -> notFound
+    Just row -> do
+      let slug = getRowString_ "slug" row
+      let name = getRowString_ "name" row
+      if slug == ""
+        then badRequest' jsonHeaders """{"error": "Project has no slug"}"""
+        else do
+          ensured <- liftEffect $ BlogDrafts.ensureDraft slug name
+          case ensured of
+            BlogDrafts.EnsureError err ->
+              badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+            BlogDrafts.EnsureOpened absPath -> do
+              openOutcome <- liftEffect $ BlogDrafts.openInVSCode absPath
+              case openOutcome of
+                BlogDrafts.OpenError err ->
+                  badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+                BlogDrafts.OpenOk p ->
+                  ok' jsonHeaders ("{\"ok\": true, \"path\": \"" <> p <> "\"}")
+
+-- =============================================================================
+-- GET /api/blog/drafts — Letters Page: all projects with blog status
+-- =============================================================================
+
+listBlogDrafts :: Database -> Aff Response
+listBlogDrafts db = do
+  rows <- queryAll db
+    """SELECT id, slug, name, domain, blog_status
+       FROM projects
+       WHERE blog_status IS NOT NULL
+       ORDER BY
+         CASE blog_status
+           WHEN 'drafted'         THEN 1
+           WHEN 'wanted_priority' THEN 2
+           WHEN 'wanted'          THEN 3
+           WHEN 'published'       THEN 4
+           WHEN 'not_needed'      THEN 5
+           ELSE 6
+         END,
+         name"""
+  enriched <- liftEffect $ buildBlogDraftsJson_ rows
+  ok' jsonHeaders enriched
+
+-- | Build the Letters Page JSON response. Reads each project's draft file
+-- | from disk (via BlogDrafts.readDraft) to include word counts and filenames.
+foreign import buildBlogDraftsJson_ :: Rows -> Effect String
+
 addTag :: Database -> Int -> String -> Aff Response
 addTag db projectId bodyStr = case parseBody bodyStr of
   Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
@@ -394,7 +466,9 @@ buildUpdateClauses obj = { clauses, params }
     , fieldClause "preferredView" "preferred_view"
     , intFieldClause "coverAttachmentId" "cover_attachment_id"
     , fieldClause "blogStatus" "blog_status"
-    , fieldClause "blogContent" "blog_content"
+    -- blogContent is no longer DB-owned: drafts live on disk as files
+    -- under $MARGINALIA_BLOG_DRAFTS and VS Code writes them directly.
+    -- See BlogDrafts.purs.
     ]
   fieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
   fieldClause jsonKey sqlCol = case getFieldMaybe jsonKey obj of

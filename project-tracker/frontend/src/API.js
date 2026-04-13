@@ -76,6 +76,28 @@ export const parseSubscriptionResponse_ = (str) => {
   }
 };
 
+// Parse the blog drafts response (Letters section).
+export const parseBlogDraftsResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      drafts: (d.drafts || []).map(r => ({
+        id: r.id || 0,
+        slug: r.slug || '',
+        name: r.name || '',
+        domain: r.domain || '',
+        blogStatus: r.blogStatus || '',
+        filename: r.filename || '',
+        wordCount: r.wordCount || 0,
+        hasFile: r.hasFile === true,
+      })),
+      count: d.count || 0,
+    };
+  } catch {
+    return { drafts: [], count: 0 };
+  }
+};
+
 // Build JSON body for creating a child project under a parent
 export const buildChildBody = (parentId) => (name) => (domain) =>
   JSON.stringify({ parentId, name, domain, status: "idea" });
@@ -99,6 +121,7 @@ export const buildUpdateBody = (input) => {
   if (input.statusReason) body.statusReason = input.statusReason;
   if (input.preferredView) body.preferredView = input.preferredView;
   if (input.blogStatus) body.blogStatus = input.blogStatus;
-  if (input.blogContent) body.blogContent = input.blogContent;
+  // blogContent is no longer sent from the UI: drafts live on disk and
+  // VS Code writes them directly. See BlogDrafts.purs on the server.
   return JSON.stringify(body);
 };

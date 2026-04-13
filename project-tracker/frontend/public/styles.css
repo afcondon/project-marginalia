@@ -3350,6 +3350,11 @@ a.attachment-marg-filename:hover {
   border-color: #b84a2a;
 }
 
+.blog-status-btn.blog-status-wanted_priority.current {
+  background: #c45a1a;
+  border-color: #c45a1a;
+}
+
 .blog-status-btn.blog-status-drafted.current {
   background: #a8831e;  /* amber */
   border-color: #a8831e;
@@ -3360,6 +3365,103 @@ a.attachment-marg-filename:hover {
   border-color: #3c6b3c;
 }
 
+.blog-content-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.blog-actions-row {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.blog-action-btn {
+  font-family: var(--sans-label);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+
+.blog-action-btn:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.blog-action-btn.secondary {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.blog-action-btn.secondary:hover {
+  background: rgba(26, 22, 18, 0.06);
+}
+
+/* =============================================================================
+   BLOG IMAGE STRIP — thumbnails of project attachments below the draft preview
+   -----------------------------------------------------------------------------
+   Click a thumbnail to copy its `![alt](url)` markdown to the clipboard so it
+   can be pasted into the draft while writing in VS Code.
+   ============================================================================= */
+
+.blog-image-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.blog-image-strip-label {
+  font-family: var(--sans-label);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-muted);
+}
+
+.blog-image-strip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.blog-image-thumb {
+  padding: 0;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  cursor: pointer;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  transition: border-color 120ms, transform 120ms;
+}
+
+.blog-image-thumb:hover {
+  border-color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.blog-image-thumb:active {
+  transform: translateY(0);
+}
+
+.blog-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Legacy .blog-content.editable styles kept in case any other view still
+   uses them — harmless as long as nothing references them. The Dossier
+   now uses .blog-content-view above. */
 .blog-content.editable {
   cursor: text;
   padding: var(--space-2);
@@ -3433,6 +3535,11 @@ a.attachment-marg-filename:hover {
 
 .card-blog-pill.blog-pill-wanted {
   background: #b84a2a;
+}
+
+.card-blog-pill.blog-pill-wanted_priority {
+  background: #c45a1a;
+  font-weight: 600;
 }
 
 .card-blog-pill.blog-pill-drafted {
@@ -3521,4 +3628,186 @@ a.attachment-marg-filename:hover {
   font-family: var(--sans-label);
   font-size: 0.65rem;
   color: var(--ink-light);
+}
+
+/* =============================================================================
+   LETTERS SECTION — blog draft queue (The Letters Page)
+   ============================================================================= */
+
+.section-pill.section-letters {
+  border-left: 2px solid #6b4c8a;
+  font-weight: 600;
+}
+
+.section-pill.section-letters.section-pill-active {
+  background: #6b4c8a;
+  color: var(--paper);
+  border-color: #6b4c8a;
+}
+
+.letters-section {
+  padding: var(--space-3);
+}
+
+.letters-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: var(--space-4);
+}
+
+.letters-title {
+  font-family: var(--serif-display);
+  font-size: 2rem;
+  font-weight: 400;
+  color: var(--ink);
+  font-style: italic;
+}
+
+.letters-count {
+  font-family: var(--sans-label);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+}
+
+.letters-group {
+  margin-bottom: var(--space-6);
+}
+
+.letters-group-label {
+  font-family: var(--sans-label);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  margin: 0 0 var(--space-2) 0;
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--ink-faint);
+}
+
+.letters-group-count {
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.letters-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans-body);
+  font-size: 0.82rem;
+}
+
+.letters-table th {
+  font-family: var(--sans-label);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-muted);
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--ink-faint);
+}
+
+.letters-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+
+.letters-row:hover {
+  background: var(--hover-bg);
+}
+
+.letters-row-nofile {
+  color: var(--ink-light);
+}
+
+.letters-name {
+  font-weight: 500;
+}
+
+.letters-domain {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.letters-file {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-light);
+}
+
+.letters-words {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+
+.letters-col-words {
+  text-align: right;
+}
+
+.letters-actions {
+  text-align: right;
+  white-space: nowrap;
+  display: flex;
+  gap: var(--space-1);
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* Promote/demote arrow buttons */
+.letters-arrow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper);
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  padding: 0;
+  line-height: 1;
+}
+
+.letters-arrow-btn:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.letters-promote:hover {
+  background: #c45a1a;
+  border-color: #c45a1a;
+}
+
+.letters-demote:hover {
+  background: var(--ink-muted);
+  border-color: var(--ink-muted);
+}
+
+.letters-remove:hover {
+  background: #8b3a3a;
+  border-color: #8b3a3a;
+}
+
+/* Priority group gets a subtle left accent */
+.letters-group-wanted_priority .letters-group-label {
+  color: #c45a1a;
+  border-bottom-color: #c45a1a;
+}
+
+.letters-group-wanted_priority .letters-row {
+  border-left: 2px solid #c45a1a;
 }

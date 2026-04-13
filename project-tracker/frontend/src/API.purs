@@ -15,9 +15,13 @@ module API
   , renameProject
   , addNote
   , addTag
+  , openBlogInVSCode
   , fetchSubscriptions
   , SubscriptionResponse
   , SubscriptionRecord
+  , fetchBlogDrafts
+  , BlogDraftsResponse
+  , BlogDraftRecord
   ) where
 
 import Prelude
@@ -28,7 +32,7 @@ import Affjax.ResponseFormat as ResponseFormat
 import Data.Argonaut.Core (toObject, toString) as J
 import Data.Argonaut.Parser (jsonParser)
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
@@ -279,6 +283,24 @@ renameProject projectId newName renameDir = do
             Just e -> pure { ok: false, message: Just e }
             Nothing -> pure { ok: true, message: mWarning }
 
+-- | Ask the server to open this project's blog draft in VS Code. The
+-- | server creates `<slug>.md` with a template if it doesn't already
+-- | exist, then shells out to `open -a "Visual Studio Code" <path>`.
+-- | Returns Left with an error message on failure, Right unit on success.
+openBlogInVSCode :: Int -> Aff (Either String Unit)
+openBlogInVSCode projectId = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/open"
+  result <- AX.post ResponseFormat.string url Nothing
+  case result of
+    Left err -> pure (Left (AX.printError err))
+    Right response -> case jsonParser response.body of
+      Left _ -> pure (Left "failed to parse response")
+      Right json -> case J.toObject json of
+        Nothing -> pure (Left "response was not an object")
+        Just obj -> case FO.lookup "error" obj of
+          Just errJson -> pure (Left (fromMaybe "unknown error" (J.toString errJson)))
+          Nothing -> pure (Right unit)
+
 -- | Create a child project under the given parent. Returns the new project on success.
 createChild :: Int -> String -> String -> Aff (Maybe Project)
 createChild parentId name domain = do
@@ -340,3 +362,32 @@ fetchSubscriptions = do
   case result of
     Left _ -> pure Nothing
     Right response -> pure (Just (parseSubscriptionResponse_ response.body))
+
+-- =============================================================================
+-- Blog Drafts (Letters section)
+-- =============================================================================
+
+foreign import parseBlogDraftsResponse_ :: String -> BlogDraftsResponse
+
+type BlogDraftsResponse =
+  { drafts :: Array BlogDraftRecord
+  , count :: Int
+  }
+
+type BlogDraftRecord =
+  { id :: Int
+  , slug :: String
+  , name :: String
+  , domain :: String
+  , blogStatus :: String
+  , filename :: String
+  , wordCount :: Int
+  , hasFile :: Boolean
+  }
+
+fetchBlogDrafts :: Aff (Maybe BlogDraftsResponse)
+fetchBlogDrafts = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/blog/drafts")
+  case result of
+    Left _ -> pure Nothing
+    Right response -> pure (Just (parseBlogDraftsResponse_ response.body))

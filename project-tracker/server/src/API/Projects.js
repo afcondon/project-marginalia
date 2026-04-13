@@ -50,6 +50,46 @@ export const buildProjectListJson = (rows) => {
   return JSON.stringify({ projects, count: projects.length });
 };
 
+// Blog drafts directory — duplicated from BlogDrafts.js (FFI files can't import
+// each other since PureScript copies them to output/foreign.js per module).
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+const _defaultDraftsDir = path.join(os.homedir(), 'Documents', 'marginalia-blog-drafts');
+const _rawDraftsDir = process.env.MARGINALIA_BLOG_DRAFTS || _defaultDraftsDir;
+const BLOG_DRAFTS_DIR = _rawDraftsDir.endsWith('/') ? _rawDraftsDir.slice(0, -1) : _rawDraftsDir;
+
+// Build JSON for the Letters Page (GET /api/blog/drafts). Reads each
+// project's <slug>.md from disk for word count and filename.
+export const buildBlogDraftsJson_ = (rows) => () => {
+  const drafts = (rows || []).map(row => {
+    const slug = row.slug || '';
+    const filename = slug ? slug + '.md' : null;
+    let wordCount = 0;
+    let hasFile = false;
+    if (slug) {
+      try {
+        const content = fs.readFileSync(path.join(BLOG_DRAFTS_DIR, slug + '.md'), 'utf-8');
+        hasFile = true;
+        // Word count: split on whitespace, ignore empty tokens and markdown
+        // frontmatter/headings (rough but good enough for a summary).
+        wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+      } catch { /* file doesn't exist yet */ }
+    }
+    return {
+      id: Number(row.id),
+      slug,
+      name: row.name || '',
+      domain: row.domain || '',
+      blogStatus: row.blog_status || null,
+      filename,
+      wordCount,
+      hasFile,
+    };
+  });
+  return JSON.stringify({ drafts, count: drafts.length });
+};
+
 // Build JSON for a single project with notes, dependencies, and attachments
 export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachments) => {
   const projectId = Number(project.id);

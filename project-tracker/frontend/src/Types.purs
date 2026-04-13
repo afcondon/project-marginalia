@@ -88,6 +88,7 @@ statusLabel = case _ of
 data BlogStatus
   = BlogNotNeeded
   | BlogWanted
+  | BlogWantedPriority
   | BlogDrafted
   | BlogPublished
 
@@ -99,28 +100,31 @@ instance Show BlogStatus where
 
 blogStatusFromString :: String -> Maybe BlogStatus
 blogStatusFromString = case _ of
-  "not_needed" -> Just BlogNotNeeded
-  "wanted"     -> Just BlogWanted
-  "drafted"    -> Just BlogDrafted
-  "published"  -> Just BlogPublished
-  _            -> Nothing
+  "not_needed"      -> Just BlogNotNeeded
+  "wanted"          -> Just BlogWanted
+  "wanted_priority" -> Just BlogWantedPriority
+  "drafted"         -> Just BlogDrafted
+  "published"       -> Just BlogPublished
+  _                 -> Nothing
 
 blogStatusToString :: BlogStatus -> String
 blogStatusToString = case _ of
-  BlogNotNeeded -> "not_needed"
-  BlogWanted    -> "wanted"
-  BlogDrafted   -> "drafted"
-  BlogPublished -> "published"
+  BlogNotNeeded      -> "not_needed"
+  BlogWanted         -> "wanted"
+  BlogWantedPriority -> "wanted_priority"
+  BlogDrafted        -> "drafted"
+  BlogPublished      -> "published"
 
 blogStatusLabel :: BlogStatus -> String
 blogStatusLabel = case _ of
-  BlogNotNeeded -> "Not needed"
-  BlogWanted    -> "Wanted"
-  BlogDrafted   -> "Drafted"
-  BlogPublished -> "Published"
+  BlogNotNeeded      -> "Not needed"
+  BlogWanted         -> "Wanted"
+  BlogWantedPriority -> "Priority"
+  BlogDrafted        -> "Drafted"
+  BlogPublished      -> "Published"
 
 allBlogStatuses :: Array BlogStatus
-allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogDrafted, BlogPublished ]
+allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogWantedPriority, BlogDrafted, BlogPublished ]
 
 -- | Reachable next statuses for quick status transitions.
 -- |
@@ -274,7 +278,9 @@ type ProjectInput =
   , statusReason :: String
   , preferredView :: String   -- empty string means "don't update"
   , blogStatus :: String      -- empty string means "don't update"
-  , blogContent :: String     -- empty string means "don't update"
+  -- blogContent is no longer part of ProjectInput: drafts live on disk
+  -- as files under $MARGINALIA_BLOG_DRAFTS and are written by VS Code
+  -- directly. The browser only reads them via GET /api/projects/:id.
   }
 
 -- =============================================================================
