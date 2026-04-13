@@ -1,19 +1,28 @@
 /* =============================================================================
    Klapaucius — blog workbench
-   Newspaper-inspired typography, warm palette
+   Inspired by Daniel Mróz's pen-and-ink illustrations for Lem's Cyberiada
+   (1978 edition). Dense black hatching on warm paper, amber/gold accent.
    ============================================================================= */
 
 :root {
-  --paper:         #faf8f3;
-  --ink:           #1a1612;
-  --ink-muted:     #6d6a63;
-  --ink-light:     #9e9a90;
-  --ink-faint:     #d4d0c8;
-  --rule:          #c8c3b6;
-  --rule-strong:   #1a1612;
-  --hover-bg:      rgba(26, 22, 18, 0.03);
-  --accent:        #6b4c8a;   /* Klapaucius purple — the Cyberiad's hue */
+  /* Paper & ink — warm, slightly aged */
+  --paper:         #f5f0e6;   /* yellowed stock, like the Mróz jacket */
+  --paper-dark:    #ece5d5;   /* slightly deeper, for inset panels */
+  --ink:           #1a1612;   /* warm near-black, dense hatching */
+  --ink-muted:     #5a5650;
+  --ink-light:     #8a857c;
+  --ink-faint:     #c5bfb2;
+  --rule:          #b0a898;   /* hairline rules */
+  --rule-strong:   #1a1612;   /* double rules, borders */
+  --hover-bg:      rgba(26, 22, 18, 0.04);
 
+  /* Single accent: the amber/gold from the Cyberiada spine & banners */
+  --accent:        #c49a1a;
+  --accent-light:  #d4ad3a;
+  --accent-dark:   #a07c10;
+  --accent-bg:     #c49a1a;
+
+  /* Type — engraving feel */
   --serif-display: "Old Standard TT", Georgia, serif;
   --serif-body:    "Source Serif 4", Georgia, serif;
   --sans-label:    "Libre Franklin", "Inter", sans-serif;
@@ -27,6 +36,7 @@
   --space-5: 1.25rem;
   --space-6: 1.5rem;
   --space-8: 2rem;
+  --space-10: 2.5rem;
 }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -42,7 +52,24 @@ body {
 
 #app { min-height: 100vh; }
 
-/* ----- App shell --------------------------------------------------------- */
+/* =============================================================================
+   Hatching — a CSS nod to Mróz's dense pen-and-ink line work.
+   Applied sparingly on borders and backgrounds.
+   ============================================================================= */
+
+.hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 2px,
+    rgba(26, 22, 18, 0.06) 2px,
+    rgba(26, 22, 18, 0.06) 3px
+  );
+}
+
+/* =============================================================================
+   App Shell
+   ============================================================================= */
 
 .app-shell {
   min-height: 100vh;
@@ -50,10 +77,12 @@ body {
   flex-direction: column;
 }
 
+/* ----- Masthead ---------------------------------------------------------- */
+
 .app-header {
-  background: var(--paper);
-  border-bottom: 3px double var(--rule-strong);
-  padding: var(--space-3) var(--space-6);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -65,121 +94,129 @@ body {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
 }
 
 .header-top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
 }
 
 .app-title {
   font-family: var(--serif-display);
-  font-size: 1.8rem;
+  font-size: 1.6rem;
   font-weight: 700;
   font-style: italic;
-  color: var(--ink);
-  letter-spacing: -0.02em;
+  color: var(--paper);
+  letter-spacing: 0.02em;
 }
 
 .header-subtitle {
   font-family: var(--sans-label);
-  font-size: 0.72rem;
+  font-size: 0.62rem;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--ink-muted);
+  letter-spacing: 0.18em;
+  color: var(--ink-light);
 }
 
 .btn-create {
   margin-left: auto;
   font-family: var(--sans-label);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--ink);
-  border-radius: 2px;
-  background: var(--paper);
-  color: var(--ink);
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
 
 .btn-create:hover {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--ink);
 }
 
-/* ----- Filter pills ------------------------------------------------------ */
+/* ----- Amber banner bar (filter pills) ----------------------------------- */
 
 .filter-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
+  gap: 0;
+  background: var(--accent-bg);
+  padding: 0 var(--space-6);
 }
 
 .filter-pill {
   font-family: var(--sans-label);
-  font-size: 0.68rem;
-  font-weight: 500;
+  font-size: 0.65rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  background: var(--paper);
-  color: var(--ink-muted);
+  letter-spacing: 0.1em;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background 0.1s;
+  opacity: 0.7;
 }
 
 .filter-pill:hover {
-  border-color: var(--ink-light);
-  color: var(--ink);
+  opacity: 1;
+  background: rgba(26, 22, 18, 0.1);
 }
 
 .filter-pill-active {
-  background: var(--accent);
-  color: var(--paper);
-  border-color: var(--accent);
+  opacity: 1;
+  background: var(--ink);
+  color: var(--accent);
 }
 
 .pill-count {
   font-weight: 400;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
-/* ----- Main content ------------------------------------------------------ */
+/* =============================================================================
+   Main Content
+   ============================================================================= */
 
 .app-main {
   max-width: 64rem;
   width: 100%;
   margin: 0 auto;
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-6) var(--space-6);
   flex: 1;
 }
 
-/* ----- Post section (Letters Page) --------------------------------------- */
+/* =============================================================================
+   Post Section — The Letters Page
+   ============================================================================= */
 
 .post-section {
-  padding: var(--space-3);
+  padding: 0;
 }
 
 .post-header {
   display: flex;
   align-items: baseline;
   gap: var(--space-6);
-  padding: var(--space-4) var(--space-3) var(--space-3);
-  border-bottom: 2px solid var(--ink);
-  margin-bottom: var(--space-4);
+  padding: var(--space-4) 0 var(--space-3);
+  border-bottom: 3px double var(--rule-strong);
+  margin-bottom: var(--space-6);
 }
 
 .post-title {
   font-family: var(--serif-display);
-  font-size: 2rem;
+  font-size: 1.8rem;
   font-weight: 400;
   font-style: italic;
   color: var(--ink);
@@ -187,27 +224,31 @@ body {
 
 .post-count {
   font-family: var(--sans-label);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--ink-muted);
 }
 
-/* ----- Post groups ------------------------------------------------------- */
+/* =============================================================================
+   Post Groups — status sections
+   ============================================================================= */
 
-.post-group { margin-bottom: var(--space-6); }
+.post-group {
+  margin-bottom: var(--space-8);
+}
 
 .post-group-label {
   font-family: var(--sans-label);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   color: var(--ink);
   margin: 0 0 var(--space-2) 0;
   padding-bottom: var(--space-1);
-  border-bottom: 1px solid var(--ink-faint);
+  border-bottom: 2px solid var(--ink);
 }
 
 .post-group-count {
@@ -215,16 +256,19 @@ body {
   color: var(--ink-muted);
 }
 
+/* Priority group: amber accent */
 .post-group-wanted_priority .post-group-label {
-  color: #c45a1a;
-  border-bottom-color: #c45a1a;
+  color: var(--accent-dark);
+  border-bottom-color: var(--accent);
 }
 
 .post-group-wanted_priority .post-row {
-  border-left: 2px solid #c45a1a;
+  border-left: 3px solid var(--accent);
 }
 
-/* ----- Table ------------------------------------------------------------- */
+/* =============================================================================
+   Table — dense, ruled, engraving-like precision
+   ============================================================================= */
 
 .post-table {
   width: 100%;
@@ -235,43 +279,66 @@ body {
 
 .post-table th {
   font-family: var(--sans-label);
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: 0.62rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: var(--ink-muted);
   text-align: left;
   padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--ink-faint);
+  border-bottom: 2px solid var(--ink);
 }
 
 .post-table td {
   padding: var(--space-2);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ink-faint);
   vertical-align: middle;
 }
 
-.post-row { cursor: pointer; }
-.post-row:hover { background: var(--hover-bg); }
-.row-nofile { color: var(--ink-light); }
-.row-expanded { background: var(--hover-bg); }
-
-.col-title { font-weight: 500; }
-.col-category {
-  color: var(--ink-muted);
-  font-size: 0.75rem;
+.post-row {
+  cursor: pointer;
+  transition: background 0.08s;
 }
+
+.post-row:hover {
+  background: var(--hover-bg);
+}
+
+.row-nofile { color: var(--ink-light); }
+
+.row-expanded {
+  background: var(--paper-dark);
+}
+
+.col-title {
+  font-weight: 600;
+  font-family: var(--serif-body);
+  font-size: 0.88rem;
+}
+
+.col-category {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
 .col-file {
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   color: var(--ink-light);
 }
+
 .col-words {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  font-size: 0.72rem;
   color: var(--ink-muted);
-  font-size: 0.78rem;
 }
+
 .col-actions {
   text-align: right;
   white-space: nowrap;
@@ -281,55 +348,123 @@ body {
   align-items: center;
 }
 
-/* ----- Arrow buttons ----------------------------------------------------- */
+/* =============================================================================
+   Arrow buttons — promote/demote, crisp mechanical feel
+   ============================================================================= */
 
 .arrow-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  border: 1px solid var(--rule);
-  border-radius: 3px;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--ink);
+  border-radius: 0;
   background: var(--paper);
-  color: var(--ink-muted);
-  font-size: 0.85rem;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
   padding: 0;
   line-height: 1;
 }
 
-.arrow-btn:hover { background: var(--ink); color: var(--paper); }
-.btn-promote:hover { background: #c45a1a; border-color: #c45a1a; }
-.btn-demote:hover { background: var(--ink-muted); border-color: var(--ink-muted); }
-.btn-remove:hover { background: #8b3a3a; border-color: #8b3a3a; }
+.arrow-btn:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
 
-/* ----- Expanded panel ---------------------------------------------------- */
+.btn-promote:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.btn-demote:hover {
+  background: var(--ink-muted);
+  border-color: var(--ink-muted);
+  color: var(--paper);
+}
+
+.btn-remove:hover {
+  background: #6b2020;
+  border-color: #6b2020;
+  color: var(--paper);
+}
+
+/* =============================================================================
+   Expanded panel — asset paste zone
+   ============================================================================= */
 
 .expand-row td {
   padding: 0;
-  border-bottom: 2px solid var(--ink-faint);
+  border-bottom: 2px solid var(--ink);
 }
 
 .expand-panel {
-  padding: var(--space-3) var(--space-4);
-  background: var(--hover-bg);
+  padding: var(--space-4) var(--space-4);
+  background: var(--paper-dark);
+  /* Subtle hatching overlay */
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 3px,
+    rgba(26, 22, 18, 0.025) 3px,
+    rgba(26, 22, 18, 0.025) 4px
+  );
 }
 
-.paste-zone {
-  border: 2px dashed var(--rule);
-  border-radius: 4px;
-  padding: var(--space-4) var(--space-3);
-  text-align: center;
-  font-family: var(--sans-label);
-  font-size: 0.75rem;
-  color: var(--ink-muted);
+.expand-actions {
+  display: flex;
+  gap: var(--space-2);
   margin-bottom: var(--space-3);
-  transition: border-color 0.15s;
 }
 
-.paste-zone:hover { border-color: var(--ink-light); }
+.btn-expand-action {
+  font-family: var(--sans-label);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--space-2) var(--space-4);
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  background: var(--accent);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.btn-expand-action:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.btn-expand-secondary {
+  background: var(--paper);
+  color: var(--ink-muted);
+  border-color: var(--ink-faint);
+}
+
+.btn-expand-secondary:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.btn-expand-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.expand-hint {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  color: var(--ink-light);
+  letter-spacing: 0.04em;
+  align-self: center;
+}
 
 .asset-grid {
   display: flex;
@@ -343,8 +478,8 @@ body {
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1);
-  border: 1px solid var(--rule);
-  border-radius: 3px;
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
   background: var(--paper);
   cursor: pointer;
   transition: border-color 0.12s;
@@ -352,20 +487,18 @@ body {
 }
 
 .asset-thumb:hover {
-  border-color: var(--ink-light);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  border-color: var(--accent);
 }
 
 .asset-thumb img {
   max-width: 100px;
   max-height: 80px;
   object-fit: contain;
-  border-radius: 2px;
 }
 
 .asset-name {
   font-family: var(--mono);
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   color: var(--ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -373,7 +506,9 @@ body {
   max-width: 100px;
 }
 
-/* ----- Create form ------------------------------------------------------- */
+/* =============================================================================
+   Create Form
+   ============================================================================= */
 
 .create-form {
   max-width: 32rem;
@@ -381,20 +516,26 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  padding: var(--space-6);
+  border: 2px solid var(--ink);
+  background: var(--paper);
 }
 
 .create-form h2 {
   font-family: var(--serif-display);
   font-weight: 400;
   font-style: italic;
+  font-size: 1.4rem;
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--ink);
 }
 
 .create-form label {
   font-family: var(--sans-label);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.65rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: var(--ink-muted);
 }
 
@@ -403,8 +544,8 @@ body {
   font-family: var(--sans-body);
   font-size: 0.9rem;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--rule);
-  border-radius: 3px;
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
   background: var(--paper);
   color: var(--ink);
 }
@@ -418,35 +559,49 @@ body {
 .form-actions {
   display: flex;
   gap: var(--space-2);
-  margin-top: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .btn-submit {
   font-family: var(--sans-label);
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: var(--space-2) var(--space-4);
-  border: none;
-  border-radius: 3px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: var(--space-2) var(--space-6);
+  border: 2px solid var(--accent);
+  border-radius: 0;
   background: var(--accent);
-  color: var(--paper);
+  color: var(--ink);
   cursor: pointer;
+  transition: background 0.12s;
 }
 
-.btn-submit:hover { opacity: 0.9; }
+.btn-submit:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
 
 .btn-cancel {
   font-family: var(--sans-label);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 500;
   padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--rule);
-  border-radius: 3px;
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
   background: var(--paper);
   color: var(--ink-muted);
   cursor: pointer;
 }
 
-/* ----- Status toast ------------------------------------------------------ */
+.btn-cancel:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* =============================================================================
+   Status Toast
+   ============================================================================= */
 
 .status-toast {
   position: fixed;
@@ -454,21 +609,382 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: var(--ink);
-  color: var(--paper);
-  padding: var(--space-2) var(--space-4);
-  border-radius: 4px;
-  font-family: var(--sans-body);
-  font-size: 0.82rem;
+  color: var(--accent);
+  padding: var(--space-2) var(--space-6);
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  font-family: var(--sans-label);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   cursor: pointer;
   z-index: 200;
 }
 
-/* ----- Empty state ------------------------------------------------------- */
+/* =============================================================================
+   Empty State
+   ============================================================================= */
 
 .empty-state {
   text-align: center;
-  padding: var(--space-8);
+  padding: var(--space-10) var(--space-8);
   font-family: var(--serif-body);
   font-style: italic;
+  font-size: 1.1rem;
+  color: var(--ink-light);
+}
+
+/* =============================================================================
+   Header Actions — source buttons
+   ============================================================================= */
+
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.btn-source {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-light);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.btn-source:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* =============================================================================
+   Source Browsers
+   ============================================================================= */
+
+.source-browser {
+  padding: 0;
+}
+
+.btn-back {
+  font-family: var(--sans-label);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--ink-faint);
+  border-radius: 0;
+  background: var(--paper);
   color: var(--ink-muted);
+  cursor: pointer;
+  margin-bottom: var(--space-4);
+}
+
+.btn-back:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.browser-title {
+  font-family: var(--serif-display);
+  font-size: 1.4rem;
+  font-weight: 400;
+  font-style: italic;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--ink);
+}
+
+.btn-select {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--space-1) var(--space-2);
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent-dark);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.btn-select:hover {
+  background: var(--accent);
+  color: var(--ink);
+}
+
+/* ----- Photo browser ----------------------------------------------------- */
+
+.date-picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.date-input {
+  font-family: var(--sans-body);
+  font-size: 0.9rem;
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+.photo-card {
+  border: 2px solid var(--ink-faint);
+  background: var(--paper);
+  cursor: pointer;
+  transition: border-color 0.12s;
+  overflow: hidden;
+}
+
+.photo-card:hover {
+  border-color: var(--accent);
+}
+
+.photo-thumb-img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-meta {
+  padding: var(--space-1) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  color: var(--ink-muted);
+}
+
+.photo-time {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  color: var(--ink-light);
+}
+
+/* ----- Path form --------------------------------------------------------- */
+
+.path-form {
+  max-width: 40rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.path-input {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+  width: 100%;
+}
+
+.path-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.path-form label {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-muted);
+}
+
+.path-form input {
+  font-family: var(--sans-body);
+  font-size: 0.9rem;
+  padding: var(--space-2) var(--space-3);
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.path-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* =============================================================================
+   Today button — photo date picker
+   ============================================================================= */
+
+.btn-today {
+  font-family: var(--sans-label);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--space-1) var(--space-3);
+  border: 2px solid var(--ink-faint);
+  border-radius: 0;
+  background: var(--paper);
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.btn-today:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+/* =============================================================================
+   File Browser
+   ============================================================================= */
+
+.browser-breadcrumb {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  padding: var(--space-1) 0 var(--space-3);
+  border-bottom: 1px solid var(--ink-faint);
+  margin-bottom: var(--space-3);
+  word-break: break-all;
+}
+
+.breadcrumb-path {
+  color: var(--ink-muted);
+}
+
+.browser-path-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+
+.browser-path-row .path-input {
+  flex: 1;
+}
+
+.file-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 2px solid var(--ink-faint);
+}
+
+.browser-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--ink-faint);
+  transition: background 0.08s;
+}
+
+.browser-entry:last-child {
+  border-bottom: none;
+}
+
+.browser-entry:hover {
+  background: var(--hover-bg);
+}
+
+.entry-icon {
+  font-size: 0.85rem;
+  width: 1.4rem;
+  flex-shrink: 0;
+}
+
+.entry-name {
+  flex: 1;
+  font-family: var(--sans-body);
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-dir .entry-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.browser-dir .entry-name:hover {
+  color: var(--accent-dark);
+  text-decoration: underline;
+}
+
+.browser-file .entry-name {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  cursor: default;
+}
+
+/* =============================================================================
+   Mróz margin illustrations
+   ============================================================================= */
+
+@media (min-width: 80rem) {
+  .app-main::before {
+    content: '';
+    position: fixed;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 140px;
+    height: 360px;
+    background: url('mroz/mroz-05.jpg') center/contain no-repeat;
+    opacity: 0.75;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app-main::after {
+    content: '';
+    position: fixed;
+    right: 1rem;
+    top: 40%;
+    transform: translateY(-50%);
+    width: 140px;
+    height: 360px;
+    background: url('mroz/mroz-08.jpg') center/contain no-repeat;
+    opacity: 0.75;
+    pointer-events: none;
+    z-index: 0;
+  }
+}
+
+/* Illustration behind the empty state */
+.post-section .empty-state {
+  background-image: url('mroz/mroz-07.jpg');
+  background-size: 100px auto;
+  background-position: center 1rem;
+  background-repeat: no-repeat;
+  padding-top: calc(var(--space-10) + 110px);
+  opacity: 0.8;
 }

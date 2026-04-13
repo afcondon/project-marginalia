@@ -4,6 +4,7 @@ module Klapaucius.Server.Main where
 import Prelude
 
 import API.Posts as Posts
+import API.Sources as Sources
 import Control.Monad.Error.Class (try)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -31,8 +32,15 @@ data Route
   = Posts
   | PostById Int
   | PostAssets Int
+  | PostOpen Int
   | Stats
   | Categories
+  -- Source browsing
+  | SourceTickets
+  | SourcePhotos
+  | SourceFromPhoto
+  | SourceFromMusic
+  | BrowseDirectory
 
 derive instance Generic Route _
 
@@ -41,8 +49,14 @@ route = root $ sum
   { "Posts": path "api/posts" noArgs
   , "PostById": path "api/posts" (int segment)
   , "PostAssets": path "api/posts" (suffix (int segment) "assets")
+  , "PostOpen": path "api/posts" (suffix (int segment) "open")
   , "Stats": path "api/stats" noArgs
   , "Categories": path "api/categories" noArgs
+  , "SourceTickets": path "api/sources/tickets" noArgs
+  , "SourcePhotos": path "api/sources/photos" noArgs
+  , "SourceFromPhoto": path "api/sources/from-photo" noArgs
+  , "SourceFromMusic": path "api/sources/from-music" noArgs
+  , "BrowseDirectory": path "api/sources/browse" noArgs
   }
 
 -- =============================================================================
@@ -124,6 +138,11 @@ main = launchAff_ do
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
+      PostOpen postId -> case method of
+        Post -> Posts.openInVSCode db postId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
       Stats -> case method of
         Get -> Posts.getStats db
         Options -> ok' corsHeaders ""
@@ -131,5 +150,42 @@ main = launchAff_ do
 
       Categories -> case method of
         Get -> Posts.getCategories db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Source browsing
+      SourceTickets -> case method of
+        Get -> Sources.listTickets
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SourcePhotos -> case method of
+        Get -> do
+          let mDate = Object.lookup "date" query
+          case mDate of
+            Nothing -> ok' jsonHeaders """{"error": "Missing ?date= parameter"}"""
+            Just d -> Sources.listPhotosByDate d
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SourceFromPhoto -> case method of
+        Post -> do
+          bodyStr <- toString body
+          Sources.createFromPhoto db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SourceFromMusic -> case method of
+        Post -> do
+          bodyStr <- toString body
+          Sources.createFromMusic db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      BrowseDirectory -> case method of
+        Get -> do
+          case Object.lookup "path" query of
+            Nothing -> ok' jsonHeaders """{"error": "Missing ?path= parameter"}"""
+            Just dirPath -> Sources.listDirectory dirPath
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""

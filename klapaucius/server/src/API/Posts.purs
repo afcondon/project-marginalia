@@ -9,6 +9,7 @@ module API.Posts
   , saveAsset
   , getStats
   , getCategories
+  , openInVSCode
   ) where
 
 import Prelude
@@ -43,6 +44,7 @@ foreign import buildPostListJson :: Rows -> String
 foreign import buildPostDetailJson :: Foreign -> String
 foreign import getRowString_ :: String -> Foreign -> String
 foreign import getRowInt_ :: String -> Foreign -> Int
+foreign import openPostInVSCode :: String -> String -> String -> Effect String
 foreign import buildStatsJson :: Rows -> Rows -> String
 foreign import buildCategoriesJson :: Rows -> String
 
@@ -158,6 +160,24 @@ deletePost :: Database -> Int -> Aff Response
 deletePost db postId = do
   run db "DELETE FROM blog_posts WHERE id = ?" [ unsafeToForeign postId ]
   ok' jsonHeaders """{"ok": true}"""
+
+-- =============================================================================
+-- POST /api/posts/:id/open — open in VS Code
+-- =============================================================================
+
+openInVSCode :: Database -> Int -> Aff Response
+openInVSCode db postId = do
+  rows <- queryAllParams db
+    "SELECT category, slug, title FROM blog_posts WHERE id = ?"
+    [ unsafeToForeign postId ]
+  case firstRow rows of
+    Nothing -> notFound
+    Just row -> do
+      let category = getRowString_ "category" row
+      let slug = getRowString_ "slug" row
+      let title = getRowString_ "title" row
+      result <- liftEffect $ openPostInVSCode category slug title
+      ok' jsonHeaders result
 
 -- =============================================================================
 -- GET /api/posts/:id/assets

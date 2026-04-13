@@ -13,6 +13,7 @@
     "serve:frontend": "node tools/frontend-server.mjs"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "duckdb": "^1.4.4"
   },
   "devDependencies": {

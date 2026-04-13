@@ -4,6 +4,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +16,23 @@ const _rawBlogRoot = process.env.KLAPAUCIUS_ROOT || _defaultBlogRoot;
 const BLOG_ROOT = _rawBlogRoot.endsWith('/') ? _rawBlogRoot.slice(0, -1) : _rawBlogRoot;
 const PORT = parseInt(process.env.KLAPAUCIUS_FRONTEND_PORT || '3401', 10);
 const API_TARGET = { host: '127.0.0.1', port: 3400 };
+
+const THUMB_CACHE = path.join(BLOG_ROOT, '.thumb-cache');
+const RAW_EXTS = new Set(['.dng', '.raf', '.cr2', '.nef', '.raw']);
+
+function thumbPath(originalPath) {
+  const hash = crypto.createHash('sha256').update(originalPath).digest('hex').slice(0, 16);
+  return path.join(THUMB_CACHE, hash + '.jpg');
+}
+
+function ensureThumb(originalPath) {
+  const dest = thumbPath(originalPath);
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(THUMB_CACHE, { recursive: true });
+    execSync(`sips -s format jpeg -Z 400 ${JSON.stringify(originalPath)} --out ${JSON.stringify(dest)}`, { stdio: 'ignore' });
+  }
+  return dest;
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -72,15 +91,61 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Source media: serve photo/music files from their original locations.
+  // Path: /source-media/<absolute-path> — the API returns these URLs.
+  // Only serves files, with basic extension allowlisting.
+  if (url.startsWith('/source-media/')) {
+    const absPath = decodeURIComponent(url.slice('/source-media'.length).split('?')[0]);
+    const resolved = path.normalize(absPath);
+    // Only serve image/audio files (no arbitrary filesystem reads)
+    const ext = path.extname(resolved).toLowerCase();
+    const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.tif', '.tiff',
+                     '.raw', '.raf', '.cr2', '.nef', '.dng',
+                     '.mp3', '.m4a', '.flac', '.wav', '.aac', '.ogg'];
+    if (!allowed.includes(ext)) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      res.end('forbidden file type\n');
+      return;
+    }
+    fs.stat(resolved, (err, stat) => {
+      if (err || !stat.isFile()) {
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end('not found\n');
+        return;
+      }
+      if (RAW_EXTS.has(ext)) {
+        try {
+          const cached = ensureThumb(resolved);
+          streamFile(cached, res);
+        } catch (thumbErr) {
+          res.writeHead(500, { 'content-type': 'text/plain' });
+          res.end(`thumbnail generation failed: ${thumbErr.message}\n`);
+        }
+      } else {
+        streamFile(resolved, res);
+      }
+    });
+    return;
+  }
+
   // Blog assets: /blog-assets/<category>/<slug>/<file>
   if (url.startsWith('/blog-assets/')) {
     const subPath = url.slice('/blog-assets/'.length).split('?')[0];
     const resolved = path.normalize(path.join(BLOG_ROOT, subPath));
     if (resolved.startsWith(BLOG_ROOT)) {
+      const blogExt = path.extname(resolved).toLowerCase();
       fs.stat(resolved, (err, stat) => {
         if (err || !stat.isFile()) {
           res.writeHead(404, { 'content-type': 'text/plain' });
           res.end('not found\n');
+        } else if (RAW_EXTS.has(blogExt)) {
+          try {
+            const cached = ensureThumb(resolved);
+            streamFile(cached, res);
+          } catch (thumbErr) {
+            res.writeHead(500, { 'content-type': 'text/plain' });
+            res.end(`thumbnail generation failed: ${thumbErr.message}\n`);
+          }
         } else {
           streamFile(resolved, res);
         }

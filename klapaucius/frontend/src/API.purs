@@ -15,6 +15,17 @@ module API
   , CategoryRecord
   , CreatePostInput
   , UpdatePostInput
+  -- Source browsing
+  , fetchTickets
+  , TicketRecord
+  , fetchPhotosByDate
+  , PhotoRecord
+  , createFromPhoto
+  , createFromMusic
+  , fetchDirectory
+  , DirectoryEntry
+  , DirectoryResponse
+  , openInVSCode
   ) where
 
 import Prelude
@@ -173,6 +184,91 @@ fetchCategories = do
   case result of
     Left _ -> pure []
     Right response -> pure (parseCategoriesResponse_ response.body)
+
+-- =============================================================================
+-- Source Browsing
+-- =============================================================================
+
+foreign import parseTicketsResponse_ :: String -> { tickets :: Array TicketRecord, count :: Int }
+foreign import parsePhotosResponse_ :: String -> { photos :: Array PhotoRecord, count :: Int }
+foreign import parseDirectoryResponse_ :: String -> DirectoryResponse
+
+type TicketRecord =
+  { idx :: Int
+  , artist :: String
+  , venue :: String
+  , date :: String
+  , city :: String
+  , price :: String
+  }
+
+type PhotoRecord =
+  { imageId :: Int
+  , fileName :: String
+  , captureTime :: String
+  , rating :: Number
+  , width :: Int
+  , height :: Int
+  , extension :: String
+  , filePath :: String
+  , thumbUrl :: String
+  }
+
+type DirectoryEntry =
+  { name :: String
+  , isDirectory :: Boolean
+  , path :: String
+  }
+
+type DirectoryResponse =
+  { items :: Array DirectoryEntry
+  , count :: Int
+  , path :: String
+  }
+
+fetchTickets :: Aff { tickets :: Array TicketRecord, count :: Int }
+fetchTickets = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/sources/tickets")
+  case result of
+    Left _ -> pure { tickets: [], count: 0 }
+    Right response -> pure (parseTicketsResponse_ response.body)
+
+fetchPhotosByDate :: String -> Aff { photos :: Array PhotoRecord, count :: Int }
+fetchPhotosByDate dateStr = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/sources/photos?date=" <> dateStr)
+  case result of
+    Left _ -> pure { photos: [], count: 0 }
+    Right response -> pure (parsePhotosResponse_ response.body)
+
+createFromPhoto :: { path :: String, title :: String, slug :: String } -> Aff Boolean
+createFromPhoto input = do
+  let body = "{\"path\":\"" <> input.path <> "\",\"title\":\"" <> input.title <> "\",\"slug\":\"" <> input.slug <> "\"}"
+  result <- AX.post ResponseFormat.string (baseUrl <> "/api/sources/from-photo") (Just (RequestBody.string body))
+  case result of
+    Left _ -> pure false
+    Right _ -> pure true
+
+createFromMusic :: { path :: String, title :: String, slug :: String } -> Aff Boolean
+createFromMusic input = do
+  let body = "{\"path\":\"" <> input.path <> "\",\"title\":\"" <> input.title <> "\",\"slug\":\"" <> input.slug <> "\"}"
+  result <- AX.post ResponseFormat.string (baseUrl <> "/api/sources/from-music") (Just (RequestBody.string body))
+  case result of
+    Left _ -> pure false
+    Right _ -> pure true
+
+fetchDirectory :: String -> Aff DirectoryResponse
+fetchDirectory dirPath = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/sources/browse?path=" <> dirPath)
+  case result of
+    Left _ -> pure { items: [], count: 0, path: dirPath }
+    Right response -> pure (parseDirectoryResponse_ response.body)
+
+openInVSCode :: Int -> Aff Boolean
+openInVSCode postId = do
+  result <- AX.post ResponseFormat.string (baseUrl <> "/api/posts/" <> show postId <> "/open") Nothing
+  case result of
+    Left _ -> pure false
+    Right _ -> pure true
 
 buildQS :: Maybe String -> Maybe String -> String
 buildQS mCat mStat =

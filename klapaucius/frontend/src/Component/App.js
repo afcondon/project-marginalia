@@ -50,3 +50,10 @@ export const onPaste_ = (callback) => () => {
   window.addEventListener('paste', handler);
   return () => window.removeEventListener('paste', handler);
 };
+
+export const todayMMDD_ = () => {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return mm + '-' + dd;
+};

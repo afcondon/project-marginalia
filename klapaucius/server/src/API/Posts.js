@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawn } from 'child_process';
 
 const _defaultRoot = path.join(os.homedir(), 'Documents', 'klapaucius');
 const _rawRoot = process.env.KLAPAUCIUS_ROOT || _defaultRoot;
@@ -33,6 +34,28 @@ const readPostInfo = (category, slug) => {
     return { wordCount, hasFile: true };
   } catch {
     return { wordCount: 0, hasFile: false };
+  }
+};
+
+// Open a post's index.md in VS Code. Creates the directory + file if needed.
+export const openPostInVSCode = (category) => (slug) => (title) => () => {
+  if (!isSafeSlug(slug)) return JSON.stringify({ error: 'invalid slug' });
+  const dir = postDir(category, slug);
+  const indexFile = postFile(category, slug);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(indexFile)) {
+      const template = '# ' + (title || 'Untitled') + '\n\n';
+      fs.writeFileSync(indexFile, template, { flag: 'wx' });
+    }
+    const child = spawn('open', ['-a', 'Visual Studio Code', indexFile], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return JSON.stringify({ ok: true, path: indexFile });
+  } catch (e) {
+    return JSON.stringify({ error: String(e.message || e) });
   }
 };
 

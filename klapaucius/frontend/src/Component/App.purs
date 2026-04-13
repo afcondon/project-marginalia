@@ -25,6 +25,7 @@ import Web.Event.Event (Event)
 
 foreign import stopPropagation_ :: Event -> Effect Unit
 foreign import copyToClipboard :: String -> Effect Unit
+foreign import todayMMDD_ :: Effect String
 
 type ClipboardImageData = { filename :: String, base64 :: String }
 foreign import onPaste_ :: (ClipboardImageData -> Effect Unit) -> Effect (Effect Unit)
@@ -32,6 +33,18 @@ foreign import onPaste_ :: (ClipboardImageData -> Effect Unit) -> Effect (Effect
 -- =============================================================================
 -- Types
 -- =============================================================================
+
+-- | Which view is active
+data ViewMode
+  = PostTable
+  | CreateForm
+  | TicketBrowser
+  | PhotoBrowser
+  | PhotoFromPath
+  | MusicFromPath
+  | FileBrowser
+
+derive instance Eq ViewMode
 
 type State =
   { posts :: Array API.PostRecord
@@ -44,11 +57,20 @@ type State =
   , expandedPost :: Maybe Int
   , expandedAssets :: Array API.AssetRecord
   , uploading :: Boolean
+  -- View mode
+  , viewMode :: ViewMode
   -- Create form
-  , showCreateForm :: Boolean
   , formTitle :: String
   , formCategory :: String
   , formSlug :: String
+  -- Source browsers
+  , tickets :: Array API.TicketRecord
+  , photos :: Array API.PhotoRecord
+  , photoDate :: String
+  , pathInput :: String   -- for photo-from-path and music-from-path
+  -- File browser (for music)
+  , browserPath :: String
+  , browserEntries :: Array API.DirectoryEntry
   }
 
 data Action
@@ -61,12 +83,26 @@ data Action
   | SetPostStatus Int String
   | PasteImage ClipboardImageData
   | CopyMarkdown String
-  | OpenCreateForm
-  | CloseCreateForm
+  | OpenInVSCode Int
+  | SetView ViewMode
   | SetFormTitle String
   | SetFormCategory String
   | SetFormSlug String
   | SubmitCreate
+  -- Source browsers
+  | LoadTickets
+  | SelectTicket API.TicketRecord
+  | SetPhotoDate String
+  | LoadPhotos
+  | SelectPhoto API.PhotoRecord
+  | SetPathInput String
+  | SubmitPhotoFromPath
+  | SubmitMusicFromPath
+  | TodayPhotos
+  -- File browser
+  | SetBrowserPath String
+  | BrowsePath String
+  | SelectEntry API.DirectoryEntry
   | ClearError
 
 -- =============================================================================
@@ -94,10 +130,16 @@ initialState =
   , expandedPost: Nothing
   , expandedAssets: []
   , uploading: false
-  , showCreateForm: false
+  , viewMode: PostTable
   , formTitle: ""
   , formCategory: "freestanding"
   , formSlug: ""
+  , tickets: []
+  , photos: []
+  , photoDate: ""
+  , pathInput: ""
+  , browserPath: "/Volumes/Crucial4TB/Music/"
+  , browserEntries: []
   }
 
 -- =============================================================================
@@ -128,16 +170,29 @@ renderHeader state =
                 [ HH.text "Klapaucius" ]
             , HH.span [ HP.class_ (H.ClassName "header-subtitle") ]
                 [ HH.text "blog workbench" ]
-            , HH.button
-                [ HP.class_ (H.ClassName "btn-create")
-                , HE.onClick \_ -> OpenCreateForm
+            , HH.div [ HP.class_ (H.ClassName "header-actions") ]
+                [ sourceBtn "Tickets" TicketBrowser
+                , sourceBtn "Photos" PhotoBrowser
+                , sourceBtn "Photo Path" PhotoFromPath
+                , sourceBtn "Music" FileBrowser
+                , HH.button
+                    [ HP.class_ (H.ClassName "btn-create")
+                    , HE.onClick \_ -> SetView CreateForm
+                    ]
+                    [ HH.text "+ New" ]
                 ]
-                [ HH.text "+ New Post" ]
             ]
         , HH.div [ HP.class_ (H.ClassName "filter-row") ]
             (renderCategoryPills state)
         ]
     ]
+
+sourceBtn :: forall m. String -> ViewMode -> H.ComponentHTML Action () m
+sourceBtn label mode = HH.button
+  [ HP.class_ (H.ClassName "btn-source")
+  , HE.onClick \_ -> SetView mode
+  ]
+  [ HH.text label ]
 
 renderCategoryPills :: forall m. State -> Array (H.ComponentHTML Action () m)
 renderCategoryPills state =
@@ -161,22 +216,20 @@ renderCategoryPills state =
     ]
 
 renderContent :: forall m. State -> H.ComponentHTML Action () m
-renderContent state =
-  if state.showCreateForm
-    then renderCreateForm state
-    else renderPostTable state
+renderContent state = case state.viewMode of
+  PostTable     -> renderPostTable state
+  CreateForm    -> renderCreateForm state
+  TicketBrowser -> renderTicketBrowser state
+  PhotoBrowser  -> renderPhotoBrowser state
+  PhotoFromPath -> renderPhotoFromPath state
+  MusicFromPath -> renderMusicFromPath state
+  FileBrowser   -> renderFileBrowser state
 
 renderPostTable :: forall m. State -> H.ComponentHTML Action () m
 renderPostTable state =
   let grouped = groupByStatus state.posts
   in HH.div [ HP.class_ (H.ClassName "post-section") ]
-    [ HH.div [ HP.class_ (H.ClassName "post-header") ]
-        [ HH.span [ HP.class_ (H.ClassName "post-title") ]
-            [ HH.text "The Letters Page" ]
-        , HH.span [ HP.class_ (H.ClassName "post-count") ]
-            [ HH.text (show (Array.length state.posts) <> " entries") ]
-        ]
-    , if Array.null state.posts
+    [ if Array.null state.posts
         then HH.div [ HP.class_ (H.ClassName "empty-state") ]
           [ HH.text "No blog posts yet. Click '+ New Post' to get started." ]
         else HH.div_
@@ -274,15 +327,19 @@ rowActions groupStatus post = case groupStatus of
     [ HH.text label ]
 
 renderExpandedPanel :: forall m. State -> API.PostRecord -> H.ComponentHTML Action () m
-renderExpandedPanel state _post =
+renderExpandedPanel state post =
   HH.tr [ HP.class_ (H.ClassName "expand-row") ]
     [ HH.td [ HP.colSpan 5 ]
         [ HH.div [ HP.class_ (H.ClassName "expand-panel") ]
-            [ HH.div [ HP.class_ (H.ClassName "paste-zone") ]
-                [ HH.text
-                    (if state.uploading
-                      then "Uploading\x2026"
-                      else "Paste screenshot (Cmd+V) to attach")
+            [ HH.div [ HP.class_ (H.ClassName "expand-actions") ]
+                [ HH.button
+                    [ HP.class_ (H.ClassName "btn-expand-action")
+                    , HE.onClick \_ -> OpenInVSCode post.id
+                    , HP.title "Open index.md in VS Code"
+                    ]
+                    [ HH.text (if post.hasFile then "Edit in VS Code" else "Start in VS Code") ]
+                , HH.span [ HP.class_ (H.ClassName "expand-hint") ]
+                    [ HH.text (if state.uploading then "Uploading\x2026" else "Cmd+V to paste image") ]
                 ]
             , if Array.null state.expandedAssets
                 then HH.text ""
@@ -345,11 +402,251 @@ renderCreateForm state =
             [ HH.text "Create" ]
         , HH.button
             [ HP.class_ (H.ClassName "btn-cancel")
-            , HE.onClick \_ -> CloseCreateForm
+            , HE.onClick \_ -> SetView PostTable
             ]
             [ HH.text "Cancel" ]
         ]
     ]
+
+-- =============================================================================
+-- Source Browsers
+-- =============================================================================
+
+backBtn :: forall m. H.ComponentHTML Action () m
+backBtn = HH.button
+  [ HP.class_ (H.ClassName "btn-back")
+  , HE.onClick \_ -> SetView PostTable
+  ]
+  [ HH.text "\x2190 Back" ]
+
+-- | Concert ticket browser — table sorted by artist
+renderTicketBrowser :: forall m. State -> H.ComponentHTML Action () m
+renderTicketBrowser state =
+  HH.div [ HP.class_ (H.ClassName "source-browser") ]
+    [ backBtn
+    , HH.h2 [ HP.class_ (H.ClassName "browser-title") ] [ HH.text "Concert Tickets" ]
+    , if Array.null state.tickets
+        then HH.p [ HP.class_ (H.ClassName "empty-state") ] [ HH.text "Loading tickets\x2026" ]
+        else HH.table [ HP.class_ (H.ClassName "post-table") ]
+          [ HH.thead_
+              [ HH.tr_
+                  [ HH.th_ [ HH.text "Artist" ]
+                  , HH.th_ [ HH.text "Venue" ]
+                  , HH.th_ [ HH.text "City" ]
+                  , HH.th_ [ HH.text "Date" ]
+                  , HH.th_ [ HH.text "" ]
+                  ]
+              ]
+          , HH.tbody_
+              (map renderTicketRow state.tickets)
+          ]
+    ]
+
+renderTicketRow :: forall m. API.TicketRecord -> H.ComponentHTML Action () m
+renderTicketRow t =
+  HH.tr [ HP.class_ (H.ClassName "post-row") ]
+    [ HH.td [ HP.class_ (H.ClassName "col-title") ] [ HH.text t.artist ]
+    , HH.td_ [ HH.text t.venue ]
+    , HH.td [ HP.class_ (H.ClassName "col-category") ] [ HH.text t.city ]
+    , HH.td [ HP.class_ (H.ClassName "col-file") ] [ HH.text t.date ]
+    , HH.td [ HP.class_ (H.ClassName "col-actions") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "btn-select")
+            , HE.onClick \_ -> SelectTicket t
+            ]
+            [ HH.text "Blog this" ]
+        ]
+    ]
+
+-- | Photo browser — pick a date, see photos, select one
+renderPhotoBrowser :: forall m. State -> H.ComponentHTML Action () m
+renderPhotoBrowser state =
+  HH.div [ HP.class_ (H.ClassName "source-browser") ]
+    [ backBtn
+    , HH.h2 [ HP.class_ (H.ClassName "browser-title") ] [ HH.text "Photos by Date" ]
+    , HH.div [ HP.class_ (H.ClassName "date-picker-row") ]
+        [ HH.input
+            [ HP.type_ HP.InputText
+            , HP.value state.photoDate
+            , HE.onValueInput SetPhotoDate
+            , HP.placeholder "MM-DD"
+            , HP.class_ (H.ClassName "date-input")
+            ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn-today")
+            , HE.onClick \_ -> TodayPhotos
+            ]
+            [ HH.text "Today" ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn-submit")
+            , HE.onClick \_ -> LoadPhotos
+            ]
+            [ HH.text "Load" ]
+        , HH.span [ HP.class_ (H.ClassName "post-count") ]
+            [ HH.text (show (Array.length state.photos) <> " photos") ]
+        ]
+    , if Array.null state.photos
+        then HH.text ""
+        else HH.div [ HP.class_ (H.ClassName "photo-grid") ]
+          (map renderPhotoCard state.photos)
+    ]
+
+renderPhotoCard :: forall m. API.PhotoRecord -> H.ComponentHTML Action () m
+renderPhotoCard p =
+  HH.div
+    [ HP.class_ (H.ClassName "photo-card")
+    , HE.onClick \_ -> SelectPhoto p
+    , HP.title (p.fileName <> " \x2014 " <> p.captureTime)
+    ]
+    [ HH.img [ HP.src p.thumbUrl, HP.alt p.fileName, HP.class_ (H.ClassName "photo-thumb-img") ]
+    , HH.div [ HP.class_ (H.ClassName "photo-meta") ]
+        [ HH.span_ [ HH.text p.fileName ]
+        , HH.span [ HP.class_ (H.ClassName "photo-time") ]
+            [ HH.text (String.take 10 p.captureTime) ]
+        ]
+    ]
+
+-- | Photo from path — text input for a fully qualified path
+renderPhotoFromPath :: forall m. State -> H.ComponentHTML Action () m
+renderPhotoFromPath state =
+  HH.div [ HP.class_ (H.ClassName "source-browser") ]
+    [ backBtn
+    , HH.h2 [ HP.class_ (H.ClassName "browser-title") ] [ HH.text "Photo from Path" ]
+    , HH.div [ HP.class_ (H.ClassName "path-form") ]
+        [ HH.label_ [ HH.text "Photo path" ]
+        , HH.input
+            [ HP.value state.pathInput
+            , HE.onValueInput SetPathInput
+            , HP.placeholder "/Volumes/Crucial4TB/Photos/..."
+            , HP.autofocus true
+            , HP.class_ (H.ClassName "path-input")
+            ]
+        , HH.label_ [ HH.text "Title" ]
+        , HH.input
+            [ HP.value state.formTitle
+            , HE.onValueInput SetFormTitle
+            , HP.placeholder "Post title"
+            ]
+        , HH.label_ [ HH.text "Slug" ]
+        , HH.input
+            [ HP.value state.formSlug
+            , HE.onValueInput SetFormSlug
+            , HP.placeholder "url-safe-slug"
+            ]
+        , HH.div [ HP.class_ (H.ClassName "form-actions") ]
+            [ HH.button
+                [ HP.class_ (H.ClassName "btn-submit")
+                , HE.onClick \_ -> SubmitPhotoFromPath
+                ]
+                [ HH.text "Create Post" ]
+            ]
+        ]
+    ]
+
+-- | Music from path — text input for a file or folder path
+renderMusicFromPath :: forall m. State -> H.ComponentHTML Action () m
+renderMusicFromPath state =
+  HH.div [ HP.class_ (H.ClassName "source-browser") ]
+    [ backBtn
+    , HH.h2 [ HP.class_ (H.ClassName "browser-title") ] [ HH.text "Music from Path" ]
+    , HH.div [ HP.class_ (H.ClassName "path-form") ]
+        [ HH.label_ [ HH.text "Track or album path" ]
+        , HH.input
+            [ HP.value state.pathInput
+            , HE.onValueInput SetPathInput
+            , HP.placeholder "/Volumes/Crucial4TB/Music/Artist/Album/..."
+            , HP.autofocus true
+            , HP.class_ (H.ClassName "path-input")
+            ]
+        , HH.label_ [ HH.text "Title" ]
+        , HH.input
+            [ HP.value state.formTitle
+            , HE.onValueInput SetFormTitle
+            , HP.placeholder "Post title"
+            ]
+        , HH.label_ [ HH.text "Slug" ]
+        , HH.input
+            [ HP.value state.formSlug
+            , HE.onValueInput SetFormSlug
+            , HP.placeholder "url-safe-slug"
+            ]
+        , HH.div [ HP.class_ (H.ClassName "form-actions") ]
+            [ HH.button
+                [ HP.class_ (H.ClassName "btn-submit")
+                , HE.onClick \_ -> SubmitMusicFromPath
+                ]
+                [ HH.text "Create Post" ]
+            ]
+        ]
+    ]
+
+-- | Music file browser — navigate directories, select a file or folder
+renderFileBrowser :: forall m. State -> H.ComponentHTML Action () m
+renderFileBrowser state =
+  HH.div [ HP.class_ (H.ClassName "source-browser") ]
+    [ backBtn
+    , HH.h2 [ HP.class_ (H.ClassName "browser-title") ] [ HH.text "Music Browser" ]
+    , HH.div [ HP.class_ (H.ClassName "browser-breadcrumb") ]
+        [ HH.span [ HP.class_ (H.ClassName "breadcrumb-path") ]
+            [ HH.text state.browserPath ]
+        ]
+    , HH.div [ HP.class_ (H.ClassName "browser-path-row") ]
+        [ HH.input
+            [ HP.value state.browserPath
+            , HE.onValueInput SetBrowserPath
+            , HP.placeholder "/Volumes/Crucial4TB/Music/"
+            , HP.class_ (H.ClassName "path-input")
+            ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn-submit")
+            , HE.onClick \_ -> BrowsePath state.browserPath
+            ]
+            [ HH.text "Go" ]
+        ]
+    , if Array.null state.browserEntries
+        then HH.p [ HP.class_ (H.ClassName "empty-state") ]
+          [ HH.text "Enter a path and click Go to browse." ]
+        else HH.div [ HP.class_ (H.ClassName "file-browser-list") ]
+          (map (renderBrowserEntry state) state.browserEntries)
+    ]
+
+renderBrowserEntry :: forall m. State -> API.DirectoryEntry -> H.ComponentHTML Action () m
+renderBrowserEntry _state entry =
+  HH.div [ HP.class_ (H.ClassName ("browser-entry" <> if entry.isDirectory then " browser-dir" else " browser-file")) ]
+    [ HH.span
+        [ HP.class_ (H.ClassName "entry-icon") ]
+        [ HH.text (if entry.isDirectory then "\x1f4c1" else "\x1f3b5") ]
+    , HH.span
+        [ HP.class_ (H.ClassName "entry-name")
+        , HE.onClick \_ -> if entry.isDirectory then BrowsePath entry.path else SetPathInput entry.path
+        ]
+        [ HH.text entry.name ]
+    , if entry.isDirectory
+        then HH.button
+          [ HP.class_ (H.ClassName "btn-select")
+          , HE.onClick \_ -> SelectEntry entry
+          ]
+          [ HH.text "Blog this" ]
+        else if isAudioFile entry.name
+          then HH.button
+            [ HP.class_ (H.ClassName "btn-select")
+            , HE.onClick \_ -> SelectEntry entry
+            ]
+            [ HH.text "Blog this" ]
+          else HH.text ""
+    ]
+
+isAudioFile :: String -> Boolean
+isAudioFile name =
+  let lower = String.toLower name
+  in String.contains (String.Pattern ".mp3") lower
+  || String.contains (String.Pattern ".m4a") lower
+  || String.contains (String.Pattern ".flac") lower
+  || String.contains (String.Pattern ".wav") lower
+  || String.contains (String.Pattern ".aac") lower
+  || String.contains (String.Pattern ".ogg") lower
+  || String.contains (String.Pattern ".aiff") lower
+  || String.contains (String.Pattern ".alac") lower
 
 -- =============================================================================
 -- Action Handlers
@@ -416,15 +713,29 @@ handleAction = case _ of
   CopyMarkdown md ->
     liftEffect $ copyToClipboard md
 
-  OpenCreateForm ->
-    H.modify_ \s -> s { showCreateForm = true, formTitle = "", formCategory = "freestanding", formSlug = "" }
+  OpenInVSCode postId -> do
+    _ <- liftAff $ API.openInVSCode postId
+    -- Refetch so hasFile updates if a template was created
+    handleAction LoadPosts
 
-  CloseCreateForm ->
-    H.modify_ \s -> s { showCreateForm = false }
+  SetView mode -> do
+    H.modify_ \s -> s
+      { viewMode = mode
+      , formTitle = ""
+      , formCategory = "freestanding"
+      , formSlug = ""
+      , pathInput = ""
+      }
+    case mode of
+      TicketBrowser -> handleAction LoadTickets
+      FileBrowser -> handleAction (BrowsePath "/Volumes/Crucial4TB/Music/")
+      _ -> pure unit
 
   SetFormTitle v -> H.modify_ \s -> s { formTitle = v }
   SetFormCategory v -> H.modify_ \s -> s { formCategory = v }
   SetFormSlug v -> H.modify_ \s -> s { formSlug = v }
+  SetPathInput v -> H.modify_ \s -> s { pathInput = v }
+  SetPhotoDate v -> H.modify_ \s -> s { photoDate = v }
 
   SubmitCreate -> do
     st <- H.get
@@ -438,7 +749,81 @@ handleAction = case _ of
           , sourceId: ""
           }
     _ <- liftAff $ API.createPost input
-    H.modify_ \s -> s { showCreateForm = false }
+    H.modify_ \s -> s { viewMode = PostTable }
+    handleAction LoadPosts
+    handleAction LoadCategories
+
+  -- Source browsers
+  LoadTickets -> do
+    resp <- liftAff API.fetchTickets
+    H.modify_ \s -> s { tickets = resp.tickets }
+
+  SelectTicket t -> do
+    let slug = slugify (t.artist <> "-" <> t.venue <> "-" <> String.take 4 t.date)
+    let cityPart = if t.city == "" then "" else ", " <> t.city
+    let datePart = if t.date == "" then "" else " (" <> t.date <> ")"
+    let title = t.artist <> " at " <> t.venue <> cityPart <> datePart
+    let input =
+          { category: "concerts"
+          , slug: slug
+          , title: title
+          , status: "drafted"
+          , sourceType: "infovore_concerts"
+          , sourceId: t.artist <> "|" <> t.date
+          }
+    _ <- liftAff $ API.createPost input
+    H.modify_ \s -> s { viewMode = PostTable }
+    handleAction LoadPosts
+    handleAction LoadCategories
+
+  LoadPhotos -> do
+    st <- H.get
+    resp <- liftAff $ API.fetchPhotosByDate st.photoDate
+    H.modify_ \s -> s { photos = resp.photos }
+
+  SelectPhoto p -> do
+    let datePart = String.take 10 p.captureTime
+    let slug = slugify (p.fileName <> "-" <> datePart)
+    let title = p.fileName <> " (" <> datePart <> ")"
+    _ <- liftAff $ API.createFromPhoto { path: p.filePath, title, slug }
+    H.modify_ \s -> s { viewMode = PostTable }
+    handleAction LoadPosts
+    handleAction LoadCategories
+
+  SubmitPhotoFromPath -> do
+    st <- H.get
+    let slug = if String.null st.formSlug then slugify st.formTitle else st.formSlug
+    _ <- liftAff $ API.createFromPhoto { path: st.pathInput, title: st.formTitle, slug }
+    H.modify_ \s -> s { viewMode = PostTable }
+    handleAction LoadPosts
+    handleAction LoadCategories
+
+  SubmitMusicFromPath -> do
+    st <- H.get
+    let slug = if String.null st.formSlug then slugify st.formTitle else st.formSlug
+    _ <- liftAff $ API.createFromMusic { path: st.pathInput, title: st.formTitle, slug }
+    H.modify_ \s -> s { viewMode = PostTable }
+    handleAction LoadPosts
+    handleAction LoadCategories
+
+  TodayPhotos -> do
+    today <- liftEffect todayMMDD_
+    H.modify_ \s -> s { photoDate = today }
+    handleAction LoadPhotos
+
+  SetBrowserPath v ->
+    H.modify_ \s -> s { browserPath = v }
+
+  BrowsePath dirPath -> do
+    H.modify_ \s -> s { browserPath = dirPath, browserEntries = [] }
+    resp <- liftAff $ API.fetchDirectory dirPath
+    H.modify_ \s -> s { browserEntries = resp.items }
+
+  SelectEntry entry -> do
+    let title = entry.name
+    let slug = slugify entry.name
+    _ <- liftAff $ API.createFromMusic { path: entry.path, title, slug }
+    H.modify_ \s -> s { viewMode = PostTable }
     handleAction LoadPosts
     handleAction LoadCategories
 

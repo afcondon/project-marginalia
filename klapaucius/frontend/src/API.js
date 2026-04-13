@@ -87,3 +87,62 @@ export const buildUpdateBody = (input) => {
 
 export const buildAssetUploadBody = (filename) => (data) =>
   JSON.stringify({ filename, data });
+
+// Source browsing parsers
+export const parseTicketsResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      tickets: (d.tickets || []).map(t => ({
+        idx: t.idx || 0,
+        artist: t.artist || '',
+        venue: t.venue || '',
+        date: t.date || '',
+        city: t.city || '',
+        price: t.price || '',
+      })),
+      count: d.count || 0,
+    };
+  } catch {
+    return { tickets: [], count: 0 };
+  }
+};
+
+export const parsePhotosResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      photos: (d.photos || []).map(p => ({
+        imageId: p.imageId || 0,
+        fileName: p.fileName || '',
+        captureTime: p.captureTime || '',
+        rating: p.rating || 0,
+        width: p.width || 0,
+        height: p.height || 0,
+        extension: p.extension || '',
+        filePath: p.filePath || '',
+        thumbUrl: p.thumbUrl || '',
+      })),
+      count: d.count || 0,
+    };
+  } catch {
+    return { photos: [], count: 0 };
+  }
+};
+
+export const parseDirectoryResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      items: (d.items || []).map(e => ({
+        name: e.name || '',
+        isDirectory: e.isDirectory === true,
+        path: e.path || '',
+      })),
+      count: d.count || 0,
+      path: d.path || '',
+    };
+  } catch {
+    return { items: [], count: 0, path: '' };
+  }
+};

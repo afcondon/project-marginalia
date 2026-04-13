@@ -51,6 +51,12 @@
     window.addEventListener("paste", handler3);
     return () => window.removeEventListener("paste", handler3);
   };
+  var todayMMDD_ = () => {
+    const now = /* @__PURE__ */ new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd2 = String(now.getDate()).padStart(2, "0");
+    return mm + "-" + dd2;
+  };
 
   // output/API/foreign.js
   var computedBaseUrl = (() => {
@@ -123,6 +129,61 @@
     return JSON.stringify(body2);
   };
   var buildAssetUploadBody = (filename) => (data) => JSON.stringify({ filename, data });
+  var parseTicketsResponse_ = (str) => {
+    try {
+      const d = JSON.parse(str);
+      return {
+        tickets: (d.tickets || []).map((t) => ({
+          idx: t.idx || 0,
+          artist: t.artist || "",
+          venue: t.venue || "",
+          date: t.date || "",
+          city: t.city || "",
+          price: t.price || ""
+        })),
+        count: d.count || 0
+      };
+    } catch {
+      return { tickets: [], count: 0 };
+    }
+  };
+  var parsePhotosResponse_ = (str) => {
+    try {
+      const d = JSON.parse(str);
+      return {
+        photos: (d.photos || []).map((p2) => ({
+          imageId: p2.imageId || 0,
+          fileName: p2.fileName || "",
+          captureTime: p2.captureTime || "",
+          rating: p2.rating || 0,
+          width: p2.width || 0,
+          height: p2.height || 0,
+          extension: p2.extension || "",
+          filePath: p2.filePath || "",
+          thumbUrl: p2.thumbUrl || ""
+        })),
+        count: d.count || 0
+      };
+    } catch {
+      return { photos: [], count: 0 };
+    }
+  };
+  var parseDirectoryResponse_ = (str) => {
+    try {
+      const d = JSON.parse(str);
+      return {
+        items: (d.items || []).map((e) => ({
+          name: e.name || "",
+          isDirectory: e.isDirectory === true,
+          path: e.path || ""
+        })),
+        count: d.count || 0,
+        path: d.path || ""
+      };
+    } catch {
+      return { items: [], count: 0, path: "" };
+    }
+  };
 
   // output/Affjax/foreign.js
   function _ajax(platformSpecificDriver, timeoutErrorMessageIdent, requestFailedMessageIdent, mkHeader, options2) {
@@ -400,6 +461,7 @@
   };
   var ordIntImpl = unsafeCompareImpl;
   var ordStringImpl = unsafeCompareImpl;
+  var ordCharImpl = unsafeCompareImpl;
 
   // output/Data.Eq/foreign.js
   var refEq = function(r1) {
@@ -408,6 +470,7 @@
     };
   };
   var eqIntImpl = refEq;
+  var eqCharImpl = refEq;
   var eqStringImpl = refEq;
 
   // output/Data.Eq/index.js
@@ -416,6 +479,9 @@
   };
   var eqInt = {
     eq: eqIntImpl
+  };
+  var eqChar = {
+    eq: eqCharImpl
   };
   var eq = function(dict) {
     return dict.eq;
@@ -444,6 +510,41 @@
     return EQ2;
   })();
 
+  // output/Data.Ring/foreign.js
+  var intSub = function(x) {
+    return function(y) {
+      return x - y | 0;
+    };
+  };
+
+  // output/Data.Semiring/foreign.js
+  var intAdd = function(x) {
+    return function(y) {
+      return x + y | 0;
+    };
+  };
+  var intMul = function(x) {
+    return function(y) {
+      return x * y | 0;
+    };
+  };
+
+  // output/Data.Semiring/index.js
+  var semiringInt = {
+    add: intAdd,
+    zero: 0,
+    mul: intMul,
+    one: 1
+  };
+
+  // output/Data.Ring/index.js
+  var ringInt = {
+    sub: intSub,
+    Semiring0: function() {
+      return semiringInt;
+    }
+  };
+
   // output/Data.Ord/index.js
   var ordString = /* @__PURE__ */ (function() {
     return {
@@ -461,8 +562,31 @@
       }
     };
   })();
+  var ordChar = /* @__PURE__ */ (function() {
+    return {
+      compare: ordCharImpl(LT.value)(EQ.value)(GT.value),
+      Eq0: function() {
+        return eqChar;
+      }
+    };
+  })();
   var compare = function(dict) {
     return dict.compare;
+  };
+
+  // output/Data.Bounded/index.js
+  var top = function(dict) {
+    return dict.top;
+  };
+  var boundedChar = {
+    top: topChar,
+    bottom: bottomChar,
+    Ord0: function() {
+      return ordChar;
+    }
+  };
+  var bottom = function(dict) {
+    return dict.bottom;
   };
 
   // output/Data.Show/foreign.js
@@ -1091,6 +1215,47 @@
         });
       };
     };
+  };
+
+  // output/Data.EuclideanRing/foreign.js
+  var intDegree = function(x) {
+    return Math.min(Math.abs(x), 2147483647);
+  };
+  var intDiv = function(x) {
+    return function(y) {
+      if (y === 0) return 0;
+      return y > 0 ? Math.floor(x / y) : -Math.floor(x / -y);
+    };
+  };
+  var intMod = function(x) {
+    return function(y) {
+      if (y === 0) return 0;
+      var yy = Math.abs(y);
+      return (x % yy + yy) % yy;
+    };
+  };
+
+  // output/Data.CommutativeRing/index.js
+  var commutativeRingInt = {
+    Ring0: function() {
+      return ringInt;
+    }
+  };
+
+  // output/Data.EuclideanRing/index.js
+  var mod = function(dict) {
+    return dict.mod;
+  };
+  var euclideanRingInt = {
+    degree: intDegree,
+    div: intDiv,
+    mod: intMod,
+    CommutativeRing0: function() {
+      return commutativeRingInt;
+    }
+  };
+  var div = function(dict) {
+    return dict.div;
   };
 
   // output/Data.Monoid/index.js
@@ -2149,6 +2314,9 @@
   };
 
   // output/Data.String.Common/foreign.js
+  var toLower = function(s) {
+    return s.toLowerCase();
+  };
   var joinWith = function(s) {
     return function(xs) {
       return xs.join(s);
@@ -3911,6 +4079,48 @@
     return Object.prototype.toString.call(value15).slice(8, -1);
   }
 
+  // output/Data.String.CodeUnits/foreign.js
+  var singleton6 = function(c) {
+    return c;
+  };
+  var length3 = function(s) {
+    return s.length;
+  };
+  var _indexOf = function(just) {
+    return function(nothing) {
+      return function(x) {
+        return function(s) {
+          var i2 = s.indexOf(x);
+          return i2 === -1 ? nothing : just(i2);
+        };
+      };
+    };
+  };
+  var drop2 = function(n) {
+    return function(s) {
+      return s.substring(n);
+    };
+  };
+
+  // output/Data.String.Unsafe/foreign.js
+  var charAt = function(i2) {
+    return function(s) {
+      if (i2 >= 0 && i2 < s.length) return s.charAt(i2);
+      throw new Error("Data.String.Unsafe.charAt: Invalid index.");
+    };
+  };
+
+  // output/Data.String.CodeUnits/index.js
+  var indexOf = /* @__PURE__ */ (function() {
+    return _indexOf(Just.create)(Nothing.value);
+  })();
+  var contains = function(pat) {
+    var $23 = indexOf(pat);
+    return function($24) {
+      return isJust($23($24));
+    };
+  };
+
   // output/Foreign/index.js
   var show2 = /* @__PURE__ */ show(showString);
   var show1 = /* @__PURE__ */ show(showInt);
@@ -4366,6 +4576,34 @@
     };
   };
   var baseUrl = computedBaseUrl;
+  var createFromMusic = function(input3) {
+    var body2 = '{"path":"' + (input3.path + ('","title":"' + (input3.title + ('","slug":"' + (input3.slug + '"}')))));
+    return bind2(post2(string2)(baseUrl + "/api/sources/from-music")(new Just(string(body2))))(function(result) {
+      if (result instanceof Left) {
+        return pure4(false);
+      }
+      ;
+      if (result instanceof Right) {
+        return pure4(true);
+      }
+      ;
+      throw new Error("Failed pattern match at API (line 255, column 3 - line 257, column 25): " + [result.constructor.name]);
+    });
+  };
+  var createFromPhoto = function(input3) {
+    var body2 = '{"path":"' + (input3.path + ('","title":"' + (input3.title + ('","slug":"' + (input3.slug + '"}')))));
+    return bind2(post2(string2)(baseUrl + "/api/sources/from-photo")(new Just(string(body2))))(function(result) {
+      if (result instanceof Left) {
+        return pure4(false);
+      }
+      ;
+      if (result instanceof Right) {
+        return pure4(true);
+      }
+      ;
+      throw new Error("Failed pattern match at API (line 247, column 3 - line 249, column 25): " + [result.constructor.name]);
+    });
+  };
   var createPost = function(input3) {
     var body2 = buildCreateBody(input3);
     return bind2(post2(string2)(baseUrl + "/api/posts")(new Just(string(body2))))(function(result) {
@@ -4377,7 +4615,7 @@
         return pure4(new Just(parsePostDetailResponse_(result.value0.body)));
       }
       ;
-      throw new Error("Failed pattern match at API (line 119, column 3 - line 121, column 75): " + [result.constructor.name]);
+      throw new Error("Failed pattern match at API (line 130, column 3 - line 132, column 75): " + [result.constructor.name]);
     });
   };
   var fetchAssets = function(postId) {
@@ -4390,7 +4628,7 @@
         return pure4(parseAssetsResponse_(result.value0.body));
       }
       ;
-      throw new Error("Failed pattern match at API (line 141, column 3 - line 143, column 64): " + [result.constructor.name]);
+      throw new Error("Failed pattern match at API (line 152, column 3 - line 154, column 64): " + [result.constructor.name]);
     });
   };
   var fetchCategories = /* @__PURE__ */ (function() {
@@ -4403,9 +4641,42 @@
         return pure4(parseCategoriesResponse_(result.value0.body));
       }
       ;
-      throw new Error("Failed pattern match at API (line 173, column 3 - line 175, column 68): " + [result.constructor.name]);
+      throw new Error("Failed pattern match at API (line 184, column 3 - line 186, column 68): " + [result.constructor.name]);
     });
   })();
+  var fetchDirectory = function(dirPath) {
+    return bind2(get3(string2)(baseUrl + ("/api/sources/browse?path=" + dirPath)))(function(result) {
+      if (result instanceof Left) {
+        return pure4({
+          items: [],
+          count: 0,
+          path: dirPath
+        });
+      }
+      ;
+      if (result instanceof Right) {
+        return pure4(parseDirectoryResponse_(result.value0.body));
+      }
+      ;
+      throw new Error("Failed pattern match at API (line 262, column 3 - line 264, column 67): " + [result.constructor.name]);
+    });
+  };
+  var fetchPhotosByDate = function(dateStr) {
+    return bind2(get3(string2)(baseUrl + ("/api/sources/photos?date=" + dateStr)))(function(result) {
+      if (result instanceof Left) {
+        return pure4({
+          photos: [],
+          count: 0
+        });
+      }
+      ;
+      if (result instanceof Right) {
+        return pure4(parsePhotosResponse_(result.value0.body));
+      }
+      ;
+      throw new Error("Failed pattern match at API (line 239, column 3 - line 241, column 64): " + [result.constructor.name]);
+    });
+  };
   var fetchPosts = function(mCategory) {
     return function(mStatus) {
       var qs = buildQS(mCategory)(mStatus);
@@ -4418,9 +4689,38 @@
           return pure4(new Just(parsePostListResponse_(result.value0.body)));
         }
         ;
-        throw new Error("Failed pattern match at API (line 104, column 3 - line 106, column 73): " + [result.constructor.name]);
+        throw new Error("Failed pattern match at API (line 115, column 3 - line 117, column 73): " + [result.constructor.name]);
       });
     };
+  };
+  var fetchTickets = /* @__PURE__ */ (function() {
+    return bind2(get3(string2)(baseUrl + "/api/sources/tickets"))(function(result) {
+      if (result instanceof Left) {
+        return pure4({
+          tickets: [],
+          count: 0
+        });
+      }
+      ;
+      if (result instanceof Right) {
+        return pure4(parseTicketsResponse_(result.value0.body));
+      }
+      ;
+      throw new Error("Failed pattern match at API (line 232, column 3 - line 234, column 65): " + [result.constructor.name]);
+    });
+  })();
+  var openInVSCode = function(postId) {
+    return bind2(post2(string2)(baseUrl + ("/api/posts/" + (show3(postId) + "/open")))(Nothing.value))(function(result) {
+      if (result instanceof Left) {
+        return pure4(false);
+      }
+      ;
+      if (result instanceof Right) {
+        return pure4(true);
+      }
+      ;
+      throw new Error("Failed pattern match at API (line 269, column 3 - line 271, column 25): " + [result.constructor.name]);
+    });
   };
   var updatePost = function(postId) {
     return function(input3) {
@@ -4434,7 +4734,7 @@
           return pure4(new Just(parsePostDetailResponse_(result.value0.body)));
         }
         ;
-        throw new Error("Failed pattern match at API (line 127, column 3 - line 129, column 75): " + [result.constructor.name]);
+        throw new Error("Failed pattern match at API (line 138, column 3 - line 140, column 75): " + [result.constructor.name]);
       });
     };
   };
@@ -4475,16 +4775,16 @@
                   }));
                 }
                 ;
-                throw new Error("Failed pattern match at API (line 156, column 21 - line 161, column 56): " + [v2.constructor.name]);
+                throw new Error("Failed pattern match at API (line 167, column 21 - line 172, column 56): " + [v2.constructor.name]);
               }
               ;
-              throw new Error("Failed pattern match at API (line 154, column 21 - line 161, column 56): " + [v1.constructor.name]);
+              throw new Error("Failed pattern match at API (line 165, column 21 - line 172, column 56): " + [v1.constructor.name]);
             }
             ;
-            throw new Error("Failed pattern match at API (line 152, column 23 - line 161, column 56): " + [v.constructor.name]);
+            throw new Error("Failed pattern match at API (line 163, column 23 - line 172, column 56): " + [v.constructor.name]);
           }
           ;
-          throw new Error("Failed pattern match at API (line 150, column 3 - line 161, column 56): " + [result.constructor.name]);
+          throw new Error("Failed pattern match at API (line 161, column 3 - line 172, column 56): " + [result.constructor.name]);
         });
       };
     };
@@ -4527,6 +4827,438 @@
     ;
     throw new Error("Failed pattern match at DOM.HTML.Indexed.ButtonType (line 14, column 20 - line 17, column 25): " + [v.constructor.name]);
   };
+
+  // output/DOM.HTML.Indexed.InputType/index.js
+  var InputButton = /* @__PURE__ */ (function() {
+    function InputButton2() {
+    }
+    ;
+    InputButton2.value = new InputButton2();
+    return InputButton2;
+  })();
+  var InputCheckbox = /* @__PURE__ */ (function() {
+    function InputCheckbox2() {
+    }
+    ;
+    InputCheckbox2.value = new InputCheckbox2();
+    return InputCheckbox2;
+  })();
+  var InputColor = /* @__PURE__ */ (function() {
+    function InputColor2() {
+    }
+    ;
+    InputColor2.value = new InputColor2();
+    return InputColor2;
+  })();
+  var InputDate = /* @__PURE__ */ (function() {
+    function InputDate2() {
+    }
+    ;
+    InputDate2.value = new InputDate2();
+    return InputDate2;
+  })();
+  var InputDatetimeLocal = /* @__PURE__ */ (function() {
+    function InputDatetimeLocal2() {
+    }
+    ;
+    InputDatetimeLocal2.value = new InputDatetimeLocal2();
+    return InputDatetimeLocal2;
+  })();
+  var InputEmail = /* @__PURE__ */ (function() {
+    function InputEmail2() {
+    }
+    ;
+    InputEmail2.value = new InputEmail2();
+    return InputEmail2;
+  })();
+  var InputFile = /* @__PURE__ */ (function() {
+    function InputFile2() {
+    }
+    ;
+    InputFile2.value = new InputFile2();
+    return InputFile2;
+  })();
+  var InputHidden = /* @__PURE__ */ (function() {
+    function InputHidden2() {
+    }
+    ;
+    InputHidden2.value = new InputHidden2();
+    return InputHidden2;
+  })();
+  var InputImage = /* @__PURE__ */ (function() {
+    function InputImage2() {
+    }
+    ;
+    InputImage2.value = new InputImage2();
+    return InputImage2;
+  })();
+  var InputMonth = /* @__PURE__ */ (function() {
+    function InputMonth2() {
+    }
+    ;
+    InputMonth2.value = new InputMonth2();
+    return InputMonth2;
+  })();
+  var InputNumber = /* @__PURE__ */ (function() {
+    function InputNumber2() {
+    }
+    ;
+    InputNumber2.value = new InputNumber2();
+    return InputNumber2;
+  })();
+  var InputPassword = /* @__PURE__ */ (function() {
+    function InputPassword2() {
+    }
+    ;
+    InputPassword2.value = new InputPassword2();
+    return InputPassword2;
+  })();
+  var InputRadio = /* @__PURE__ */ (function() {
+    function InputRadio2() {
+    }
+    ;
+    InputRadio2.value = new InputRadio2();
+    return InputRadio2;
+  })();
+  var InputRange = /* @__PURE__ */ (function() {
+    function InputRange2() {
+    }
+    ;
+    InputRange2.value = new InputRange2();
+    return InputRange2;
+  })();
+  var InputReset = /* @__PURE__ */ (function() {
+    function InputReset2() {
+    }
+    ;
+    InputReset2.value = new InputReset2();
+    return InputReset2;
+  })();
+  var InputSearch = /* @__PURE__ */ (function() {
+    function InputSearch2() {
+    }
+    ;
+    InputSearch2.value = new InputSearch2();
+    return InputSearch2;
+  })();
+  var InputSubmit = /* @__PURE__ */ (function() {
+    function InputSubmit2() {
+    }
+    ;
+    InputSubmit2.value = new InputSubmit2();
+    return InputSubmit2;
+  })();
+  var InputTel = /* @__PURE__ */ (function() {
+    function InputTel2() {
+    }
+    ;
+    InputTel2.value = new InputTel2();
+    return InputTel2;
+  })();
+  var InputText = /* @__PURE__ */ (function() {
+    function InputText2() {
+    }
+    ;
+    InputText2.value = new InputText2();
+    return InputText2;
+  })();
+  var InputTime = /* @__PURE__ */ (function() {
+    function InputTime2() {
+    }
+    ;
+    InputTime2.value = new InputTime2();
+    return InputTime2;
+  })();
+  var InputUrl = /* @__PURE__ */ (function() {
+    function InputUrl2() {
+    }
+    ;
+    InputUrl2.value = new InputUrl2();
+    return InputUrl2;
+  })();
+  var InputWeek = /* @__PURE__ */ (function() {
+    function InputWeek2() {
+    }
+    ;
+    InputWeek2.value = new InputWeek2();
+    return InputWeek2;
+  })();
+  var renderInputType = function(v) {
+    if (v instanceof InputButton) {
+      return "button";
+    }
+    ;
+    if (v instanceof InputCheckbox) {
+      return "checkbox";
+    }
+    ;
+    if (v instanceof InputColor) {
+      return "color";
+    }
+    ;
+    if (v instanceof InputDate) {
+      return "date";
+    }
+    ;
+    if (v instanceof InputDatetimeLocal) {
+      return "datetime-local";
+    }
+    ;
+    if (v instanceof InputEmail) {
+      return "email";
+    }
+    ;
+    if (v instanceof InputFile) {
+      return "file";
+    }
+    ;
+    if (v instanceof InputHidden) {
+      return "hidden";
+    }
+    ;
+    if (v instanceof InputImage) {
+      return "image";
+    }
+    ;
+    if (v instanceof InputMonth) {
+      return "month";
+    }
+    ;
+    if (v instanceof InputNumber) {
+      return "number";
+    }
+    ;
+    if (v instanceof InputPassword) {
+      return "password";
+    }
+    ;
+    if (v instanceof InputRadio) {
+      return "radio";
+    }
+    ;
+    if (v instanceof InputRange) {
+      return "range";
+    }
+    ;
+    if (v instanceof InputReset) {
+      return "reset";
+    }
+    ;
+    if (v instanceof InputSearch) {
+      return "search";
+    }
+    ;
+    if (v instanceof InputSubmit) {
+      return "submit";
+    }
+    ;
+    if (v instanceof InputTel) {
+      return "tel";
+    }
+    ;
+    if (v instanceof InputText) {
+      return "text";
+    }
+    ;
+    if (v instanceof InputTime) {
+      return "time";
+    }
+    ;
+    if (v instanceof InputUrl) {
+      return "url";
+    }
+    ;
+    if (v instanceof InputWeek) {
+      return "week";
+    }
+    ;
+    throw new Error("Failed pattern match at DOM.HTML.Indexed.InputType (line 33, column 19 - line 55, column 22): " + [v.constructor.name]);
+  };
+
+  // output/Data.String.CodePoints/foreign.js
+  var hasStringIterator = typeof Symbol !== "undefined" && Symbol != null && typeof Symbol.iterator !== "undefined" && typeof String.prototype[Symbol.iterator] === "function";
+  var hasFromCodePoint = typeof String.prototype.fromCodePoint === "function";
+  var hasCodePointAt = typeof String.prototype.codePointAt === "function";
+  var _singleton = function(fallback) {
+    return hasFromCodePoint ? String.fromCodePoint : fallback;
+  };
+  var _take = function(fallback) {
+    return function(n) {
+      if (hasStringIterator) {
+        return function(str) {
+          var accum = "";
+          var iter = str[Symbol.iterator]();
+          for (var i2 = 0; i2 < n; ++i2) {
+            var o = iter.next();
+            if (o.done) return accum;
+            accum += o.value;
+          }
+          return accum;
+        };
+      }
+      return fallback(n);
+    };
+  };
+
+  // output/Data.Enum/foreign.js
+  function toCharCode(c) {
+    return c.charCodeAt(0);
+  }
+  function fromCharCode(c) {
+    return String.fromCharCode(c);
+  }
+
+  // output/Data.Enum/index.js
+  var bottom1 = /* @__PURE__ */ bottom(boundedChar);
+  var top1 = /* @__PURE__ */ top(boundedChar);
+  var toEnum = function(dict) {
+    return dict.toEnum;
+  };
+  var fromEnum = function(dict) {
+    return dict.fromEnum;
+  };
+  var toEnumWithDefaults = function(dictBoundedEnum) {
+    var toEnum1 = toEnum(dictBoundedEnum);
+    var fromEnum1 = fromEnum(dictBoundedEnum);
+    var bottom2 = bottom(dictBoundedEnum.Bounded0());
+    return function(low2) {
+      return function(high2) {
+        return function(x) {
+          var v = toEnum1(x);
+          if (v instanceof Just) {
+            return v.value0;
+          }
+          ;
+          if (v instanceof Nothing) {
+            var $140 = x < fromEnum1(bottom2);
+            if ($140) {
+              return low2;
+            }
+            ;
+            return high2;
+          }
+          ;
+          throw new Error("Failed pattern match at Data.Enum (line 158, column 33 - line 160, column 62): " + [v.constructor.name]);
+        };
+      };
+    };
+  };
+  var defaultSucc = function(toEnum$prime) {
+    return function(fromEnum$prime) {
+      return function(a2) {
+        return toEnum$prime(fromEnum$prime(a2) + 1 | 0);
+      };
+    };
+  };
+  var defaultPred = function(toEnum$prime) {
+    return function(fromEnum$prime) {
+      return function(a2) {
+        return toEnum$prime(fromEnum$prime(a2) - 1 | 0);
+      };
+    };
+  };
+  var charToEnum = function(v) {
+    if (v >= toCharCode(bottom1) && v <= toCharCode(top1)) {
+      return new Just(fromCharCode(v));
+    }
+    ;
+    return Nothing.value;
+  };
+  var enumChar = {
+    succ: /* @__PURE__ */ defaultSucc(charToEnum)(toCharCode),
+    pred: /* @__PURE__ */ defaultPred(charToEnum)(toCharCode),
+    Ord0: function() {
+      return ordChar;
+    }
+  };
+  var boundedEnumChar = /* @__PURE__ */ (function() {
+    return {
+      cardinality: toCharCode(top1) - toCharCode(bottom1) | 0,
+      toEnum: charToEnum,
+      fromEnum: toCharCode,
+      Bounded0: function() {
+        return boundedChar;
+      },
+      Enum1: function() {
+        return enumChar;
+      }
+    };
+  })();
+
+  // output/Data.String.CodePoints/index.js
+  var fromEnum2 = /* @__PURE__ */ fromEnum(boundedEnumChar);
+  var div2 = /* @__PURE__ */ div(euclideanRingInt);
+  var mod2 = /* @__PURE__ */ mod(euclideanRingInt);
+  var unsurrogate = function(lead) {
+    return function(trail) {
+      return (((lead - 55296 | 0) * 1024 | 0) + (trail - 56320 | 0) | 0) + 65536 | 0;
+    };
+  };
+  var isTrail = function(cu) {
+    return 56320 <= cu && cu <= 57343;
+  };
+  var isLead = function(cu) {
+    return 55296 <= cu && cu <= 56319;
+  };
+  var uncons2 = function(s) {
+    var v = length3(s);
+    if (v === 0) {
+      return Nothing.value;
+    }
+    ;
+    if (v === 1) {
+      return new Just({
+        head: fromEnum2(charAt(0)(s)),
+        tail: ""
+      });
+    }
+    ;
+    var cu1 = fromEnum2(charAt(1)(s));
+    var cu0 = fromEnum2(charAt(0)(s));
+    var $43 = isLead(cu0) && isTrail(cu1);
+    if ($43) {
+      return new Just({
+        head: unsurrogate(cu0)(cu1),
+        tail: drop2(2)(s)
+      });
+    }
+    ;
+    return new Just({
+      head: cu0,
+      tail: drop2(1)(s)
+    });
+  };
+  var fromCharCode2 = /* @__PURE__ */ (function() {
+    var $75 = toEnumWithDefaults(boundedEnumChar)(bottom(boundedChar))(top(boundedChar));
+    return function($76) {
+      return singleton6($75($76));
+    };
+  })();
+  var singletonFallback = function(v) {
+    if (v <= 65535) {
+      return fromCharCode2(v);
+    }
+    ;
+    var lead = div2(v - 65536 | 0)(1024) + 55296 | 0;
+    var trail = mod2(v - 65536 | 0)(1024) + 56320 | 0;
+    return fromCharCode2(lead) + fromCharCode2(trail);
+  };
+  var singleton7 = /* @__PURE__ */ _singleton(singletonFallback);
+  var takeFallback = function(v) {
+    return function(v1) {
+      if (v < 1) {
+        return "";
+      }
+      ;
+      var v2 = uncons2(v1);
+      if (v2 instanceof Just) {
+        return singleton7(v2.value0.head) + takeFallback(v - 1 | 0)(v2.value0.tail);
+      }
+      ;
+      return v1;
+    };
+  };
+  var take3 = /* @__PURE__ */ _take(takeFallback);
 
   // output/Effect.Aff.Class/index.js
   var monadAffAff = {
@@ -4693,7 +5425,7 @@
     ;
     throw new Error("Failed pattern match at Data.Map.Internal (line 700, column 32 - line 712, column 68): " + [l.constructor.name]);
   };
-  var singleton7 = function(k) {
+  var singleton8 = function(k) {
     return function(v) {
       return new Node(1, 1, k, v, Leaf.value, Leaf.value);
     };
@@ -4727,7 +5459,7 @@
     return function(k, v, l, r) {
       if (l instanceof Leaf) {
         if (r instanceof Leaf) {
-          return singleton7(k)(v);
+          return singleton8(k)(v);
         }
         ;
         if (r instanceof Node && r.value0 > 1) {
@@ -4865,7 +5597,7 @@
       return function(v) {
         var go2 = function(v1) {
           if (v1 instanceof Leaf) {
-            return singleton7(k)(v);
+            return singleton8(k)(v);
           }
           ;
           if (v1 instanceof Node) {
@@ -6034,6 +6766,11 @@
   var isPropInt = {
     toPropValue: propFromInt
   };
+  var isPropInputType = {
+    toPropValue: function($45) {
+      return propFromString(renderInputType($45));
+    }
+  };
   var isPropButtonType = {
     toPropValue: function($50) {
       return propFromString(renderButtonType($50));
@@ -6277,7 +7014,7 @@
     };
     return CatQueue2;
   })();
-  var uncons2 = function($copy_v) {
+  var uncons3 = function($copy_v) {
     var $tco_done = false;
     var $tco_result;
     function $tco_loop(v) {
@@ -6399,7 +7136,7 @@
             var $tco_done1 = false;
             var $tco_result;
             function $tco_loop(xs, ys) {
-              var v = uncons2(xs);
+              var v = uncons3(xs);
               if (v instanceof Nothing) {
                 $tco_done1 = true;
                 return foldl2(function(x) {
@@ -6429,7 +7166,7 @@
       };
     };
   };
-  var uncons3 = function(v) {
+  var uncons4 = function(v) {
     if (v instanceof CatNil) {
       return Nothing.value;
     }
@@ -6523,7 +7260,7 @@
         };
       };
       if (v.value0 instanceof Return) {
-        var v2 = uncons3(v.value1);
+        var v2 = uncons4(v.value1);
         if (v2 instanceof Nothing) {
           $tco_done = true;
           return new Return(v.value0.value0);
@@ -7072,20 +7809,23 @@
   var label_ = /* @__PURE__ */ label([]);
   var main = /* @__PURE__ */ element2("main");
   var option = /* @__PURE__ */ element2("option");
+  var p = /* @__PURE__ */ element2("p");
   var select = /* @__PURE__ */ element2("select");
   var span2 = /* @__PURE__ */ element2("span");
+  var span_ = /* @__PURE__ */ span2([]);
   var table = /* @__PURE__ */ element2("table");
   var tbody = /* @__PURE__ */ element2("tbody");
   var tbody_ = /* @__PURE__ */ tbody([]);
   var td = /* @__PURE__ */ element2("td");
+  var td_ = /* @__PURE__ */ td([]);
   var th = /* @__PURE__ */ element2("th");
   var th_ = /* @__PURE__ */ th([]);
   var thead = /* @__PURE__ */ element2("thead");
   var thead_ = /* @__PURE__ */ thead([]);
   var tr = /* @__PURE__ */ element2("tr");
   var tr_ = /* @__PURE__ */ tr([]);
-  var div2 = /* @__PURE__ */ element2("div");
-  var div_ = /* @__PURE__ */ div2([]);
+  var div3 = /* @__PURE__ */ element2("div");
+  var div_ = /* @__PURE__ */ div3([]);
   var button = /* @__PURE__ */ element2("button");
 
   // output/Foreign.Index/foreign.js
@@ -7211,6 +7951,56 @@
   var get4 = /* @__PURE__ */ get(monadStateHalogenM);
   var pure7 = /* @__PURE__ */ pure(applicativeHalogenM);
   var modify_3 = /* @__PURE__ */ modify_2(monadStateHalogenM);
+  var type_1 = /* @__PURE__ */ type_3(isPropInputType);
+  var PostTable = /* @__PURE__ */ (function() {
+    function PostTable2() {
+    }
+    ;
+    PostTable2.value = new PostTable2();
+    return PostTable2;
+  })();
+  var CreateForm = /* @__PURE__ */ (function() {
+    function CreateForm2() {
+    }
+    ;
+    CreateForm2.value = new CreateForm2();
+    return CreateForm2;
+  })();
+  var TicketBrowser = /* @__PURE__ */ (function() {
+    function TicketBrowser2() {
+    }
+    ;
+    TicketBrowser2.value = new TicketBrowser2();
+    return TicketBrowser2;
+  })();
+  var PhotoBrowser = /* @__PURE__ */ (function() {
+    function PhotoBrowser2() {
+    }
+    ;
+    PhotoBrowser2.value = new PhotoBrowser2();
+    return PhotoBrowser2;
+  })();
+  var PhotoFromPath = /* @__PURE__ */ (function() {
+    function PhotoFromPath2() {
+    }
+    ;
+    PhotoFromPath2.value = new PhotoFromPath2();
+    return PhotoFromPath2;
+  })();
+  var MusicFromPath = /* @__PURE__ */ (function() {
+    function MusicFromPath2() {
+    }
+    ;
+    MusicFromPath2.value = new MusicFromPath2();
+    return MusicFromPath2;
+  })();
+  var FileBrowser = /* @__PURE__ */ (function() {
+    function FileBrowser2() {
+    }
+    ;
+    FileBrowser2.value = new FileBrowser2();
+    return FileBrowser2;
+  })();
   var Initialize2 = /* @__PURE__ */ (function() {
     function Initialize3() {
     }
@@ -7295,19 +8085,25 @@
     };
     return CopyMarkdown2;
   })();
-  var OpenCreateForm = /* @__PURE__ */ (function() {
-    function OpenCreateForm2() {
+  var OpenInVSCode = /* @__PURE__ */ (function() {
+    function OpenInVSCode2(value0) {
+      this.value0 = value0;
     }
     ;
-    OpenCreateForm2.value = new OpenCreateForm2();
-    return OpenCreateForm2;
+    OpenInVSCode2.create = function(value0) {
+      return new OpenInVSCode2(value0);
+    };
+    return OpenInVSCode2;
   })();
-  var CloseCreateForm = /* @__PURE__ */ (function() {
-    function CloseCreateForm2() {
+  var SetView = /* @__PURE__ */ (function() {
+    function SetView2(value0) {
+      this.value0 = value0;
     }
     ;
-    CloseCreateForm2.value = new CloseCreateForm2();
-    return CloseCreateForm2;
+    SetView2.create = function(value0) {
+      return new SetView2(value0);
+    };
+    return SetView2;
   })();
   var SetFormTitle = /* @__PURE__ */ (function() {
     function SetFormTitle2(value0) {
@@ -7346,6 +8142,111 @@
     SubmitCreate2.value = new SubmitCreate2();
     return SubmitCreate2;
   })();
+  var LoadTickets = /* @__PURE__ */ (function() {
+    function LoadTickets2() {
+    }
+    ;
+    LoadTickets2.value = new LoadTickets2();
+    return LoadTickets2;
+  })();
+  var SelectTicket = /* @__PURE__ */ (function() {
+    function SelectTicket2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SelectTicket2.create = function(value0) {
+      return new SelectTicket2(value0);
+    };
+    return SelectTicket2;
+  })();
+  var SetPhotoDate = /* @__PURE__ */ (function() {
+    function SetPhotoDate2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SetPhotoDate2.create = function(value0) {
+      return new SetPhotoDate2(value0);
+    };
+    return SetPhotoDate2;
+  })();
+  var LoadPhotos = /* @__PURE__ */ (function() {
+    function LoadPhotos2() {
+    }
+    ;
+    LoadPhotos2.value = new LoadPhotos2();
+    return LoadPhotos2;
+  })();
+  var SelectPhoto = /* @__PURE__ */ (function() {
+    function SelectPhoto2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SelectPhoto2.create = function(value0) {
+      return new SelectPhoto2(value0);
+    };
+    return SelectPhoto2;
+  })();
+  var SetPathInput = /* @__PURE__ */ (function() {
+    function SetPathInput2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SetPathInput2.create = function(value0) {
+      return new SetPathInput2(value0);
+    };
+    return SetPathInput2;
+  })();
+  var SubmitPhotoFromPath = /* @__PURE__ */ (function() {
+    function SubmitPhotoFromPath2() {
+    }
+    ;
+    SubmitPhotoFromPath2.value = new SubmitPhotoFromPath2();
+    return SubmitPhotoFromPath2;
+  })();
+  var SubmitMusicFromPath = /* @__PURE__ */ (function() {
+    function SubmitMusicFromPath2() {
+    }
+    ;
+    SubmitMusicFromPath2.value = new SubmitMusicFromPath2();
+    return SubmitMusicFromPath2;
+  })();
+  var TodayPhotos = /* @__PURE__ */ (function() {
+    function TodayPhotos2() {
+    }
+    ;
+    TodayPhotos2.value = new TodayPhotos2();
+    return TodayPhotos2;
+  })();
+  var SetBrowserPath = /* @__PURE__ */ (function() {
+    function SetBrowserPath2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SetBrowserPath2.create = function(value0) {
+      return new SetBrowserPath2(value0);
+    };
+    return SetBrowserPath2;
+  })();
+  var BrowsePath = /* @__PURE__ */ (function() {
+    function BrowsePath2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    BrowsePath2.create = function(value0) {
+      return new BrowsePath2(value0);
+    };
+    return BrowsePath2;
+  })();
+  var SelectEntry = /* @__PURE__ */ (function() {
+    function SelectEntry2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SelectEntry2.create = function(value0) {
+      return new SelectEntry2(value0);
+    };
+    return SelectEntry2;
+  })();
   var ClearError = /* @__PURE__ */ (function() {
     function ClearError2() {
     }
@@ -7353,6 +8254,13 @@
     ClearError2.value = new ClearError2();
     return ClearError2;
   })();
+  var sourceBtn = function(label5) {
+    return function(mode) {
+      return button([class_("btn-source"), onClick(function(v) {
+        return new SetView(mode);
+      })])([text(label5)]);
+    };
+  };
   var slugify = slugify_;
   var rowActions = function(groupStatus) {
     return function(post3) {
@@ -7378,18 +8286,28 @@
       return [];
     };
   };
+  var renderTicketRow = function(t) {
+    return tr([class_("post-row")])([td([class_("col-title")])([text(t.artist)]), td_([text(t.venue)]), td([class_("col-category")])([text(t.city)]), td([class_("col-file")])([text(t.date)]), td([class_("col-actions")])([button([class_("btn-select"), onClick(function(v) {
+      return new SelectTicket(t);
+    })])([text("Blog this")])])]);
+  };
+  var renderPhotoCard = function(p2) {
+    return div3([class_("photo-card"), onClick(function(v) {
+      return new SelectPhoto(p2);
+    }), title(p2.fileName + (" \u2014 " + p2.captureTime))])([img([src2(p2.thumbUrl), alt4(p2.fileName), class_("photo-thumb-img")]), div3([class_("photo-meta")])([span_([text(p2.fileName)]), span2([class_("photo-time")])([text(take3(10)(p2.captureTime))])])]);
+  };
   var renderCreateForm = function(state3) {
-    return div2([class_("create-form")])([h2_([text("New Blog Post")]), label_([text("Title")]), input([value4(state3.formTitle), onValueInput(SetFormTitle.create), placeholder2("Post title"), autofocus2(true)]), label_([text("Category")]), select([onValueInput(SetFormCategory.create)])([option([value4("freestanding"), selected(state3.formCategory === "freestanding")])([text("freestanding")]), option([value4("projects"), selected(state3.formCategory === "projects")])([text("projects")]), option([value4("music"), selected(state3.formCategory === "music")])([text("music")]), option([value4("photos"), selected(state3.formCategory === "photos")])([text("photos")]), option([value4("concerts"), selected(state3.formCategory === "concerts")])([text("concerts")]), option([value4("books"), selected(state3.formCategory === "books")])([text("books")]), option([value4("podcasts"), selected(state3.formCategory === "podcasts")])([text("podcasts")]), option([value4("cooking"), selected(state3.formCategory === "cooking")])([text("cooking")])]), label_([text("Slug")]), input([value4(state3.formSlug), onValueInput(SetFormSlug.create), placeholder2("url-safe-slug")]), div2([class_("form-actions")])([button([class_("btn-submit"), onClick(function(v) {
+    return div3([class_("create-form")])([h2_([text("New Blog Post")]), label_([text("Title")]), input([value4(state3.formTitle), onValueInput(SetFormTitle.create), placeholder2("Post title"), autofocus2(true)]), label_([text("Category")]), select([onValueInput(SetFormCategory.create)])([option([value4("freestanding"), selected(state3.formCategory === "freestanding")])([text("freestanding")]), option([value4("projects"), selected(state3.formCategory === "projects")])([text("projects")]), option([value4("music"), selected(state3.formCategory === "music")])([text("music")]), option([value4("photos"), selected(state3.formCategory === "photos")])([text("photos")]), option([value4("concerts"), selected(state3.formCategory === "concerts")])([text("concerts")]), option([value4("books"), selected(state3.formCategory === "books")])([text("books")]), option([value4("podcasts"), selected(state3.formCategory === "podcasts")])([text("podcasts")]), option([value4("cooking"), selected(state3.formCategory === "cooking")])([text("cooking")])]), label_([text("Slug")]), input([value4(state3.formSlug), onValueInput(SetFormSlug.create), placeholder2("url-safe-slug")]), div3([class_("form-actions")])([button([class_("btn-submit"), onClick(function(v) {
       return SubmitCreate.value;
     })])([text("Create")]), button([class_("btn-cancel"), onClick(function(v) {
-      return CloseCreateForm.value;
+      return new SetView(PostTable.value);
     })])([text("Cancel")])])]);
   };
   var renderCategoryPills = function(state3) {
     var catPill = function(cat) {
       return button([class_("filter-pill" + (function() {
-        var $56 = eq12(state3.filterCategory)(new Just(cat.category));
-        if ($56) {
+        var $88 = eq12(state3.filterCategory)(new Just(cat.category));
+        if ($88) {
           return " filter-pill-active";
         }
         ;
@@ -7399,8 +8317,8 @@
       })])([text(cat.category), span2([class_("pill-count")])([text(" (" + (show4(cat.count) + ")"))])]);
     };
     var allPill = button([class_("filter-pill" + (function() {
-      var $57 = eq12(state3.filterCategory)(Nothing.value);
-      if ($57) {
+      var $89 = eq12(state3.filterCategory)(Nothing.value);
+      if ($89) {
         return " filter-pill-active";
       }
       ;
@@ -7411,9 +8329,9 @@
     return append12([allPill])(map15(catPill)(state3.categories));
   };
   var renderHeader = function(state3) {
-    return header([class_("app-header")])([div2([class_("header-inner")])([div2([class_("header-top")])([h1([class_("app-title")])([text("Klapaucius")]), span2([class_("header-subtitle")])([text("blog workbench")]), button([class_("btn-create"), onClick(function(v) {
-      return OpenCreateForm.value;
-    })])([text("+ New Post")])]), div2([class_("filter-row")])(renderCategoryPills(state3))])]);
+    return header([class_("app-header")])([div3([class_("header-inner")])([div3([class_("header-top")])([h1([class_("app-title")])([text("Klapaucius")]), span2([class_("header-subtitle")])([text("blog workbench")]), div3([class_("header-actions")])([sourceBtn("Tickets")(TicketBrowser.value), sourceBtn("Photos")(PhotoBrowser.value), sourceBtn("Photo Path")(PhotoFromPath.value), sourceBtn("Music")(FileBrowser.value), button([class_("btn-create"), onClick(function(v) {
+      return new SetView(CreateForm.value);
+    })])([text("+ New")])])]), div3([class_("filter-row")])(renderCategoryPills(state3))])]);
   };
   var renderAsset = function(asset) {
     return button([class_("asset-thumb"), onClick(function(v) {
@@ -7421,20 +8339,28 @@
     }), title("Click to copy: " + asset.markdown), type_4(ButtonButton.value)])([img([src2(asset.url), alt4(asset.filename)]), span2([class_("asset-name")])([text(asset.filename)])]);
   };
   var renderExpandedPanel = function(state3) {
-    return function(_post) {
-      return tr([class_("expand-row")])([td([colSpan(5)])([div2([class_("expand-panel")])([div2([class_("paste-zone")])([text((function() {
+    return function(post3) {
+      return tr([class_("expand-row")])([td([colSpan(5)])([div3([class_("expand-panel")])([div3([class_("expand-actions")])([button([class_("btn-expand-action"), onClick(function(v) {
+        return new OpenInVSCode(post3.id);
+      }), title("Open index.md in VS Code")])([text((function() {
+        if (post3.hasFile) {
+          return "Edit in VS Code";
+        }
+        ;
+        return "Start in VS Code";
+      })())]), span2([class_("expand-hint")])([text((function() {
         if (state3.uploading) {
           return "Uploading\u2026";
         }
         ;
-        return "Paste screenshot (Cmd+V) to attach";
-      })())]), (function() {
-        var $59 = $$null(state3.expandedAssets);
-        if ($59) {
+        return "Cmd+V to paste image";
+      })())])]), (function() {
+        var $92 = $$null(state3.expandedAssets);
+        if ($92) {
           return text("");
         }
         ;
-        return div2([class_("asset-grid")])(map15(renderAsset)(state3.expandedAssets));
+        return div3([class_("asset-grid")])(map15(renderAsset)(state3.expandedAssets));
       })()])])]);
     };
   };
@@ -7483,14 +8409,56 @@
     return function(label5) {
       return function(statusKey) {
         return function(posts) {
-          var $65 = $$null(posts);
-          if ($65) {
+          var $98 = $$null(posts);
+          if ($98) {
             return text("");
           }
           ;
-          return div2([class_("post-group post-group-" + statusKey)])([h3([class_("post-group-label")])([text(label5), span2([class_("post-group-count")])([text(" (" + (show4(length(posts)) + ")"))])]), table([class_("post-table")])([thead_([tr_([th_([text("Title")]), th_([text("Category")]), th_([text("File")]), th([class_("col-words")])([text("Words")]), th_([text("")])])]), tbody_(concatMap(renderRowWithExpand(state3)(statusKey))(posts))])]);
+          return div3([class_("post-group post-group-" + statusKey)])([h3([class_("post-group-label")])([text(label5), span2([class_("post-group-count")])([text(" (" + (show4(length(posts)) + ")"))])]), table([class_("post-table")])([thead_([tr_([th_([text("Title")]), th_([text("Category")]), th_([text("File")]), th([class_("col-words")])([text("Words")]), th_([text("")])])]), tbody_(concatMap(renderRowWithExpand(state3)(statusKey))(posts))])]);
         };
       };
+    };
+  };
+  var isAudioFile = function(name16) {
+    var lower = toLower(name16);
+    return contains(".mp3")(lower) || (contains(".m4a")(lower) || (contains(".flac")(lower) || (contains(".wav")(lower) || (contains(".aac")(lower) || (contains(".ogg")(lower) || (contains(".aiff")(lower) || contains(".alac")(lower)))))));
+  };
+  var renderBrowserEntry = function(_state) {
+    return function(entry) {
+      return div3([class_("browser-entry" + (function() {
+        if (entry.isDirectory) {
+          return " browser-dir";
+        }
+        ;
+        return " browser-file";
+      })())])([span2([class_("entry-icon")])([text((function() {
+        if (entry.isDirectory) {
+          return "\u{1F4C1}";
+        }
+        ;
+        return "\u{1F3B5}";
+      })())]), span2([class_("entry-name"), onClick(function(v) {
+        if (entry.isDirectory) {
+          return new BrowsePath(entry.path);
+        }
+        ;
+        return new SetPathInput(entry.path);
+      })])([text(entry.name)]), (function() {
+        if (entry.isDirectory) {
+          return button([class_("btn-select"), onClick(function(v) {
+            return new SelectEntry(entry);
+          })])([text("Blog this")]);
+        }
+        ;
+        var $103 = isAudioFile(entry.name);
+        if ($103) {
+          return button([class_("btn-select"), onClick(function(v) {
+            return new SelectEntry(entry);
+          })])([text("Blog this")]);
+        }
+        ;
+        return text("");
+      })()]);
     };
   };
   var initialState = /* @__PURE__ */ (function() {
@@ -7504,10 +8472,16 @@
       expandedPost: Nothing.value,
       expandedAssets: [],
       uploading: false,
-      showCreateForm: false,
+      viewMode: PostTable.value,
       formTitle: "",
       formCategory: "freestanding",
-      formSlug: ""
+      formSlug: "",
+      tickets: [],
+      photos: [],
+      photoDate: "",
+      pathInput: "",
+      browserPath: "/Volumes/Crucial4TB/Music/",
+      browserEntries: []
     };
   })();
   var handleAction = function(dictMonadAff) {
@@ -7537,20 +8511,20 @@
             ;
             if (mResp instanceof Just) {
               return modify_3(function(s) {
-                var $71 = {};
-                for (var $72 in s) {
-                  if ({}.hasOwnProperty.call(s, $72)) {
-                    $71[$72] = s[$72];
+                var $109 = {};
+                for (var $110 in s) {
+                  if ({}.hasOwnProperty.call(s, $110)) {
+                    $109[$110] = s[$110];
                   }
                   ;
                 }
                 ;
-                $71.posts = mResp.value0.posts;
-                return $71;
+                $109.posts = mResp.value0.posts;
+                return $109;
               });
             }
             ;
-            throw new Error("Failed pattern match at Component.App (line 371, column 5 - line 373, column 60): " + [mResp.constructor.name]);
+            throw new Error("Failed pattern match at Component.App (line 668, column 5 - line 670, column 60): " + [mResp.constructor.name]);
           });
         });
       }
@@ -7558,32 +8532,32 @@
       if (v instanceof LoadCategories) {
         return bind4(liftAff2(fetchCategories))(function(cats) {
           return modify_3(function(s) {
-            var $75 = {};
-            for (var $76 in s) {
-              if ({}.hasOwnProperty.call(s, $76)) {
-                $75[$76] = s[$76];
+            var $113 = {};
+            for (var $114 in s) {
+              if ({}.hasOwnProperty.call(s, $114)) {
+                $113[$114] = s[$114];
               }
               ;
             }
             ;
-            $75.categories = cats;
-            return $75;
+            $113.categories = cats;
+            return $113;
           });
         });
       }
       ;
       if (v instanceof SetFilterCategory) {
         return discard2(modify_3(function(s) {
-          var $78 = {};
-          for (var $79 in s) {
-            if ({}.hasOwnProperty.call(s, $79)) {
-              $78[$79] = s[$79];
+          var $116 = {};
+          for (var $117 in s) {
+            if ({}.hasOwnProperty.call(s, $117)) {
+              $116[$117] = s[$117];
             }
             ;
           }
           ;
-          $78.filterCategory = v.value0;
-          return $78;
+          $116.filterCategory = v.value0;
+          return $116;
         }))(function() {
           return handleAction(dictMonadAff)(LoadPosts.value);
         });
@@ -7591,16 +8565,16 @@
       ;
       if (v instanceof SetFilterStatus) {
         return discard2(modify_3(function(s) {
-          var $82 = {};
-          for (var $83 in s) {
-            if ({}.hasOwnProperty.call(s, $83)) {
-              $82[$83] = s[$83];
+          var $120 = {};
+          for (var $121 in s) {
+            if ({}.hasOwnProperty.call(s, $121)) {
+              $120[$121] = s[$121];
             }
             ;
           }
           ;
-          $82.filterStatus = v.value0;
-          return $82;
+          $120.filterStatus = v.value0;
+          return $120;
         }))(function() {
           return handleAction(dictMonadAff)(LoadPosts.value);
         });
@@ -7608,36 +8582,36 @@
       ;
       if (v instanceof ToggleExpand) {
         return bind4(get4)(function(st) {
-          var $86 = eq22(st.expandedPost)(new Just(v.value0));
-          if ($86) {
+          var $124 = eq22(st.expandedPost)(new Just(v.value0));
+          if ($124) {
             return modify_3(function(s) {
-              var $87 = {};
-              for (var $88 in s) {
-                if ({}.hasOwnProperty.call(s, $88)) {
-                  $87[$88] = s[$88];
+              var $125 = {};
+              for (var $126 in s) {
+                if ({}.hasOwnProperty.call(s, $126)) {
+                  $125[$126] = s[$126];
                 }
                 ;
               }
               ;
-              $87.expandedPost = Nothing.value;
-              $87.expandedAssets = [];
-              return $87;
+              $125.expandedPost = Nothing.value;
+              $125.expandedAssets = [];
+              return $125;
             });
           }
           ;
           return bind4(liftAff2(fetchAssets(v.value0)))(function(assets) {
             return modify_3(function(s) {
-              var $90 = {};
-              for (var $91 in s) {
-                if ({}.hasOwnProperty.call(s, $91)) {
-                  $90[$91] = s[$91];
+              var $128 = {};
+              for (var $129 in s) {
+                if ({}.hasOwnProperty.call(s, $129)) {
+                  $128[$129] = s[$129];
                 }
                 ;
               }
               ;
-              $90.expandedPost = new Just(v.value0);
-              $90.expandedAssets = assets;
-              return $90;
+              $128.expandedPost = new Just(v.value0);
+              $128.expandedAssets = assets;
+              return $128;
             });
           });
         });
@@ -7665,31 +8639,31 @@
           ;
           if (st.expandedPost instanceof Just) {
             return discard2(modify_3(function(s) {
-              var $97 = {};
-              for (var $98 in s) {
-                if ({}.hasOwnProperty.call(s, $98)) {
-                  $97[$98] = s[$98];
+              var $135 = {};
+              for (var $136 in s) {
+                if ({}.hasOwnProperty.call(s, $136)) {
+                  $135[$136] = s[$136];
                 }
                 ;
               }
               ;
-              $97.uploading = true;
-              return $97;
+              $135.uploading = true;
+              return $135;
             }))(function() {
               return bind4(liftAff2(uploadAsset(st.expandedPost.value0)(v.value0.filename)(v.value0.base64)))(function(result) {
                 if (result instanceof Left) {
                   return modify_3(function(s) {
-                    var $101 = {};
-                    for (var $102 in s) {
-                      if ({}.hasOwnProperty.call(s, $102)) {
-                        $101[$102] = s[$102];
+                    var $139 = {};
+                    for (var $140 in s) {
+                      if ({}.hasOwnProperty.call(s, $140)) {
+                        $139[$140] = s[$140];
                       }
                       ;
                     }
                     ;
-                    $101.uploading = false;
-                    $101.error = new Just("Upload failed: " + result.value0);
-                    return $101;
+                    $139.uploading = false;
+                    $139.error = new Just("Upload failed: " + result.value0);
+                    return $139;
                   });
                 }
                 ;
@@ -7697,28 +8671,28 @@
                   return discard2(liftEffect8(copyToClipboard(result.value0.markdown)))(function() {
                     return bind4(liftAff2(fetchAssets(st.expandedPost.value0)))(function(assets) {
                       return modify_3(function(s) {
-                        var $105 = {};
-                        for (var $106 in s) {
-                          if ({}.hasOwnProperty.call(s, $106)) {
-                            $105[$106] = s[$106];
+                        var $143 = {};
+                        for (var $144 in s) {
+                          if ({}.hasOwnProperty.call(s, $144)) {
+                            $143[$144] = s[$144];
                           }
                           ;
                         }
                         ;
-                        $105.uploading = false;
-                        $105.expandedAssets = assets;
-                        return $105;
+                        $143.uploading = false;
+                        $143.expandedAssets = assets;
+                        return $143;
                       });
                     });
                   });
                 }
                 ;
-                throw new Error("Failed pattern match at Component.App (line 408, column 9 - line 414, column 77): " + [result.constructor.name]);
+                throw new Error("Failed pattern match at Component.App (line 705, column 9 - line 711, column 77): " + [result.constructor.name]);
               });
             });
           }
           ;
-          throw new Error("Failed pattern match at Component.App (line 403, column 5 - line 414, column 77): " + [st.expandedPost.constructor.name]);
+          throw new Error("Failed pattern match at Component.App (line 700, column 5 - line 711, column 77): " + [st.expandedPost.constructor.name]);
         });
       }
       ;
@@ -7726,89 +8700,121 @@
         return liftEffect8(copyToClipboard(v.value0));
       }
       ;
-      if (v instanceof OpenCreateForm) {
-        return modify_3(function(s) {
-          var $112 = {};
-          for (var $113 in s) {
-            if ({}.hasOwnProperty.call(s, $113)) {
-              $112[$113] = s[$113];
-            }
-            ;
-          }
-          ;
-          $112.showCreateForm = true;
-          $112.formTitle = "";
-          $112.formCategory = "freestanding";
-          $112.formSlug = "";
-          return $112;
+      if (v instanceof OpenInVSCode) {
+        return bind4(liftAff2(openInVSCode(v.value0)))(function() {
+          return handleAction(dictMonadAff)(LoadPosts.value);
         });
       }
       ;
-      if (v instanceof CloseCreateForm) {
-        return modify_3(function(s) {
-          var $115 = {};
-          for (var $116 in s) {
-            if ({}.hasOwnProperty.call(s, $116)) {
-              $115[$116] = s[$116];
+      if (v instanceof SetView) {
+        return discard2(modify_3(function(s) {
+          var $151 = {};
+          for (var $152 in s) {
+            if ({}.hasOwnProperty.call(s, $152)) {
+              $151[$152] = s[$152];
             }
             ;
           }
           ;
-          $115.showCreateForm = false;
-          return $115;
+          $151.viewMode = v.value0;
+          $151.formTitle = "";
+          $151.formCategory = "freestanding";
+          $151.formSlug = "";
+          $151.pathInput = "";
+          return $151;
+        }))(function() {
+          if (v.value0 instanceof TicketBrowser) {
+            return handleAction(dictMonadAff)(LoadTickets.value);
+          }
+          ;
+          if (v.value0 instanceof FileBrowser) {
+            return handleAction(dictMonadAff)(new BrowsePath("/Volumes/Crucial4TB/Music/"));
+          }
+          ;
+          return pure7(unit);
         });
       }
       ;
       if (v instanceof SetFormTitle) {
         return modify_3(function(s) {
-          var $118 = {};
-          for (var $119 in s) {
-            if ({}.hasOwnProperty.call(s, $119)) {
-              $118[$119] = s[$119];
+          var $156 = {};
+          for (var $157 in s) {
+            if ({}.hasOwnProperty.call(s, $157)) {
+              $156[$157] = s[$157];
             }
             ;
           }
           ;
-          $118.formTitle = v.value0;
-          return $118;
+          $156.formTitle = v.value0;
+          return $156;
         });
       }
       ;
       if (v instanceof SetFormCategory) {
         return modify_3(function(s) {
-          var $122 = {};
-          for (var $123 in s) {
-            if ({}.hasOwnProperty.call(s, $123)) {
-              $122[$123] = s[$123];
+          var $160 = {};
+          for (var $161 in s) {
+            if ({}.hasOwnProperty.call(s, $161)) {
+              $160[$161] = s[$161];
             }
             ;
           }
           ;
-          $122.formCategory = v.value0;
-          return $122;
+          $160.formCategory = v.value0;
+          return $160;
         });
       }
       ;
       if (v instanceof SetFormSlug) {
         return modify_3(function(s) {
-          var $126 = {};
-          for (var $127 in s) {
-            if ({}.hasOwnProperty.call(s, $127)) {
-              $126[$127] = s[$127];
+          var $164 = {};
+          for (var $165 in s) {
+            if ({}.hasOwnProperty.call(s, $165)) {
+              $164[$165] = s[$165];
             }
             ;
           }
           ;
-          $126.formSlug = v.value0;
-          return $126;
+          $164.formSlug = v.value0;
+          return $164;
+        });
+      }
+      ;
+      if (v instanceof SetPathInput) {
+        return modify_3(function(s) {
+          var $168 = {};
+          for (var $169 in s) {
+            if ({}.hasOwnProperty.call(s, $169)) {
+              $168[$169] = s[$169];
+            }
+            ;
+          }
+          ;
+          $168.pathInput = v.value0;
+          return $168;
+        });
+      }
+      ;
+      if (v instanceof SetPhotoDate) {
+        return modify_3(function(s) {
+          var $172 = {};
+          for (var $173 in s) {
+            if ({}.hasOwnProperty.call(s, $173)) {
+              $172[$173] = s[$173];
+            }
+            ;
+          }
+          ;
+          $172.photoDate = v.value0;
+          return $172;
         });
       }
       ;
       if (v instanceof SubmitCreate) {
         return bind4(get4)(function(st) {
-          var slug = (function() {
-            var $130 = $$null2(st.formSlug);
-            if ($130) {
+          var slug2 = (function() {
+            var $176 = $$null2(st.formSlug);
+            if ($176) {
               return slugify(st.formTitle);
             }
             ;
@@ -7816,7 +8822,7 @@
           })();
           var input4 = {
             category: st.formCategory,
-            slug,
+            slug: slug2,
             title: st.formTitle,
             status: "wanted",
             sourceType: "freestanding",
@@ -7824,16 +8830,16 @@
           };
           return bind4(liftAff2(createPost(input4)))(function() {
             return discard2(modify_3(function(s) {
-              var $131 = {};
-              for (var $132 in s) {
-                if ({}.hasOwnProperty.call(s, $132)) {
-                  $131[$132] = s[$132];
+              var $177 = {};
+              for (var $178 in s) {
+                if ({}.hasOwnProperty.call(s, $178)) {
+                  $177[$178] = s[$178];
                 }
                 ;
               }
               ;
-              $131.showCreateForm = false;
-              return $131;
+              $177.viewMode = PostTable.value;
+              return $177;
             }))(function() {
               return discard2(handleAction(dictMonadAff)(LoadPosts.value))(function() {
                 return handleAction(dictMonadAff)(LoadCategories.value);
@@ -7843,22 +8849,294 @@
         });
       }
       ;
-      if (v instanceof ClearError) {
+      if (v instanceof LoadTickets) {
+        return bind4(liftAff2(fetchTickets))(function(resp) {
+          return modify_3(function(s) {
+            var $180 = {};
+            for (var $181 in s) {
+              if ({}.hasOwnProperty.call(s, $181)) {
+                $180[$181] = s[$181];
+              }
+              ;
+            }
+            ;
+            $180.tickets = resp.tickets;
+            return $180;
+          });
+        });
+      }
+      ;
+      if (v instanceof SelectTicket) {
+        var slug = slugify(v.value0.artist + ("-" + (v.value0.venue + ("-" + take3(4)(v.value0.date)))));
+        var cityPart = (function() {
+          var $183 = v.value0.city === "";
+          if ($183) {
+            return "";
+          }
+          ;
+          return ", " + v.value0.city;
+        })();
+        var datePart = (function() {
+          var $184 = v.value0.date === "";
+          if ($184) {
+            return "";
+          }
+          ;
+          return " (" + (v.value0.date + ")");
+        })();
+        var title4 = v.value0.artist + (" at " + (v.value0.venue + (cityPart + datePart)));
+        var input3 = {
+          category: "concerts",
+          slug,
+          title: title4,
+          status: "drafted",
+          sourceType: "infovore_concerts",
+          sourceId: v.value0.artist + ("|" + v.value0.date)
+        };
+        return bind4(liftAff2(createPost(input3)))(function() {
+          return discard2(modify_3(function(s) {
+            var $185 = {};
+            for (var $186 in s) {
+              if ({}.hasOwnProperty.call(s, $186)) {
+                $185[$186] = s[$186];
+              }
+              ;
+            }
+            ;
+            $185.viewMode = PostTable.value;
+            return $185;
+          }))(function() {
+            return discard2(handleAction(dictMonadAff)(LoadPosts.value))(function() {
+              return handleAction(dictMonadAff)(LoadCategories.value);
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof LoadPhotos) {
+        return bind4(get4)(function(st) {
+          return bind4(liftAff2(fetchPhotosByDate(st.photoDate)))(function(resp) {
+            return modify_3(function(s) {
+              var $189 = {};
+              for (var $190 in s) {
+                if ({}.hasOwnProperty.call(s, $190)) {
+                  $189[$190] = s[$190];
+                }
+                ;
+              }
+              ;
+              $189.photos = resp.photos;
+              return $189;
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof SelectPhoto) {
+        var datePart = take3(10)(v.value0.captureTime);
+        var slug = slugify(v.value0.fileName + ("-" + datePart));
+        var title4 = v.value0.fileName + (" (" + (datePart + ")"));
+        return bind4(liftAff2(createFromPhoto({
+          path: v.value0.filePath,
+          title: title4,
+          slug
+        })))(function() {
+          return discard2(modify_3(function(s) {
+            var $192 = {};
+            for (var $193 in s) {
+              if ({}.hasOwnProperty.call(s, $193)) {
+                $192[$193] = s[$193];
+              }
+              ;
+            }
+            ;
+            $192.viewMode = PostTable.value;
+            return $192;
+          }))(function() {
+            return discard2(handleAction(dictMonadAff)(LoadPosts.value))(function() {
+              return handleAction(dictMonadAff)(LoadCategories.value);
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof SubmitPhotoFromPath) {
+        return bind4(get4)(function(st) {
+          var slug2 = (function() {
+            var $196 = $$null2(st.formSlug);
+            if ($196) {
+              return slugify(st.formTitle);
+            }
+            ;
+            return st.formSlug;
+          })();
+          return bind4(liftAff2(createFromPhoto({
+            path: st.pathInput,
+            title: st.formTitle,
+            slug: slug2
+          })))(function() {
+            return discard2(modify_3(function(s) {
+              var $197 = {};
+              for (var $198 in s) {
+                if ({}.hasOwnProperty.call(s, $198)) {
+                  $197[$198] = s[$198];
+                }
+                ;
+              }
+              ;
+              $197.viewMode = PostTable.value;
+              return $197;
+            }))(function() {
+              return discard2(handleAction(dictMonadAff)(LoadPosts.value))(function() {
+                return handleAction(dictMonadAff)(LoadCategories.value);
+              });
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof SubmitMusicFromPath) {
+        return bind4(get4)(function(st) {
+          var slug2 = (function() {
+            var $200 = $$null2(st.formSlug);
+            if ($200) {
+              return slugify(st.formTitle);
+            }
+            ;
+            return st.formSlug;
+          })();
+          return bind4(liftAff2(createFromMusic({
+            path: st.pathInput,
+            title: st.formTitle,
+            slug: slug2
+          })))(function() {
+            return discard2(modify_3(function(s) {
+              var $201 = {};
+              for (var $202 in s) {
+                if ({}.hasOwnProperty.call(s, $202)) {
+                  $201[$202] = s[$202];
+                }
+                ;
+              }
+              ;
+              $201.viewMode = PostTable.value;
+              return $201;
+            }))(function() {
+              return discard2(handleAction(dictMonadAff)(LoadPosts.value))(function() {
+                return handleAction(dictMonadAff)(LoadCategories.value);
+              });
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof TodayPhotos) {
+        return bind4(liftEffect8(todayMMDD_))(function(today) {
+          return discard2(modify_3(function(s) {
+            var $204 = {};
+            for (var $205 in s) {
+              if ({}.hasOwnProperty.call(s, $205)) {
+                $204[$205] = s[$205];
+              }
+              ;
+            }
+            ;
+            $204.photoDate = today;
+            return $204;
+          }))(function() {
+            return handleAction(dictMonadAff)(LoadPhotos.value);
+          });
+        });
+      }
+      ;
+      if (v instanceof SetBrowserPath) {
         return modify_3(function(s) {
-          var $134 = {};
-          for (var $135 in s) {
-            if ({}.hasOwnProperty.call(s, $135)) {
-              $134[$135] = s[$135];
+          var $207 = {};
+          for (var $208 in s) {
+            if ({}.hasOwnProperty.call(s, $208)) {
+              $207[$208] = s[$208];
             }
             ;
           }
           ;
-          $134.error = Nothing.value;
-          return $134;
+          $207.browserPath = v.value0;
+          return $207;
         });
       }
       ;
-      throw new Error("Failed pattern match at Component.App (line 359, column 16 - line 446, column 42): " + [v.constructor.name]);
+      if (v instanceof BrowsePath) {
+        return discard2(modify_3(function(s) {
+          var $211 = {};
+          for (var $212 in s) {
+            if ({}.hasOwnProperty.call(s, $212)) {
+              $211[$212] = s[$212];
+            }
+            ;
+          }
+          ;
+          $211.browserPath = v.value0;
+          $211.browserEntries = [];
+          return $211;
+        }))(function() {
+          return bind4(liftAff2(fetchDirectory(v.value0)))(function(resp) {
+            return modify_3(function(s) {
+              var $214 = {};
+              for (var $215 in s) {
+                if ({}.hasOwnProperty.call(s, $215)) {
+                  $214[$215] = s[$215];
+                }
+                ;
+              }
+              ;
+              $214.browserEntries = resp.items;
+              return $214;
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof SelectEntry) {
+        var slug = slugify(v.value0.name);
+        return bind4(liftAff2(createFromMusic({
+          path: v.value0.path,
+          title: v.value0.name,
+          slug
+        })))(function() {
+          return discard2(modify_3(function(s) {
+            var $218 = {};
+            for (var $219 in s) {
+              if ({}.hasOwnProperty.call(s, $219)) {
+                $218[$219] = s[$219];
+              }
+              ;
+            }
+            ;
+            $218.viewMode = PostTable.value;
+            return $218;
+          }))(function() {
+            return discard2(handleAction(dictMonadAff)(LoadPosts.value))(function() {
+              return handleAction(dictMonadAff)(LoadCategories.value);
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof ClearError) {
+        return modify_3(function(s) {
+          var $222 = {};
+          for (var $223 in s) {
+            if ({}.hasOwnProperty.call(s, $223)) {
+              $222[$223] = s[$223];
+            }
+            ;
+          }
+          ;
+          $222.error = Nothing.value;
+          return $222;
+        });
+      }
+      ;
+      throw new Error("Failed pattern match at Component.App (line 656, column 16 - line 831, column 42): " + [v.constructor.name]);
     };
   };
   var groupByStatus = function(posts) {
@@ -7882,35 +9160,108 @@
   };
   var renderPostTable = function(state3) {
     var grouped = groupByStatus(state3.posts);
-    return div2([class_("post-section")])([div2([class_("post-header")])([span2([class_("post-title")])([text("The Letters Page")]), span2([class_("post-count")])([text(show4(length(state3.posts)) + " entries")])]), (function() {
-      var $137 = $$null(state3.posts);
-      if ($137) {
-        return div2([class_("empty-state")])([text("No blog posts yet. Click '+ New Post' to get started.")]);
+    return div3([class_("post-section")])([(function() {
+      var $225 = $$null(state3.posts);
+      if ($225) {
+        return div3([class_("empty-state")])([text("No blog posts yet. Click '+ New Post' to get started.")]);
       }
       ;
       return div_([renderGroup(state3)("Drafted")("drafted")(grouped.drafted), renderGroup(state3)("Priority")("wanted_priority")(grouped.priority), renderGroup(state3)("Wanted")("wanted")(grouped.wanted), renderGroup(state3)("Published")("published")(grouped.published), renderGroup(state3)("Not Needed")("not_needed")(grouped.notNeeded)]);
     })()]);
   };
+  var backBtn = /* @__PURE__ */ button([/* @__PURE__ */ class_("btn-back"), /* @__PURE__ */ onClick(function(v) {
+    return new SetView(PostTable.value);
+  })])([/* @__PURE__ */ text("\u2190 Back")]);
+  var renderFileBrowser = function(state3) {
+    return div3([class_("source-browser")])([backBtn, h2([class_("browser-title")])([text("Music Browser")]), div3([class_("browser-breadcrumb")])([span2([class_("breadcrumb-path")])([text(state3.browserPath)])]), div3([class_("browser-path-row")])([input([value4(state3.browserPath), onValueInput(SetBrowserPath.create), placeholder2("/Volumes/Crucial4TB/Music/"), class_("path-input")]), button([class_("btn-submit"), onClick(function(v) {
+      return new BrowsePath(state3.browserPath);
+    })])([text("Go")])]), (function() {
+      var $226 = $$null(state3.browserEntries);
+      if ($226) {
+        return p([class_("empty-state")])([text("Enter a path and click Go to browse.")]);
+      }
+      ;
+      return div3([class_("file-browser-list")])(map15(renderBrowserEntry(state3))(state3.browserEntries));
+    })()]);
+  };
+  var renderMusicFromPath = function(state3) {
+    return div3([class_("source-browser")])([backBtn, h2([class_("browser-title")])([text("Music from Path")]), div3([class_("path-form")])([label_([text("Track or album path")]), input([value4(state3.pathInput), onValueInput(SetPathInput.create), placeholder2("/Volumes/Crucial4TB/Music/Artist/Album/..."), autofocus2(true), class_("path-input")]), label_([text("Title")]), input([value4(state3.formTitle), onValueInput(SetFormTitle.create), placeholder2("Post title")]), label_([text("Slug")]), input([value4(state3.formSlug), onValueInput(SetFormSlug.create), placeholder2("url-safe-slug")]), div3([class_("form-actions")])([button([class_("btn-submit"), onClick(function(v) {
+      return SubmitMusicFromPath.value;
+    })])([text("Create Post")])])])]);
+  };
+  var renderPhotoBrowser = function(state3) {
+    return div3([class_("source-browser")])([backBtn, h2([class_("browser-title")])([text("Photos by Date")]), div3([class_("date-picker-row")])([input([type_1(InputText.value), value4(state3.photoDate), onValueInput(SetPhotoDate.create), placeholder2("MM-DD"), class_("date-input")]), button([class_("btn-today"), onClick(function(v) {
+      return TodayPhotos.value;
+    })])([text("Today")]), button([class_("btn-submit"), onClick(function(v) {
+      return LoadPhotos.value;
+    })])([text("Load")]), span2([class_("post-count")])([text(show4(length(state3.photos)) + " photos")])]), (function() {
+      var $227 = $$null(state3.photos);
+      if ($227) {
+        return text("");
+      }
+      ;
+      return div3([class_("photo-grid")])(map15(renderPhotoCard)(state3.photos));
+    })()]);
+  };
+  var renderPhotoFromPath = function(state3) {
+    return div3([class_("source-browser")])([backBtn, h2([class_("browser-title")])([text("Photo from Path")]), div3([class_("path-form")])([label_([text("Photo path")]), input([value4(state3.pathInput), onValueInput(SetPathInput.create), placeholder2("/Volumes/Crucial4TB/Photos/..."), autofocus2(true), class_("path-input")]), label_([text("Title")]), input([value4(state3.formTitle), onValueInput(SetFormTitle.create), placeholder2("Post title")]), label_([text("Slug")]), input([value4(state3.formSlug), onValueInput(SetFormSlug.create), placeholder2("url-safe-slug")]), div3([class_("form-actions")])([button([class_("btn-submit"), onClick(function(v) {
+      return SubmitPhotoFromPath.value;
+    })])([text("Create Post")])])])]);
+  };
+  var renderTicketBrowser = function(state3) {
+    return div3([class_("source-browser")])([backBtn, h2([class_("browser-title")])([text("Concert Tickets")]), (function() {
+      var $228 = $$null(state3.tickets);
+      if ($228) {
+        return p([class_("empty-state")])([text("Loading tickets\u2026")]);
+      }
+      ;
+      return table([class_("post-table")])([thead_([tr_([th_([text("Artist")]), th_([text("Venue")]), th_([text("City")]), th_([text("Date")]), th_([text("")])])]), tbody_(map15(renderTicketRow)(state3.tickets))]);
+    })()]);
+  };
   var renderContent = function(state3) {
-    if (state3.showCreateForm) {
+    if (state3.viewMode instanceof PostTable) {
+      return renderPostTable(state3);
+    }
+    ;
+    if (state3.viewMode instanceof CreateForm) {
       return renderCreateForm(state3);
     }
     ;
-    return renderPostTable(state3);
+    if (state3.viewMode instanceof TicketBrowser) {
+      return renderTicketBrowser(state3);
+    }
+    ;
+    if (state3.viewMode instanceof PhotoBrowser) {
+      return renderPhotoBrowser(state3);
+    }
+    ;
+    if (state3.viewMode instanceof PhotoFromPath) {
+      return renderPhotoFromPath(state3);
+    }
+    ;
+    if (state3.viewMode instanceof MusicFromPath) {
+      return renderMusicFromPath(state3);
+    }
+    ;
+    if (state3.viewMode instanceof FileBrowser) {
+      return renderFileBrowser(state3);
+    }
+    ;
+    throw new Error("Failed pattern match at Component.App (line 219, column 23 - line 226, column 43): " + [state3.viewMode.constructor.name]);
   };
   var render = function(state3) {
-    return div2([class_("app-shell")])([renderHeader(state3), main([class_("app-main")])([renderContent(state3)]), (function() {
+    return div3([class_("app-shell")])([renderHeader(state3), main([class_("app-main")])([renderContent(state3)]), (function() {
       if (state3.error instanceof Nothing) {
         return text("");
       }
       ;
       if (state3.error instanceof Just) {
-        return div2([class_("status-toast"), onClick(function(v) {
+        return div3([class_("status-toast"), onClick(function(v) {
           return ClearError.value;
         })])([text(state3.error.value0)]);
       }
       ;
-      throw new Error("Failed pattern match at Component.App (line 113, column 7 - line 119, column 26): " + [state3.error.constructor.name]);
+      throw new Error("Failed pattern match at Component.App (line 155, column 7 - line 161, column 26): " + [state3.error.constructor.name]);
     })()]);
   };
   var component = function(dictMonadAff) {
