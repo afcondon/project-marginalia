@@ -1,0 +1,25 @@
+package:
+  name: klapaucius-server
+  description: "Klapaucius — blog workbench API server"
+  dependencies:
+    - aff
+    - aff-promise
+    - argonaut-codecs
+    - argonaut-core
+    - arrays
+    - console
+    - effect
+    - either
+    - foldable-traversable
+    - foreign
+    - foreign-object
+    - httpurple
+    - maybe
+    - node-buffer
+    - node-fs
+    - nullable
+    - prelude
+    - refs
+    - strings
+    - transformers
+    - tuples

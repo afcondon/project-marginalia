@@ -1,0 +1,29 @@
+package:
+  name: klapaucius-frontend
+  description: "Klapaucius — blog workbench Halogen frontend"
+  bundle:
+    module: Klapaucius.Main
+    outfile: public/bundle.js
+    platform: browser
+  dependencies:
+    - aff
+    - aff-promise
+    - affjax
+    - affjax-web
+    - argonaut-codecs
+    - argonaut-core
+    - arrays
+    - console
+    - effect
+    - either
+    - foldable-traversable
+    - foreign
+    - foreign-object
+    - halogen
+    - maybe
+    - prelude
+    - strings
+    - tuples
+    - web-dom
+    - web-html
+    - web-uievents

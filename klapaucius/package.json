@@ -1,0 +1,23 @@
+{
+  "name": "klapaucius",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "spago build",
+    "build:server": "spago build -p klapaucius-server",
+    "build:frontend": "spago build -p klapaucius-frontend",
+    "bundle:frontend": "spago bundle -p klapaucius-frontend",
+    "bootstrap": "spago build && spago bundle -p klapaucius-frontend",
+    "serve:api": "node server/run.js",
+    "serve:frontend": "node tools/frontend-server.mjs"
+  },
+  "dependencies": {
+    "duckdb": "^1.4.4"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11",
+    "purescript": "0.15.15",
+    "spago": "1.0.3"
+  }
+}
