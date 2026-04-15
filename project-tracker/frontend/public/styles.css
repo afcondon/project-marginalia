@@ -735,18 +735,37 @@ body {
   margin-bottom: var(--space-2);
 }
 
+.server-row-wrap {
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) 0;
+}
+
+.server-row-wrap:last-child {
+  border-bottom: none;
+}
+
 .server-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border);
   font-size: var(--text-sm);
 }
 
 .server-role {
   font-weight: 500;
   min-width: 90px;
+}
+
+.server-env {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  font-size: var(--text-xs);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  white-space: nowrap;
 }
 
 .server-port {
@@ -759,6 +778,14 @@ body {
   flex: 1;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+}
+
+.server-prereq {
+  margin-top: var(--space-1);
+  margin-left: 90px;
+  font-size: var(--text-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
 }
 
 .server-delete {

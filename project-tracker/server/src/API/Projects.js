@@ -6,6 +6,10 @@ export const getRowString_ = (key) => (row) => {
   const v = row[key];
   return v == null ? "" : String(v);
 };
+
+// JavaScript null exposed as a Foreign value so SQL parameter binding can
+// pass NULL for nullable columns (e.g. parent_id when reparenting to root).
+export const jsNull = null;
 // JSON response builders only — marshalling Foreign (DuckDB rows) to JSON strings.
 // All body parsing and SQL construction is in PureScript.
 

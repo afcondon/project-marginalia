@@ -9,6 +9,7 @@ module API.Projects
   , createProject
   , updateProject
   , addTag
+  , deleteTag
   , renameProject
   , openBlogDraft
   , listBlogDrafts
@@ -352,6 +353,10 @@ renameProject db projectId bodyStr = case parseBody bodyStr of
 -- | Read a string field from a Foreign row. Returns "" if missing or null.
 foreign import getRowString_ :: String -> Foreign -> String
 
+-- | JavaScript `null` exposed as a Foreign. Passed as a SQL parameter when a
+-- | nullable column should be explicitly set to NULL (rather than untouched).
+foreign import jsNull :: Foreign
+
 -- =============================================================================
 -- POST /api/projects/:id/blog/open — open blog draft in VS Code
 -- =============================================================================
@@ -502,6 +507,21 @@ addTag db projectId bodyStr = case parseBody bodyStr of
               [ unsafeToForeign projectId, unsafeToForeign tagName ]
           ok' jsonHeaders ("""{"projectId": """ <> show projectId <> """, "tag": """ <> "\"" <> tagName <> "\"" <> """}""")
 
+-- | Remove a tag from a project (by name). The tag itself is left in the
+-- | `tags` table — other projects may still reference it. Idempotent: returns
+-- | ok whether or not the link existed.
+deleteTag :: Database -> Int -> String -> Aff Response
+deleteTag db projectId tagName = do
+  run db
+    """DELETE FROM project_tags
+       WHERE project_id = ?
+         AND tag_id IN (SELECT id FROM tags WHERE name = ?)"""
+    [ unsafeToForeign projectId, unsafeToForeign tagName ]
+  ok' jsonHeaders
+    ( """{"ok": true, "projectId": """ <> show projectId
+      <> """, "tag": """ <> "\"" <> tagName <> "\"" <> "}"
+    )
+
 -- =============================================================================
 -- Helpers
 -- =============================================================================
@@ -523,6 +543,7 @@ buildUpdateClauses obj = { clauses, params }
     , fieldClause "preferredView" "preferred_view"
     , intFieldClause "coverAttachmentId" "cover_attachment_id"
     , fieldClause "blogStatus" "blog_status"
+    , nullableIntFieldClause "parentId" "parent_id"
     -- blogContent is no longer DB-owned: drafts live on disk as files
     -- under $MARGINALIA_BLOG_DRAFTS and VS Code writes them directly.
     -- See BlogDrafts.purs.
@@ -535,6 +556,15 @@ buildUpdateClauses obj = { clauses, params }
   intFieldClause jsonKey sqlCol = case getIntField jsonKey obj of
     Nothing -> Nothing
     Just n -> Just { clause: sqlCol <> " = ?", param: unsafeToForeign n }
+  -- | Integer field that may also be explicitly null (move-to-root semantics
+  -- | for parent_id, or clear-cover for cover_attachment_id). Missing key =
+  -- | don't update; JSON null = set NULL; JSON number = set to that int.
+  nullableIntFieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
+  nullableIntFieldClause jsonKey sqlCol = case FO.lookup jsonKey obj of
+    Nothing -> Nothing
+    Just json -> case J.toNumber json of
+      Just n -> Just { clause: sqlCol <> " = ?", param: unsafeToForeign (Int.floor n) }
+      Nothing -> Just { clause: sqlCol <> " = ?", param: jsNull }
   present = Array.catMaybes fields
   clauses = map _.clause present
   params = map _.param present

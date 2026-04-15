@@ -64,6 +64,8 @@ type ServerRow =
   , url :: Maybe String
   , startCommand :: Maybe String
   , description :: Maybe String
+  , environment :: Maybe String
+  , prerequisites :: Maybe String
   }
 
 -- | Decode a single DB row into a typed ServerRow using the Foreign module's
@@ -79,7 +81,9 @@ decodeServerRow f = do
   url <- readProp "url" f >>= readNullOrUndefined >>= traverse readString
   startCommand <- readProp "start_command" f >>= readNullOrUndefined >>= traverse readString
   description <- readProp "description" f >>= readNullOrUndefined >>= traverse readString
-  pure { id, projectId, projectName, projectSlug, role, port, url, startCommand, description }
+  environment <- readProp "environment" f >>= readNullOrUndefined >>= traverse readString
+  prerequisites <- readProp "prerequisites" f >>= readNullOrUndefined >>= traverse readString
+  pure { id, projectId, projectName, projectSlug, role, port, url, startCommand, description, environment, prerequisites }
 
 -- | Decode a result array, dropping any rows that fail to decode.
 -- | For a stricter pipeline we'd collect and return errors; for now the
@@ -107,6 +111,8 @@ encodeServerRow r = J.fromObject $ Object.fromFoldable
   , "url" /\ maybeString r.url
   , "startCommand" /\ maybeString r.startCommand
   , "description" /\ maybeString r.description
+  , "environment" /\ maybeString r.environment
+  , "prerequisites" /\ maybeString r.prerequisites
   ]
   where
   maybeString = maybe J.jsonNull J.fromString
@@ -150,7 +156,8 @@ listPorts :: Database -> Aff Response
 listPorts db = do
   rows <- queryAll db
     """SELECT s.id, s.project_id, p.name AS project_name, p.slug AS project_slug,
-              s.role, s.port, s.url, s.start_command, s.description
+              s.role, s.port, s.url, s.start_command, s.description,
+              s.environment, s.prerequisites
        FROM project_servers s
        JOIN projects p ON p.id = s.project_id
        WHERE s.port IS NOT NULL
@@ -166,7 +173,8 @@ listServersForProject :: Database -> Int -> Aff Response
 listServersForProject db projectId = do
   rows <- queryAllParams db
     """SELECT s.id, s.project_id, p.name AS project_name, p.slug AS project_slug,
-              s.role, s.port, s.url, s.start_command, s.description
+              s.role, s.port, s.url, s.start_command, s.description,
+              s.environment, s.prerequisites
        FROM project_servers s
        JOIN projects p ON p.id = s.project_id
        WHERE s.project_id = ?
@@ -194,23 +202,28 @@ addServer db projectId bodyStr = case parseBody bodyStr of
           mUrl = getStringField "url" obj
           mCmd = getStringField "startCommand" obj
           mDesc = getStringField "description" obj
+          mEnv = getStringField "environment" obj
+          mPrereq = getStringField "prerequisites" obj
 
       run db
         """INSERT INTO project_servers
-               (project_id, role, port, url, start_command, description)
-           VALUES (?, ?, ?, ?, ?, ?)"""
+               (project_id, role, port, url, start_command, description, environment, prerequisites)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
         [ unsafeToForeign projectId
         , unsafeToForeign role
         , unsafeToForeign (toNullable mPort)
         , unsafeToForeign (toNullable mUrl)
         , unsafeToForeign (toNullable mCmd)
         , unsafeToForeign (toNullable mDesc)
+        , unsafeToForeign (toNullable mEnv)
+        , unsafeToForeign (toNullable mPrereq)
         ]
 
       -- Fetch and return the newly-inserted row
       rows <- queryAll db
         """SELECT s.id, s.project_id, p.name AS project_name, p.slug AS project_slug,
-                  s.role, s.port, s.url, s.start_command, s.description
+                  s.role, s.port, s.url, s.start_command, s.description,
+                  s.environment, s.prerequisites
            FROM project_servers s JOIN projects p ON p.id = s.project_id
            WHERE s.id = (SELECT MAX(id) FROM project_servers)"""
       case Array.uncons (decodeServerRows rows) of

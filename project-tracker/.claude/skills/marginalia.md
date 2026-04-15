@@ -124,6 +124,11 @@ Body: same shape as POST, partial — only include fields you want to change.
 # change status in particular you usually want the lifecycle-validated
 # agent endpoint below instead.
 #
+# parentId is nullable-aware: JSON number reparents to that project id,
+# JSON null moves the project to root (clears parent_id), missing key
+# leaves parent_id untouched. This is how the frontend and gazetteer
+# drag-to-reparent work is implemented.
+#
 # Additional updatable fields beyond the POST shape:
 #   "coverAttachmentId": 43        (int; id of an existing attachment to
 #                                    use as the hero screenshot on the
@@ -144,6 +149,10 @@ DELETE /api/servers/:id
 POST /api/agent/projects/:id/notes
 Body: { "content": "...", "author": "claude" }
 
+DELETE /api/notes/:id
+# Idempotent — returns { "ok": true, "deleted": N } even if the row is gone.
+# No PUT endpoint; to amend a note, DELETE + POST a fresh one.
+
 POST /api/agent/projects/:id/attachments
 Body: { "filename":    "report.md",
         "filePath":    "/abs/path/to/file",
@@ -157,6 +166,10 @@ Body: { "filename":    "report.md",
 
 POST /api/projects/:id/tags
 Body: { "tag": "library" }
+
+DELETE /api/projects/:id/tags?name=<tag>
+# Tag name in query param. Idempotent — ok whether or not the link existed.
+# The tag itself stays in the tags table; only the project→tag link is removed.
 
 POST /api/agent/projects/:id/status
 Body: { "status": "active", "reason": "optional explanation" }

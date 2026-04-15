@@ -216,11 +216,18 @@ CREATE TABLE IF NOT EXISTS project_servers (
     url           TEXT,                    -- optional canonical URL, e.g. 'http://localhost:3100'
     start_command TEXT,                    -- how to launch it
     description   TEXT,
+    environment   TEXT,                    -- where this instance runs: 'mbp-native', 'macmini-docker', 'cloudflare-pages', etc. NULL = implicitly 'mbp-native'
+    prerequisites TEXT,                    -- freeform: what must be true before running (e.g. "API must be stopped before loader runs; DuckDB lock")
     created_at    TIMESTAMP DEFAULT current_timestamp
 );
 
+-- Idempotent column adds for schemas created before a given column existed.
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS environment TEXT;
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS prerequisites TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_servers_project ON project_servers(project_id);
 CREATE INDEX IF NOT EXISTS idx_servers_port ON project_servers(port);
+CREATE INDEX IF NOT EXISTS idx_servers_environment ON project_servers(environment);
 
 -- =============================================================================
 -- CONVENIENCE VIEWS

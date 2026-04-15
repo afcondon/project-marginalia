@@ -1018,30 +1018,46 @@ renderLoading =
 
 renderServerRow :: forall m. Server -> H.ComponentHTML Action () m
 renderServerRow server =
-  HH.div [ HP.class_ (H.ClassName "server-row") ]
-    [ HH.span [ HP.class_ (H.ClassName "server-role") ]
-        [ HH.text server.role ]
-    , HH.span [ HP.class_ (H.ClassName "server-port") ]
-        [ HH.text (case server.port of
-            Just p -> ":" <> show p
-            Nothing -> "(no port)") ]
-    , case server.url of
-        Nothing -> HH.text ""
-        Just u -> HH.a
-          [ HP.class_ (H.ClassName "server-link")
-          , HP.href u
-          , HP.target "_blank"
-          , HP.title "Open in new tab"
-          ]
-          [ HH.text "↗" ]
-    , HH.span [ HP.class_ (H.ClassName "server-desc") ]
-        [ HH.text (fromMaybe "" server.description) ]
-    , HH.button
-        [ HP.class_ (H.ClassName "btn btn-back server-delete")
-        , HE.onClick \_ -> DeleteServerAction server.id
-        , HP.title "Delete this server"
+  HH.div [ HP.class_ (H.ClassName "server-row-wrap") ]
+    [ HH.div [ HP.class_ (H.ClassName "server-row") ]
+        [ HH.span [ HP.class_ (H.ClassName "server-role") ]
+            [ HH.text server.role ]
+        , case server.environment of
+            Nothing -> HH.text ""
+            Just env -> HH.span
+              [ HP.class_ (H.ClassName "server-env")
+              , HP.title "environment"
+              ]
+              [ HH.text env ]
+        , HH.span [ HP.class_ (H.ClassName "server-port") ]
+            [ HH.text (case server.port of
+                Just p -> ":" <> show p
+                Nothing -> "(no port)") ]
+        , case server.url of
+            Nothing -> HH.text ""
+            Just u -> HH.a
+              [ HP.class_ (H.ClassName "server-link")
+              , HP.href u
+              , HP.target "_blank"
+              , HP.title "Open in new tab"
+              ]
+              [ HH.text "↗" ]
+        , HH.span [ HP.class_ (H.ClassName "server-desc") ]
+            [ HH.text (fromMaybe "" server.description) ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn btn-back server-delete")
+            , HE.onClick \_ -> DeleteServerAction server.id
+            , HP.title "Delete this server"
+            ]
+            [ HH.text "×" ]
         ]
-        [ HH.text "×" ]
+    , case server.prerequisites of
+        Nothing -> HH.text ""
+        Just pr -> HH.div
+          [ HP.class_ (H.ClassName "server-prereq")
+          , HP.title "prerequisites"
+          ]
+          [ HH.text ("⚠ " <> pr) ]
     ]
 
 -- | Render image previews and links for attachments.

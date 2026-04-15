@@ -21,7 +21,7 @@ import Effect.Console (log)
 import Effect.Exception (message)
 import Effect.Ref as Ref
 import Foreign.Object as Object
-import Data.Maybe (fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe)
 import HTTPurple (Method(..), serve, ok, ok', toBuffer, toString)
 import HTTPurple.Headers (headers)
 import HTTPurple.Lookup ((!!))
@@ -45,6 +45,7 @@ data Route
   | Ports
   | PortsSuggest
   | ServerById Int
+  | NoteById Int
   | Stats
   | AgentProjects
   | AgentProjectById Int
@@ -79,6 +80,7 @@ route = root $ sum
   , "Ports": path "api/ports" noArgs
   , "PortsSuggest": path "api/ports/suggest" noArgs
   , "ServerById": path "api/servers" (int segment)
+  , "NoteById": path "api/notes" (int segment)
   , "Stats": path "api/stats" noArgs
   , "AgentProjects": path "api/agent/projects" noArgs
   , "AgentProjectById": path "api/agent/projects" (int segment)
@@ -165,6 +167,8 @@ main = launchAff_ do
     log "  GET    /api/agent/projects/:id           - Full project detail"
     log "  POST   /api/agent/projects/:id/status      - Update status (validated)"
     log "  POST   /api/agent/projects/:id/notes       - Add a note"
+    log "  DELETE /api/notes/:id                      - Delete a note"
+    log "  DELETE /api/projects/:id/tags?name=<tag>   - Remove a tag from a project"
     log "  POST   /api/agent/projects/:id/attachments - Register an attachment reference"
     log "  POST   /api/agent/projects/:id/attachments/upload - Upload a file"
     log "  GET    /api/agent/search?q=...             - Text search"
@@ -208,6 +212,9 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Projects.addTag db projectId bodyStr
+        Delete -> case Object.lookup "name" query of
+          Nothing -> ok """{ "error": "Missing 'name' query parameter" }"""
+          Just tagName -> Projects.deleteTag db projectId tagName
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -243,6 +250,11 @@ main = launchAff_ do
 
       ServerById serverId -> case method of
         Delete -> Servers.deleteServer db serverId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      NoteById noteId -> case method of
+        Delete -> Agent.agentDeleteNote db noteId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

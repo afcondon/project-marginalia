@@ -215,6 +215,8 @@ type Server =
   , url :: Maybe String
   , startCommand :: Maybe String
   , description :: Maybe String
+  , environment :: Maybe String
+  , prerequisites :: Maybe String
   }
 
 type ProjectDetail =
@@ -428,6 +430,8 @@ decodeServer json = case toObject json of
        , url: optString "url" obj
        , startCommand: optString "startCommand" obj
        , description: optString "description" obj
+       , environment: optString "environment" obj
+       , prerequisites: optString "prerequisites" obj
        }
 
 -- | The /api/ports response envelope
