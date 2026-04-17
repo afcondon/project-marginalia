@@ -313,6 +313,8 @@ data Action
   | LettersToggleExpand Int String  -- project id, slug — expand/collapse row
   | LettersPasteImage { filename :: String, base64 :: String }  -- clipboard paste
   | LettersCopyMarkdown String  -- copy asset markdown to clipboard
+  -- Open project in an external app via the /api/projects/:id/open endpoint
+  | OpenInApp String            -- "finder" | "vscode" | "iterm"
 
 -- =============================================================================
 -- Component
@@ -1600,11 +1602,29 @@ renderHistoryBlock detail =
 -- | External links: repo, url, source path. Each click-to-edit.
 renderExternalEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
 renderExternalEditor state detail =
-  HH.dl [ HP.class_ (H.ClassName "external-dl") ]
-    [ renderExternalField state FRepo "repo" detail.repo
-    , renderExternalField state FSourceUrl "url" detail.sourceUrl
-    , renderExternalField state FSourcePath "path" detail.sourcePath
+  HH.div_
+    [ HH.dl [ HP.class_ (H.ClassName "external-dl") ]
+        [ renderExternalField state FRepo "repo" detail.repo
+        , renderExternalField state FSourceUrl "url" detail.sourceUrl
+        , renderExternalField state FSourcePath "path" detail.sourcePath
+        ]
+    , case detail.sourcePath of
+        Just sp | not (String.null sp) ->
+          HH.div [ HP.class_ (H.ClassName "open-in-buttons") ]
+            [ openBtn "finder" "Finder"
+            , openBtn "vscode" "VS Code"
+            , openBtn "iterm" "iTerm"
+            ]
+        _ -> HH.text ""
     ]
+  where
+  openBtn app label =
+    HH.button
+      [ HP.class_ (H.ClassName "open-in-btn")
+      , HE.onClick \_ -> OpenInApp app
+      , HP.title ("Open in " <> label)
+      ]
+      [ HH.text label ]
 
 renderExternalField
   :: forall m. State -> EditableField -> String -> Maybe String
@@ -2232,6 +2252,17 @@ handleAction = case _ of
         -- Refetch so a freshly-created template file shows up in the preview.
         mNew <- liftAff $ API.fetchProject projectId
         H.modify_ \s -> s { selectedProject = mNew, error = Nothing }
+
+  OpenInApp app -> do
+    st <- H.get
+    case st.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        res <- liftAff $ API.openInApp detail.id app
+        case res of
+          Left err ->
+            H.modify_ \s -> s { error = Just ("Open in " <> app <> " failed: " <> err) }
+          Right _ -> pure unit
 
   ReloadBlogDraft projectId -> do
     mNew <- liftAff $ API.fetchProject projectId

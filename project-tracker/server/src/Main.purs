@@ -10,6 +10,7 @@ import API.Servers as Servers
 import API.Stats as Stats
 import API.Subscriptions as Subscriptions
 import BlogDrafts as BlogDrafts
+import Opener as Opener
 import Control.Monad.Error.Class (try)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -64,6 +65,8 @@ data Route
   | BlogDrafts
   | BlogAssets Int
   -- Sports section
+  | ProjectOpen Int
+  -- Sports section
   | ExerciseLog
   | ExerciseSummary
 
@@ -94,6 +97,7 @@ route = root $ sum
   , "Subscriptions": path "api/subscriptions" noArgs
   , "SubscriptionById": path "api/subscriptions" (int segment)
   , "SubscriptionsUpcoming": path "api/subscriptions/upcoming" noArgs
+  , "ProjectOpen": path "api/projects" (suffix (int segment) "open")
   , "ExerciseLog": path "api/exercise" noArgs
   , "ExerciseSummary": path "api/exercise/summary" noArgs
   , "Dependencies": path "api/dependencies" noArgs
@@ -227,6 +231,13 @@ main = launchAff_ do
 
       ProjectBlogOpen projectId -> case method of
         Post -> Projects.openBlogDraft db projectId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectOpen projectId -> case method of
+        Post -> do
+          let app = fromMaybe "finder" (Object.lookup "app" query)
+          Opener.openProject db projectId app
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 

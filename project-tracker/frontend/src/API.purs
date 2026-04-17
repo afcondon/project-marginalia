@@ -16,6 +16,7 @@ module API
   , addNote
   , addTag
   , openBlogInVSCode
+  , openInApp
   , fetchSubscriptions
   , SubscriptionResponse
   , SubscriptionRecord
@@ -293,6 +294,21 @@ renameProject projectId newName renameDir = do
 openBlogInVSCode :: Int -> Aff (Either String Unit)
 openBlogInVSCode projectId = do
   let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/open"
+  result <- AX.post ResponseFormat.string url Nothing
+  case result of
+    Left err -> pure (Left (AX.printError err))
+    Right response -> case jsonParser response.body of
+      Left _ -> pure (Left "failed to parse response")
+      Right json -> case J.toObject json of
+        Nothing -> pure (Left "response was not an object")
+        Just obj -> case FO.lookup "error" obj of
+          Just errJson -> pure (Left (fromMaybe "unknown error" (J.toString errJson)))
+          Nothing -> pure (Right unit)
+
+-- | Open a project in an external app (finder, vscode, iterm).
+openInApp :: Int -> String -> Aff (Either String Unit)
+openInApp projectId app = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/open?app=" <> app
   result <- AX.post ResponseFormat.string url Nothing
   case result of
     Left err -> pure (Left (AX.printError err))

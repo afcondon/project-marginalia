@@ -2973,6 +2973,31 @@ a.attachment-marg-filename:hover {
   color: var(--ink);
 }
 
+.open-in-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.open-in-btn {
+  font-family: var(--sans-label);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  background: var(--paper);
+  border: 1px solid var(--ink-light);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.open-in-btn:hover {
+  background: var(--ink-lightest);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
 .external-input {
   font-family: "SF Mono", ui-monospace, monospace;
   font-size: 0.75rem;
