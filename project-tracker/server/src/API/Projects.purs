@@ -8,6 +8,7 @@ module API.Projects
   , getProject
   , createProject
   , updateProject
+  , deleteProject
   , addTag
   , deleteTag
   , renameProject
@@ -26,7 +27,7 @@ import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Int (floor) as Int
 import Data.Maybe (Maybe(..), fromMaybe)
-import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, firstRow, isEmpty)
+import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, execBatch, run, firstRow, isEmpty)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
@@ -521,6 +522,56 @@ deleteTag db projectId tagName = do
     ( """{"ok": true, "projectId": """ <> show projectId
       <> """, "tag": """ <> "\"" <> tagName <> "\"" <> "}"
     )
+
+-- =============================================================================
+-- DELETE /api/projects/:id
+-- =============================================================================
+
+-- | Delete a project and cascade across every child table. The FKs in
+-- | schema.sql are commented out (DuckDB's FK enforcement interacts badly
+-- | with UPDATEs on referenced rows), so the cascade is done by hand.
+-- |
+-- | Guards:
+-- |   - 404 if the project does not exist
+-- |   - 400 if the project still has child projects (parent_id = :id);
+-- |     reparent or delete them first
+-- |
+-- | Child tables cleared: project_tags, project_notes, attachments,
+-- | status_history, project_servers, project_issues, agent_sessions,
+-- | dependencies (both directions), and any evolved_into back-reference
+-- | from another project gets NULL'd out.
+-- |
+-- | Attachment *files* on disk are NOT touched — only the DB rows go.
+-- | The filesystem is authoritative for bytes; the DB is authoritative
+-- | for pointers.
+deleteProject :: Database -> Int -> Aff Response
+deleteProject db projectId = do
+  let idParam = [ unsafeToForeign projectId ]
+  existing <- queryAllParams db
+    "SELECT id FROM projects WHERE id = ?" idParam
+  if isEmpty existing then notFound
+  else do
+    childRows <- queryAllParams db
+      "SELECT id FROM projects WHERE parent_id = ? LIMIT 1" idParam
+    if not (isEmpty childRows) then
+      badRequest' jsonHeaders
+        """{"error": "Project has child projects; reparent or delete them first"}"""
+    else do
+      let pid = show projectId
+      execBatch db
+        [ "DELETE FROM project_tags WHERE project_id = " <> pid
+        , "DELETE FROM project_notes WHERE project_id = " <> pid
+        , "DELETE FROM attachments WHERE project_id = " <> pid
+        , "DELETE FROM status_history WHERE project_id = " <> pid
+        , "DELETE FROM project_servers WHERE project_id = " <> pid
+        , "DELETE FROM project_issues WHERE project_id = " <> pid
+        , "DELETE FROM agent_sessions WHERE project_id = " <> pid
+        , "DELETE FROM dependencies WHERE blocker_id = " <> pid
+            <> " OR blocked_id = " <> pid
+        , "UPDATE projects SET evolved_into = NULL WHERE evolved_into = " <> pid
+        , "DELETE FROM projects WHERE id = " <> pid
+        ]
+      ok' jsonHeaders ("{\"ok\": true, \"deleted\": " <> pid <> "}")
 
 -- =============================================================================
 -- Helpers

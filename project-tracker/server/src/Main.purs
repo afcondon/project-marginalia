@@ -163,6 +163,7 @@ main = launchAff_ do
     log "  GET    /api/projects/:id                 - Get project with details"
     log "  POST   /api/projects                     - Create a project"
     log "  PUT    /api/projects/:id                 - Update a project"
+    log "  DELETE /api/projects/:id                 - Delete a project (cascades; refuses if children)"
     log "  POST   /api/projects/:id/blog/open         - Open blog draft in VS Code"
     log "  GET    /api/stats                        - Domain/status statistics"
     log ""
@@ -209,6 +210,7 @@ main = launchAff_ do
         Put -> do
           bodyStr <- toString body
           Projects.updateProject db projectId bodyStr
+        Delete -> Projects.deleteProject db projectId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
