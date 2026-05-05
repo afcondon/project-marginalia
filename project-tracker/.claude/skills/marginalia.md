@@ -271,6 +271,170 @@ for p in json.load(urllib.request.urlopen('http://localhost:3100/api/projects'))
     urllib.request.urlopen(req).read()
 ```
 
+## Living summaries — the `description` field as Claude-maintained context
+
+The `description` field is a **project summary**, not a session log.
+The test it has to pass: a Claude with no prior context, reading just
+the descriptions of all active projects, gets a faithful overview of
+the system without re-deriving it from notes, code, or git history.
+
+That means the description answers **what is this project, where does
+it stand, and where is it going next** — in timeless prose. Multi-
+paragraph is fine. Dated activity, decisions made today, problems hit,
+things deferred — those go in **notes**
+(`POST /api/agent/projects/:id/notes`), which is the dated record. The
+description is the timeless current view on top of that record.
+
+### What to write
+
+Aim for ~3–6 sentences (one paragraph) for small projects, up to three
+short paragraphs for large ones, structured roughly as:
+
+1. **What it is.** One or two sentences. Position it in the wider
+   system if relevant (parent project, sibling projects, what it
+   replaces, what it feeds into).
+2. **Current state.** What exists now — the components, the shape, the
+   key behaviours a fresh observer needs to navigate it. State, not
+   history. Don't say "added X today"; say "has X".
+3. **Near-term direction.** One sentence on what's next, if there's a
+   clear pointing.
+
+No leading dates. No "today". No "I" or "the session". No changelog
+bullets. No "Deferred:" sections — deferred work is a note, not part
+of the description.
+
+### Description vs. note — the rule of thumb
+
+If a sentence still reads naturally six months from now, it belongs in
+the description. If it only makes sense in the context of a specific
+session ("today's gap closes here", "the bug was…", "earlier we
+tried…"), it belongs in a note.
+
+#### Anti-pattern (do not write this)
+
+```
+**2026-05-04 (afternoon)** — Big Calypso UX session: 6→7 panes, sticky
+toolbar, comment-toggle, persistence dir, Cmd-N keymap…
+
+Promoted Hylograph's three sub-tabs to top-level panes; layout reflows
+over `1fr` columns…
+
+**Deferred**: pragma framework (`-- @bpm 120` declarations applied on
+▶ fire) and config persistence to `current.tidal`.
+```
+
+This is a session log. A fresh Claude learns what was done on one
+afternoon, not what Calypso *is*. If Andrew approves it as-is, the
+durable summary is destroyed and replaced by a dated changelog that
+ages out of usefulness within days.
+
+#### Good shape (write this)
+
+```
+Live-coding webapp for purerl-tidal. The floating-atelier sibling of
+Atelier (#158, PureScript Playground): cloned wholesale, then strips
+the compile pipeline and swaps the BEAM adapter for a purerl-tidal
+WebSocket adapter. Sonic output happens in the rig; the webapp
+doesn't see it.
+
+Seven side-by-side panes, each toggled by Cmd-1..Cmd-7… The topbar
+BPM widget commits via `bpm <n>` through `/eval`, which routes to
+link-spike's `/link/set-tempo` OSC handler.
+
+Near-term: pragma framework and config persistence to `current.tidal`.
+```
+
+A fresh Claude reading this knows what the project is, what shape it's
+in, and what to expect next. The session-specific stuff — *which* pane
+was added today, which bug was fixed — lives in notes, where it
+belongs.
+
+### End-of-session update protocol
+
+When a session has done substantive work on a tracked project — built
+something, learned something non-obvious, made a decision, hit a
+notable wall — refresh that project's `description` so it still
+describes the project accurately. **"Refresh" means re-derive the
+summary from the new state of the project; it does not mean append a
+session report.** If the existing description still describes the
+project accurately, leave it alone and write a note instead.
+
+Use the **additive-with-divider** form:
+
+```
+[new summary — written to describe the project as it now stands]
+
+---
+[previous description, preserved verbatim]
+```
+
+Mechanics:
+
+- New summary on top, then a `---` on its own line, then the old text
+  unchanged.
+- Write via `PUT /api/projects/:id` with the combined `description`.
+- The `---` is the signal that this is a **pending update** awaiting
+  human approval — it is the contract between Claude and Raker.
+
+### Morning flush (Raker, project 193)
+
+Once a day, Raker surfaces every project whose `description` contains
+a `---` divider, presenting the new-vs-old diff for review. Andrew
+approves, edits, or rewrites; on approval the below-divider text is
+dropped and the field becomes just the new summary. **Andrew is
+approving a candidate replacement summary** — your job above the
+divider is to make that replacement worth approving on its own merits,
+not merely "newer".
+
+The shape of this protocol matches the shape of attention:
+end-of-session has the highest **context** but lowest **attention**;
+morning has the highest **attention** but decayed context. The divider
+is the handoff. Claude proposes, Andrew disposes.
+
+### When to update
+
+- **Do** update when the project genuinely now reads differently — new
+  components exist, the shape has changed, a constraint has resolved
+  or been added, the near-term direction has shifted.
+- **Skip** for trivial sessions: a one-line fix, a lookup-only query,
+  re-running an existing command. Write a note instead if anything is
+  worth recording at all.
+- **Skip** if the existing description still describes the project
+  accurately. A correct summary doesn't need to be touched just
+  because work happened — write a note for the work.
+- **Skip** for projects you only touched tangentially. Update the one
+  whose summary is now most stale relative to reality.
+
+### Stacking — handling a description that already has a `---`
+
+If you go to update a description and find it already contains a
+divider (a previous unflushed proposal Andrew hasn't reviewed yet), do
+**not** stack dividers. Replace the above-divider text with your new
+summary; leave the original old text below the divider untouched. Each
+refinement during the day is still a complete project summary, not an
+addition to a running session log.
+
+```
+[your newer summary — still a project summary, not a longer log]
+
+---
+[ORIGINAL old text — same as before, NOT yesterday's "new summary"]
+```
+
+This keeps the diff Raker shows Andrew always "current proposal vs.
+last-approved baseline", regardless of how many times Claude refined
+the proposal during the day.
+
+### Mechanism
+
+```
+PUT /api/projects/:id
+Body: { "description": "[new summary]\n\n---\n[old summary]" }
+```
+
+That's it — no schema changes, no new endpoints. The convention lives
+entirely in the content of one existing field.
+
 ## The polymorphic start_command
 
 The `startCommand` field is **whatever-it-takes to start this server**.
