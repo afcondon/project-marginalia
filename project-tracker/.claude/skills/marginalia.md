@@ -12,15 +12,30 @@ It's authoritative, fast, and structured.
 
 ## Where it runs
 
-- **API base URL**: `http://localhost:3100`
-- **Frontend**: `http://localhost:3101`
-- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb`
+- **API base URL**: `http://localhost:3100` (MBP), or `http://andrews-mac-mini:3100` over Tailscale once project #203 lands. Override with the `MARGINALIA_API` env var when running outside the canonical machine.
+- **Frontend**: same host, port `3101`.
+- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb` on whichever machine is canonical.
 
 If the API isn't responding, the tracker isn't running. Start it with:
 
 ```
 cd ~/work/afc-work/agent-teams/project-tracker && node server/run.js
 ```
+
+### Multi-host topology (project #202)
+
+The registry knows which machine each service runs on. Server entries
+have two fields used by host-aware tooling:
+
+- `host` — tagged value (`mbp` | `macmini` | `cloudflare` | `andrew-only`).
+  Stable across infrastructure swaps; consumed by SDI to decide whether
+  to spawn locally or redirect.
+- `tailscaleName` — routable address (`andrews-mac-mini`, etc.). Can
+  change when a Tailscale node is renamed or replaced.
+
+Always fill both when registering a new server (see "Writing back"
+below). The full plan and migration sequence lives at
+`project-tracker/docs/multi-host-topology.md`.
 
 ### On a different machine
 
@@ -78,9 +93,12 @@ sorted by port. Each entry has:
 - `projectId`, `projectName`, `projectSlug` — who owns it
 - `role` — `api`, `frontend`, `websocket`, `worker`, `whisper`, etc.
 - `port` — the TCP port (may be null for workers without a port)
-- `url` — canonical URL (e.g. `http://localhost:3100`)
-- `startCommand` — **polymorphic start instruction** (see below)
+- `url` — canonical URL (e.g. `http://localhost:3100` for mbp-local; `http://andrews-mac-mini:8090` for a service intended to be reached via Tailscale)
+- `startCommand` — **polymorphic start instruction** (see below). NULL when the service is managed by another launcher (e.g. DeepStar #191) — registry rows with NULL startCommand are documentation/collision-avoidance only, not actionable by SDI.
 - `description` — human-readable note
+- `host` — `mbp` | `macmini` | `cloudflare` | `andrew-only` | NULL. **Set this on every new entry** — SDI uses it to decide spawn vs. redirect.
+- `tailscaleName` — e.g. `andrews-mac-mini`. NULL for non-Tailscale-routable hosts (cloudflare, andrew-only).
+- `environment` — *legacy* — deployment style (`native`, `docker`, `cloudflare-pages`). Older rows have combined values like `mbp-native` that bundled host + style; those have been unwound by setting `host` separately, but `environment` is still populated. Don't use `environment` as a host signal in new code; use `host`.
 
 The response also includes a `collisions` object mapping any port with more
 than one claimant to a list of claimants — use this to detect conflicts.
@@ -140,9 +158,15 @@ Body: same shape as POST, partial — only include fields you want to change.
 #                                    blogStatus is "drafted" or "published")
 
 POST /api/projects/:id/servers
-Body: { "role": "api", "port": 3100, "url": "http://localhost:3100",
-        "startCommand": "cd /absolute/path && node server/run.js",
-        "description": "..." }
+Body: { "role":          "api",
+        "port":          3100,
+        "url":           "http://localhost:3100",
+        "startCommand":  "cd /absolute/path && node server/run.js",
+        "description":   "...",
+        "host":          "mbp",                   # required-in-spirit; SDI keys on this
+        "tailscaleName": "andrews-macbook-pro",   # NULL ok for cloudflare / andrew-only
+        "environment":   "native"                 # optional; deployment style only
+      }
 
 DELETE /api/servers/:id
 
@@ -491,13 +515,21 @@ asks you to figure it out:
    - Python script: `cd <abs-source-path> && python3 <script>`
    - Docker: `cd <abs-source-path> && docker compose up -d`
 3. **Test it**: run it in a subshell and verify the port becomes reachable
-4. **If it works**, POST it to marginalia:
+4. **Decide the host**: which machine does this run on? `mbp` if it's
+   a dev tool that lives on the laptop; `macmini` if always-on
+   infrastructure that should be Tailscale-reachable; `cloudflare` for
+   static hosting; `andrew-only` for things that exist only when
+   physically using the rig (rare). Always set this — SDI's spawn-vs-
+   redirect decision keys on it.
+5. **If it works**, POST it to marginalia:
    ```
    curl -s -X POST http://localhost:3100/api/projects/<id>/servers \
      -H 'Content-Type: application/json' \
      -d '{"role":"api","port":3100,"url":"http://localhost:3100",
           "startCommand":"cd /abs/path && node server/run.js",
-          "description":"HTTPurple API"}'
+          "description":"HTTPurple API",
+          "host":"mbp",
+          "tailscaleName":"andrews-macbook-pro"}'
    ```
 5. **If it doesn't work**, iterate. Don't register broken commands.
 6. **When in doubt**, write a markdown runbook at
@@ -516,6 +548,11 @@ asks you to figure it out:
   port. The `/api/ports/suggest` endpoint does this for you automatically.
 - **Don't silently overwrite** existing server entries. Fetch what's there,
   decide if you want to replace, DELETE the old one, POST the new one.
+- **Always set `host` on new server entries.** SDI defaults to "ignore
+  unknown host" rather than "spawn anyway", so a missing host means SDI
+  won't bind the port at all. Pair it with a `tailscaleName` when
+  applicable (`andrews-macbook-pro`, `andrews-mac-mini`). See the
+  multi-host runbook at `project-tracker/docs/multi-host-topology.md`.
 
 ## Why this skill exists
 
