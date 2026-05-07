@@ -37,7 +37,9 @@
         <key>SDI_HOST</key>
         <string>mbp</string>
         <key>MARGINALIA_URL</key>
-        <string>http://localhost:3100</string>
+        <string>http://andrews-mac-mini:3100</string>
+        <key>SDI_FETCH_TIMEOUT_MS</key>
+        <string>10000</string>
         <!-- DeepStar-managed music-rig ports (#191). Stop-gap until a
              managed_by column on project_servers makes this declarative. -->
         <key>SDI_EXCLUDE_PORTS</key>
