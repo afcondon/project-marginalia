@@ -216,18 +216,23 @@ CREATE TABLE IF NOT EXISTS project_servers (
     url           TEXT,                    -- optional canonical URL, e.g. 'http://localhost:3100'
     start_command TEXT,                    -- how to launch it
     description   TEXT,
-    environment   TEXT,                    -- where this instance runs: 'mbp-native', 'macmini-docker', 'cloudflare-pages', etc. NULL = implicitly 'mbp-native'
+    environment   TEXT,                    -- deployment style: 'native', 'docker', 'cloudflare-pages', etc. (legacy values like 'mbp-native' combined host+style and are being unwound — see `host`)
     prerequisites TEXT,                    -- freeform: what must be true before running (e.g. "API must be stopped before loader runs; DuckDB lock")
+    host          TEXT,                    -- which machine: 'mbp' | 'macmini' | 'cloudflare' | 'andrew-only' | NULL. Consumed by SDI to decide spawn vs. redirect.
+    tailscale_name TEXT,                   -- routable address, e.g. 'andrews-mac-mini'. NULL if not Tailscale-routable. Stored alongside `host` because tailscale names can change while the logical host doesn't.
     created_at    TIMESTAMP DEFAULT current_timestamp
 );
 
 -- Idempotent column adds for schemas created before a given column existed.
 ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS environment TEXT;
 ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS prerequisites TEXT;
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS host TEXT;
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS tailscale_name TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_servers_project ON project_servers(project_id);
 CREATE INDEX IF NOT EXISTS idx_servers_port ON project_servers(port);
 CREATE INDEX IF NOT EXISTS idx_servers_environment ON project_servers(environment);
+CREATE INDEX IF NOT EXISTS idx_servers_host ON project_servers(host);
 
 -- =============================================================================
 -- CONVENIENCE VIEWS
@@ -348,6 +353,36 @@ CREATE TABLE IF NOT EXISTS exercise_log (
 
 CREATE INDEX IF NOT EXISTS idx_exercise_date ON exercise_log(date);
 CREATE INDEX IF NOT EXISTS idx_exercise_activity ON exercise_log(activity);
+
+-- =============================================================================
+-- DEPLOYMENTS
+-- =============================================================================
+
+-- Deployed artifacts — Cloudflare Pages, GitHub Pages, Netlify, or other
+-- static-hosting targets. Distinct from project_servers: servers are long-running
+-- processes bound to a port; deployments are published builds reachable via
+-- a stable URL. A project may have many deployments (multiple domains, staging
+-- + prod, etc.).
+CREATE SEQUENCE IF NOT EXISTS seq_deployments START 1;
+
+CREATE TABLE IF NOT EXISTS deployments (
+    id                 INTEGER PRIMARY KEY DEFAULT nextval('seq_deployments'),
+    project_id         INTEGER NOT NULL,             -- owning project
+    platform           TEXT NOT NULL,                -- 'cloudflare-pages','github-pages','netlify','self-hosted','other'
+    url                TEXT NOT NULL,                -- live URL where the deployment is reachable
+    target_name        TEXT,                         -- platform-specific identifier (CF project name, gh-pages branch, etc.)
+    source_path        TEXT,                         -- absolute local path of buildable/deployable source
+    build_command      TEXT,                         -- optional: how to build before deploy
+    deploy_command     TEXT,                         -- how to publish (required for automation)
+    last_deployed_at   TIMESTAMP,                    -- Phase 2: when last successful deploy completed
+    last_deploy_status TEXT,                         -- Phase 2: 'success'|'failure'|NULL
+    description        TEXT,
+    created_at         TIMESTAMP DEFAULT current_timestamp,
+    updated_at         TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployments_project ON deployments(project_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_platform ON deployments(platform);
 
 -- =============================================================================
 -- METADATA
