@@ -53,6 +53,16 @@ Plus Infovore re-registered as host=macmini.
 
 **Repo**: `agent-teams/sdi/`. Probably touches `registry.mjs` (registry shape) and `router.mjs` (binding logic).
 
+**Plist install/sync**: `agent-teams/sdi/launchd/net.hylograph.sdi.plist` is the source-of-truth. macOS launchd loads from `~/Library/LaunchAgents/`. Edits to the source need to be propagated:
+
+```
+cp /path/to/agent-teams/sdi/launchd/net.hylograph.sdi.plist ~/Library/LaunchAgents/
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/net.hylograph.sdi.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/net.hylograph.sdi.plist
+```
+
+`launchctl kickstart -k` alone is *not* enough — it restarts the process under the same plist; env-var or argument changes need bootout/bootstrap. (Symlinking from `~/Library/LaunchAgents/` to the source has been historically unreliable across macOS versions; copy is the durable approach.)
+
 ### 2. `/marginalia` slash command
 
 **Today**: hardcodes `http://localhost:3100`.

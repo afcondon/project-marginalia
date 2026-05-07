@@ -1,0 +1,14 @@
+{
+  "name": "sdi",
+  "version": "0.1.0",
+  "description": "Strategic Demo Initiative — lazy-spawn router in front of marginalia-registered services",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node router.mjs",
+    "start:one": "node router.mjs --only"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
