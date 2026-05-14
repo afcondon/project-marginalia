@@ -6,9 +6,9 @@ node_modules/
 output/
 frontend/public/bundle.js
 
-# Database files
+# Database files (live + variants: backups, cold mirrors)
 database/*.duckdb
-database/*.duckdb.wal
+database/*.duckdb.*
 
 # IDE
 .psc-ide-port
