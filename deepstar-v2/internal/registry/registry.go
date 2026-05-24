@@ -25,6 +25,15 @@ type Service struct {
 	OnFailure       string            `toml:"on_failure"`
 	Deps            []string          `toml:"deps"`
 	SourcePaths     []string          `toml:"source_paths"`
+	// SourceExcludePaths suppresses staleness findings for files
+	// matching any of these globs.  Use for modules whose mtime is
+	// deliberately allowed to post-date the process start — i.e.
+	// hot-loadable per-cell wrappers like purerl-tidal's
+	// `calypso_generated_session@ps.beam`, which is rewritten on
+	// every fire-typeful and reloaded into the running BEAM via the
+	// `reload-baseline` WS verb.  Without this, every fire-typeful
+	// would flip the service to `stale-source` in `status`.
+	SourceExcludePaths []string       `toml:"source_exclude_paths"`
 	Description     string            `toml:"description"`
 	Env             map[string]string `toml:"env"`
 }

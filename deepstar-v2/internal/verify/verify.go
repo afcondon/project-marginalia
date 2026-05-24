@@ -117,6 +117,17 @@ func staleSourceFindings(svc registry.Service, entry *state.Entry) []Finding {
 		return nil // can't compare; skip silently — the SpawnedAt format is our own
 	}
 
+	// Pre-resolve exclude globs to absolute patterns for cwd-relative
+	// match against each candidate file below.
+	excludePatterns := make([]string, 0, len(svc.SourceExcludePaths))
+	for _, p := range svc.SourceExcludePaths {
+		if filepath.IsAbs(p) {
+			excludePatterns = append(excludePatterns, p)
+		} else {
+			excludePatterns = append(excludePatterns, filepath.Join(svc.Cwd, p))
+		}
+	}
+
 	var findings []Finding
 	for _, pattern := range svc.SourcePaths {
 		fullPattern := pattern
@@ -130,6 +141,9 @@ func staleSourceFindings(svc registry.Service, entry *state.Entry) []Finding {
 				continue
 			}
 			if info.IsDir() {
+				continue
+			}
+			if matchesAnyGlob(m, excludePatterns) {
 				continue
 			}
 			if info.ModTime().After(procStart) {
@@ -152,6 +166,17 @@ func staleSourceFindings(svc registry.Service, entry *state.Entry) []Finding {
 		}
 	}
 	return findings
+}
+
+// matchesAnyGlob returns true if path matches any of the given glob
+// patterns (filepath.Match semantics).
+func matchesAnyGlob(path string, patterns []string) bool {
+	for _, pat := range patterns {
+		if ok, _ := filepath.Match(pat, path); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // siblingFindings reports processes bound to the service's endpoint
