@@ -6,9 +6,14 @@
 -- | to the whisper sidecar.
 module Capture.API
   ( fetchProjects
+  , fetchActivity
+  , fetchDossier
   , addNote
   , pickAndUploadPhoto
   , ProjectSummary
+  , ActivitySummary
+  , DossierNote
+  , MobileDossier
   ) where
 
 import Prelude
@@ -18,7 +23,6 @@ import Affjax.RequestBody as RequestBody
 import Affjax.ResponseFormat as ResponseFormat
 import Data.Argonaut.Core (Json, toObject, toArray, toString, toNumber) as J
 import Data.Argonaut.Parser (jsonParser)
-import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Int (floor)
 import Data.Maybe (Maybe(..), fromMaybe)
@@ -71,6 +75,104 @@ decodeProjectSummary json = do
   domain <- J.toString domainJson
   let status = fromMaybe "idea" (FO.lookup "status" obj >>= J.toString)
   pure { id: floor n, name, domain, status }
+
+-- =============================================================================
+-- Activity feed (for the mobile Browse tab — projects sorted by recency score)
+-- =============================================================================
+
+-- | Slim activity row — just what the Browse mini-cards render.
+type ActivitySummary =
+  { id :: Int
+  , name :: String
+  , domain :: String
+  , status :: String
+  , score :: Number
+  , description :: String
+  }
+
+fetchActivity :: Aff (Array ActivitySummary)
+fetchActivity = do
+  result <- AX.get ResponseFormat.string "/api/activity?limit=200"
+  case result of
+    Left _ -> pure []
+    Right resp -> case jsonParser resp.body of
+      Left _ -> pure []
+      Right json -> pure (fromMaybe [] (decodeActivityList json))
+
+decodeActivityList :: J.Json -> Maybe (Array ActivitySummary)
+decodeActivityList json = do
+  obj <- J.toObject json
+  projsJson <- FO.lookup "projects" obj
+  arr <- J.toArray projsJson
+  traverse decodeActivityRow arr
+
+decodeActivityRow :: J.Json -> Maybe ActivitySummary
+decodeActivityRow json = do
+  obj <- J.toObject json
+  idJson <- FO.lookup "id" obj
+  n <- J.toNumber idJson
+  nameJson <- FO.lookup "name" obj
+  name <- J.toString nameJson
+  domainJson <- FO.lookup "domain" obj
+  domain <- J.toString domainJson
+  let status = fromMaybe "idea" (FO.lookup "status" obj >>= J.toString)
+  let score = fromMaybe 0.0 (FO.lookup "score" obj >>= J.toNumber)
+  let description = fromMaybe "" (FO.lookup "description" obj >>= J.toString)
+  pure { id: floor n, name, domain, status, score, description }
+
+-- =============================================================================
+-- Dossier (single-project detail for the mobile read-only view)
+-- =============================================================================
+
+type DossierNote =
+  { content :: String
+  , author :: String
+  , createdAt :: String
+  }
+
+type MobileDossier =
+  { id :: Int
+  , name :: String
+  , domain :: String
+  , status :: String
+  , description :: String
+  , notes :: Array DossierNote
+  }
+
+fetchDossier :: Int -> Aff (Maybe MobileDossier)
+fetchDossier projectId = do
+  result <- AX.get ResponseFormat.string ("/api/projects/" <> show projectId)
+  case result of
+    Left _ -> pure Nothing
+    Right resp -> case jsonParser resp.body of
+      Left _ -> pure Nothing
+      Right json -> pure (decodeDossier json)
+
+decodeDossier :: J.Json -> Maybe MobileDossier
+decodeDossier json = do
+  obj <- J.toObject json
+  idJson <- FO.lookup "id" obj
+  n <- J.toNumber idJson
+  nameJson <- FO.lookup "name" obj
+  name <- J.toString nameJson
+  domainJson <- FO.lookup "domain" obj
+  domain <- J.toString domainJson
+  let status = fromMaybe "idea" (FO.lookup "status" obj >>= J.toString)
+  let description = fromMaybe "" (FO.lookup "description" obj >>= J.toString)
+  let notes = fromMaybe [] do
+        notesJson <- FO.lookup "notes" obj
+        arr <- J.toArray notesJson
+        traverse decodeNote arr
+  pure { id: floor n, name, domain, status, description, notes }
+
+decodeNote :: J.Json -> Maybe DossierNote
+decodeNote json = do
+  obj <- J.toObject json
+  contentJson <- FO.lookup "content" obj
+  content <- J.toString contentJson
+  let author = fromMaybe "unknown" (FO.lookup "author" obj >>= J.toString)
+  let createdAt = fromMaybe "" (FO.lookup "createdAt" obj >>= J.toString)
+  pure { content, author, createdAt }
 
 -- =============================================================================
 -- Add a note (voice transcript, typed text, or URL)

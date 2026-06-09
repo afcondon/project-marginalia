@@ -14,7 +14,22 @@ module API
   , updateProject
   , renameProject
   , addNote
+  , addNoteAs
+  , deleteNote
   , addTag
+  , removeTag
+  , openBlogInVSCode
+  , openInApp
+  , fetchSubscriptions
+  , SubscriptionResponse
+  , SubscriptionRecord
+  , fetchBlogDrafts
+  , BlogDraftsResponse
+  , BlogDraftRecord
+  , uploadBlogAsset
+  , fetchBlogAssets
+  , BlogAssetRecord
+  , fetchActivity
   ) where
 
 import Prelude
@@ -25,12 +40,12 @@ import Affjax.ResponseFormat as ResponseFormat
 import Data.Argonaut.Core (toObject, toString) as J
 import Data.Argonaut.Parser (jsonParser)
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Foreign.Object (lookup) as FO
-import Types (Project, ProjectDetail, ProjectInput, Server, Stats, decodeProjectList, decodeProjectDetail, decodeServerArray, decodeServerList, decodeStats)
+import Types (ActivityRow, Project, ProjectDetail, ProjectInput, Server, Stats, decodeActivityList, decodeProjectList, decodeProjectDetail, decodeServerArray, decodeServerList, decodeStats)
 
 -- =============================================================================
 -- Configuration
@@ -242,12 +257,35 @@ addNote projectId content = do
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
   pure unit
 
+-- | Add a note with a custom author. Used by the Weather section to file
+-- | `author = "quick-win"` marker notes so /what-next can surface them.
+addNoteAs :: String -> Int -> String -> Aff Unit
+addNoteAs author projectId content = do
+  let url = baseUrl <> "/api/agent/projects/" <> show projectId <> "/notes"
+  let body = buildNoteBodyAs author content
+  _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  pure unit
+
+-- | Delete a note by id. Idempotent server-side.
+deleteNote :: Int -> Aff Unit
+deleteNote noteId = do
+  let url = baseUrl <> "/api/notes/" <> show noteId
+  _ <- AX.delete ResponseFormat.string url
+  pure unit
+
 -- | Add a tag to a project. Tag is created if it doesn't already exist.
 addTag :: Int -> String -> Aff Unit
 addTag projectId tag = do
   let url = baseUrl <> "/api/projects/" <> show projectId <> "/tags"
   let body = buildTagBody tag
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  pure unit
+
+-- | Remove a tag from a project. Idempotent server-side — always ok.
+removeTag :: Int -> String -> Aff Unit
+removeTag projectId tag = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/tags?name=" <> tag
+  _ <- AX.delete ResponseFormat.string url
   pure unit
 
 -- | Result of a rename attempt — used to surface warnings/errors to the UI.
@@ -276,6 +314,39 @@ renameProject projectId newName renameDir = do
             Just e -> pure { ok: false, message: Just e }
             Nothing -> pure { ok: true, message: mWarning }
 
+-- | Ask the server to open this project's blog draft in VS Code. The
+-- | server creates `<slug>.md` with a template if it doesn't already
+-- | exist, then shells out to `open -a "Visual Studio Code" <path>`.
+-- | Returns Left with an error message on failure, Right unit on success.
+openBlogInVSCode :: Int -> Aff (Either String Unit)
+openBlogInVSCode projectId = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/open"
+  result <- AX.post ResponseFormat.string url Nothing
+  case result of
+    Left err -> pure (Left (AX.printError err))
+    Right response -> case jsonParser response.body of
+      Left _ -> pure (Left "failed to parse response")
+      Right json -> case J.toObject json of
+        Nothing -> pure (Left "response was not an object")
+        Just obj -> case FO.lookup "error" obj of
+          Just errJson -> pure (Left (fromMaybe "unknown error" (J.toString errJson)))
+          Nothing -> pure (Right unit)
+
+-- | Open a project in an external app (finder, vscode, iterm).
+openInApp :: Int -> String -> Aff (Either String Unit)
+openInApp projectId app = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/open?app=" <> app
+  result <- AX.post ResponseFormat.string url Nothing
+  case result of
+    Left err -> pure (Left (AX.printError err))
+    Right response -> case jsonParser response.body of
+      Left _ -> pure (Left "failed to parse response")
+      Right json -> case J.toObject json of
+        Nothing -> pure (Left "response was not an object")
+        Just obj -> case FO.lookup "error" obj of
+          Just errJson -> pure (Left (fromMaybe "unknown error" (J.toString errJson)))
+          Nothing -> pure (Right unit)
+
 -- | Create a child project under the given parent. Returns the new project on success.
 createChild :: Int -> String -> String -> Aff (Maybe Project)
 createChild parentId name domain = do
@@ -299,6 +370,134 @@ createChild parentId name domain = do
 foreign import buildCreateBody :: ProjectInput -> String
 foreign import buildUpdateBody :: ProjectInput -> String
 foreign import buildNoteBody :: String -> String
+foreign import buildNoteBodyAs :: String -> String -> String
 foreign import buildTagBody :: String -> String
 foreign import buildChildBody :: Int -> String -> String -> String
 foreign import buildRenameBody :: String -> Boolean -> String
+
+-- =============================================================================
+-- Subscriptions (Finance section)
+-- =============================================================================
+
+-- | Raw subscription response parsed via FFI. The App component
+-- | destructures this into state.subscriptions + state.subscriptionMonthlyBurn.
+foreign import parseSubscriptionResponse_ :: String -> SubscriptionResponse
+
+type SubscriptionResponse =
+  { subscriptions :: Array SubscriptionRecord
+  , count :: Int
+  , monthlyBurn :: Number
+  }
+
+type SubscriptionRecord =
+  { id :: Int
+  , name :: String
+  , category :: String
+  , amount :: Number
+  , currency :: String
+  , frequency :: String
+  , nextDue :: String
+  , autoRenew :: Boolean
+  , notes :: String
+  , projectId :: Int
+  , active :: Boolean
+  }
+
+fetchSubscriptions :: Aff (Maybe SubscriptionResponse)
+fetchSubscriptions = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/subscriptions")
+  case result of
+    Left _ -> pure Nothing
+    Right response -> pure (Just (parseSubscriptionResponse_ response.body))
+
+-- =============================================================================
+-- Blog Drafts (Letters section)
+-- =============================================================================
+
+foreign import parseBlogDraftsResponse_ :: String -> BlogDraftsResponse
+
+type BlogDraftsResponse =
+  { drafts :: Array BlogDraftRecord
+  , count :: Int
+  }
+
+type BlogDraftRecord =
+  { id :: Int
+  , slug :: String
+  , name :: String
+  , domain :: String
+  , blogStatus :: String
+  , filename :: String
+  , wordCount :: Int
+  , hasFile :: Boolean
+  }
+
+fetchBlogDrafts :: Aff (Maybe BlogDraftsResponse)
+fetchBlogDrafts = do
+  result <- AX.get ResponseFormat.string (baseUrl <> "/api/blog/drafts")
+  case result of
+    Left _ -> pure Nothing
+    Right response -> pure (Just (parseBlogDraftsResponse_ response.body))
+
+-- =============================================================================
+-- Blog Assets
+-- =============================================================================
+
+foreign import parseBlogAssetsResponse_ :: String -> Array BlogAssetRecord
+foreign import buildAssetUploadBody :: String -> String -> String
+
+type BlogAssetRecord =
+  { filename :: String
+  , size :: Int
+  , url :: String
+  , markdown :: String
+  }
+
+-- | Upload a base64-encoded image as a blog asset.
+-- | Returns Left error or Right { filename, markdown }.
+uploadBlogAsset :: Int -> String -> String -> Aff (Either String { filename :: String, markdown :: String })
+uploadBlogAsset projectId filename base64Data = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/assets"
+  let body = buildAssetUploadBody filename base64Data
+  result <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  case result of
+    Left err -> pure (Left (AX.printError err))
+    Right response -> case jsonParser response.body of
+      Left _ -> pure (Left "failed to parse response")
+      Right json -> case J.toObject json of
+        Nothing -> pure (Left "response was not an object")
+        Just obj -> case FO.lookup "error" obj of
+          Just errJson -> pure (Left (fromMaybe "unknown error" (J.toString errJson)))
+          Nothing -> do
+            let fn = fromMaybe "" (J.toString =<< FO.lookup "filename" obj)
+            let md = fromMaybe "" (J.toString =<< FO.lookup "markdown" obj)
+            pure (Right { filename: fn, markdown: md })
+
+fetchBlogAssets :: Int -> Aff (Array BlogAssetRecord)
+fetchBlogAssets projectId = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/blog/assets"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left _ -> pure []
+    Right response -> pure (parseBlogAssetsResponse_ response.body)
+
+-- | Fetch ranked project activity from the server. `limit` defaults server-side;
+-- | we ask for 100 here so the page has enough rows for scrolling without an
+-- | extra round-trip.
+fetchActivity :: Aff (Array ActivityRow)
+fetchActivity = do
+  let url = baseUrl <> "/api/activity?limit=100"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left err -> do
+      liftEffect $ log $ "fetchActivity error: " <> AX.printError err
+      pure []
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "fetchActivity: failed to parse JSON"
+        pure []
+      Right json -> case decodeActivityList json of
+        Left decErr -> do
+          liftEffect $ log $ "fetchActivity: decode error: " <> show decErr
+          pure []
+        Right rows -> pure rows

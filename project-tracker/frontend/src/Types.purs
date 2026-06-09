@@ -6,7 +6,7 @@ module Types where
 
 import Prelude
 
-import Data.Argonaut.Core (Json, toObject, toArray, toString, toNumber)
+import Data.Argonaut.Core (Json, toObject, toArray, toString, toNumber, toBoolean)
 import Data.Argonaut.Decode (JsonDecodeError(..))
 import Data.Array as Array
 import Data.Either (Either(..))
@@ -88,6 +88,7 @@ statusLabel = case _ of
 data BlogStatus
   = BlogNotNeeded
   | BlogWanted
+  | BlogWantedPriority
   | BlogDrafted
   | BlogPublished
 
@@ -99,28 +100,31 @@ instance Show BlogStatus where
 
 blogStatusFromString :: String -> Maybe BlogStatus
 blogStatusFromString = case _ of
-  "not_needed" -> Just BlogNotNeeded
-  "wanted"     -> Just BlogWanted
-  "drafted"    -> Just BlogDrafted
-  "published"  -> Just BlogPublished
-  _            -> Nothing
+  "not_needed"      -> Just BlogNotNeeded
+  "wanted"          -> Just BlogWanted
+  "wanted_priority" -> Just BlogWantedPriority
+  "drafted"         -> Just BlogDrafted
+  "published"       -> Just BlogPublished
+  _                 -> Nothing
 
 blogStatusToString :: BlogStatus -> String
 blogStatusToString = case _ of
-  BlogNotNeeded -> "not_needed"
-  BlogWanted    -> "wanted"
-  BlogDrafted   -> "drafted"
-  BlogPublished -> "published"
+  BlogNotNeeded      -> "not_needed"
+  BlogWanted         -> "wanted"
+  BlogWantedPriority -> "wanted_priority"
+  BlogDrafted        -> "drafted"
+  BlogPublished      -> "published"
 
 blogStatusLabel :: BlogStatus -> String
 blogStatusLabel = case _ of
-  BlogNotNeeded -> "Not needed"
-  BlogWanted    -> "Wanted"
-  BlogDrafted   -> "Drafted"
-  BlogPublished -> "Published"
+  BlogNotNeeded      -> "Not needed"
+  BlogWanted         -> "Wanted"
+  BlogWantedPriority -> "Priority"
+  BlogDrafted        -> "Drafted"
+  BlogPublished      -> "Published"
 
 allBlogStatuses :: Array BlogStatus
-allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogDrafted, BlogPublished ]
+allBlogStatuses = [ BlogNotNeeded, BlogWanted, BlogWantedPriority, BlogDrafted, BlogPublished ]
 
 -- | Reachable next statuses for quick status transitions.
 -- |
@@ -163,6 +167,39 @@ type Project =
   , tags :: Array String
   , coverUrl :: Maybe String
   , blogStatus :: Maybe BlogStatus
+  }
+
+-- =============================================================================
+-- ActivityRow (one row from GET /api/activity)
+-- =============================================================================
+
+-- | A ranked project from the activity endpoint. `score` blends recent notes,
+-- | status transitions, and attachments with exponential-decay weighting; the
+-- | component counts are carried alongside so the UI can show *why* a row
+-- | ranked where it did, and so alternative heuristics can be trialled
+-- | client-side without changing the server.
+type ActivityRow =
+  { id :: Int
+  , slug :: Maybe String
+  , name :: String
+  , domain :: String
+  , subdomain :: Maybe String
+  , status :: Status
+  , description :: Maybe String
+  , score :: Number
+  , notes7d :: Int
+  , notes30d :: Int
+  , notes90d :: Int
+  , notesHuman30d :: Int
+  , notesAgent30d :: Int
+  , statusChanges30d :: Int
+  , attachments30d :: Int
+  , lastNoteAt :: Maybe String
+  , lastStatusAt :: Maybe String
+  , lastAttachmentAt :: Maybe String
+  , lastActivityAt :: Maybe String
+  , updatedAt :: Maybe String
+  , pinned :: Boolean
   }
 
 -- =============================================================================
@@ -211,6 +248,8 @@ type Server =
   , url :: Maybe String
   , startCommand :: Maybe String
   , description :: Maybe String
+  , environment :: Maybe String
+  , prerequisites :: Maybe String
   }
 
 type ProjectDetail =
@@ -274,7 +313,9 @@ type ProjectInput =
   , statusReason :: String
   , preferredView :: String   -- empty string means "don't update"
   , blogStatus :: String      -- empty string means "don't update"
-  , blogContent :: String     -- empty string means "don't update"
+  -- blogContent is no longer part of ProjectInput: drafts live on disk
+  -- as files under $MARGINALIA_BLOG_DRAFTS and are written by VS Code
+  -- directly. The browser only reads them via GET /api/projects/:id.
   }
 
 -- =============================================================================
@@ -369,6 +410,69 @@ decodeProjectList json = case toObject json of
       Nothing -> Left (AtKey "projects" (TypeMismatch "Array"))
       Just arr -> traverse decodeProject arr
 
+-- | Required Number field. Used for `score` on ActivityRow.
+reqNumber :: String -> FO.Object Json -> Either JsonDecodeError Number
+reqNumber key obj = case getField key obj of
+  Nothing -> Left (AtKey key MissingValue)
+  Just j -> case toNumber j of
+    Nothing -> Left (AtKey key (TypeMismatch "Number"))
+    Just n -> Right n
+
+-- | Boolean field defaulting to false when missing / not-a-bool.
+optBool :: String -> FO.Object Json -> Boolean
+optBool key obj = case getField key obj of
+  Nothing -> false
+  Just j -> fromMaybe false (toBoolean j)
+
+-- | Int field defaulting to 0 when missing. Used for the activity counts
+-- | (they're always present in the server response, but defaulting to 0 keeps
+-- | the decoder forgiving if a future server drops an unused count).
+intOr0 :: String -> FO.Object Json -> Int
+intOr0 key obj = case optInt key obj of
+  Just n -> n
+  Nothing -> 0
+
+decodeActivityRow :: Json -> Either JsonDecodeError ActivityRow
+decodeActivityRow json = case toObject json of
+  Nothing -> Left (TypeMismatch "Object")
+  Just obj -> ado
+    id <- reqInt "id" obj
+    name <- reqString "name" obj
+    domain <- reqString "domain" obj
+    status <- reqStatus "status" obj
+    score <- reqNumber "score" obj
+    in { id
+       , slug: optString "slug" obj
+       , name
+       , domain
+       , subdomain: optString "subdomain" obj
+       , status
+       , description: optString "description" obj
+       , score
+       , notes7d: intOr0 "notes7d" obj
+       , notes30d: intOr0 "notes30d" obj
+       , notes90d: intOr0 "notes90d" obj
+       , notesHuman30d: intOr0 "notesHuman30d" obj
+       , notesAgent30d: intOr0 "notesAgent30d" obj
+       , statusChanges30d: intOr0 "statusChanges30d" obj
+       , attachments30d: intOr0 "attachments30d" obj
+       , lastNoteAt: optString "lastNoteAt" obj
+       , lastStatusAt: optString "lastStatusAt" obj
+       , lastAttachmentAt: optString "lastAttachmentAt" obj
+       , lastActivityAt: optString "lastActivityAt" obj
+       , updatedAt: optString "updatedAt" obj
+       , pinned: optBool "pinned" obj
+       }
+
+decodeActivityList :: Json -> Either JsonDecodeError (Array ActivityRow)
+decodeActivityList json = case toObject json of
+  Nothing -> Left (TypeMismatch "Object")
+  Just obj -> case getField "projects" obj of
+    Nothing -> Left (AtKey "projects" MissingValue)
+    Just projsJson -> case toArray projsJson of
+      Nothing -> Left (AtKey "projects" (TypeMismatch "Array"))
+      Just arr -> traverse decodeActivityRow arr
+
 decodeNote :: Json -> Either JsonDecodeError Note
 decodeNote json = case toObject json of
   Nothing -> Left (TypeMismatch "Object")
@@ -422,6 +526,8 @@ decodeServer json = case toObject json of
        , url: optString "url" obj
        , startCommand: optString "startCommand" obj
        , description: optString "description" obj
+       , environment: optString "environment" obj
+       , prerequisites: optString "prerequisites" obj
        }
 
 -- | The /api/ports response envelope

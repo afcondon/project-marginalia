@@ -8,8 +8,14 @@ module API.Projects
   , getProject
   , createProject
   , updateProject
+  , deleteProject
   , addTag
+  , deleteTag
   , renameProject
+  , openBlogDraft
+  , listBlogDrafts
+  , saveBlogAsset
+  , listBlogAssets
   ) where
 
 import Prelude
@@ -21,10 +27,11 @@ import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Int (floor) as Int
 import Data.Maybe (Maybe(..), fromMaybe)
-import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, run, firstRow, isEmpty)
+import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, execBatch, run, firstRow, isEmpty)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
+import BlogDrafts as BlogDrafts
 import Filesystem (RenameOutcome(..)) as FS
 import Filesystem (renameProjectDirectory) as FS
 import Foreign (Foreign, unsafeToForeign)
@@ -152,6 +159,12 @@ getProject db projectId = do
   case firstRow projectRows of
     Nothing -> notFound
     Just project -> do
+      -- Blog drafts are file-sourced: read <slug>.md from disk and splice
+      -- its contents into the row so buildProjectDetailJson sees it as
+      -- blog_content. The DB column is ignored for reads.
+      let slug = getRowString_ "slug" project
+      mDraft <- liftEffect $ BlogDrafts.readDraft slug
+      let projectWithDraft = BlogDrafts.overrideBlogContent project mDraft
       notes <- queryAllParams db
         "SELECT id, content, author, created_at FROM project_notes WHERE project_id = ? ORDER BY created_at DESC"
         idParam
@@ -167,7 +180,7 @@ getProject db projectId = do
       attachments <- queryAllParams db
         "SELECT id, filename, mime_type, file_path, description, created_at FROM attachments WHERE project_id = ? ORDER BY created_at DESC"
         idParam
-      ok' jsonHeaders (buildProjectDetailJson project notes deps attachments)
+      ok' jsonHeaders (buildProjectDetailJson projectWithDraft notes deps attachments)
 
 -- =============================================================================
 -- POST /api/projects
@@ -248,6 +261,23 @@ updateProject db projectId bodyStr = case parseBody bodyStr of
   Just obj -> do
     let newStatus = getFieldMaybe "status" obj
 
+    -- If the body carries a status, capture the *current* status BEFORE the
+    -- UPDATE runs, so we can decide whether this PUT is a real transition
+    -- (record in status_history with a correct old_status) or a no-op
+    -- (skip recording — don't pollute history with same-value writes from
+    -- callers that PUT the full project object on every save). The frontend
+    -- editor does exactly that, which is why status_history accumulated
+    -- hundreds of empty-old bogus rows before this guard was added.
+    mOldStatus <- case newStatus of
+      Nothing -> pure Nothing
+      Just _  -> do
+        oldRows <- queryAllParams db
+          "SELECT status FROM projects WHERE id = ?"
+          [ unsafeToForeign projectId ]
+        pure $ case firstRow oldRows of
+          Nothing -> Nothing
+          Just row -> Just (getRowString_ "status" row)
+
     -- Build and execute UPDATE with only provided fields
     let updates = buildUpdateClauses obj
     case updates.clauses of
@@ -258,18 +288,18 @@ updateProject db projectId bodyStr = case parseBody bodyStr of
         let params = updates.params <> [ unsafeToForeign projectId ]
         run db sql params
 
-        -- If status changed, record in history
-        case newStatus of
-          Nothing -> pure unit
-          Just status -> do
+        -- Record in history only when status is present AND actually changed.
+        case newStatus, mOldStatus of
+          Just status, Just oldStatus | oldStatus /= status -> do
             let reason = fromMaybe "Updated via API" (getFieldMaybe "statusReason" obj)
             run db
               "INSERT INTO status_history (project_id, old_status, new_status, reason, author) VALUES (?, ?, ?, ?, 'api')"
               [ unsafeToForeign projectId
-              , unsafeToForeign "" -- old_status not critical, avoids subquery FK issues
+              , unsafeToForeign oldStatus
               , unsafeToForeign status
               , unsafeToForeign reason
               ]
+          _, _ -> pure unit
 
         rows <- queryAllParams db "SELECT * FROM project_with_tags WHERE id = ?"
           [ unsafeToForeign projectId ]
@@ -341,6 +371,128 @@ renameProject db projectId bodyStr = case parseBody bodyStr of
 -- | Read a string field from a Foreign row. Returns "" if missing or null.
 foreign import getRowString_ :: String -> Foreign -> String
 
+-- | JavaScript `null` exposed as a Foreign. Passed as a SQL parameter when a
+-- | nullable column should be explicitly set to NULL (rather than untouched).
+foreign import jsNull :: Foreign
+
+-- =============================================================================
+-- POST /api/projects/:id/blog/open — open blog draft in VS Code
+-- =============================================================================
+-- |
+-- | Looks up the project's slug, ensures `<slug>.md` exists under the
+-- | configured drafts dir (creating it with a template if needed), then
+-- | shells out to `open -a "Visual Studio Code" <path>`.
+-- |
+-- | The browser UI calls this after the user clicks "Edit in VS Code";
+-- | writes happen exclusively in VS Code; the UI refetches on demand via
+-- | the standard GET handler which re-reads the file.
+openBlogDraft :: Database -> Int -> Aff Response
+openBlogDraft db projectId = do
+  rows <- queryAllParams db
+    "SELECT slug, name FROM projects WHERE id = ?"
+    [ unsafeToForeign projectId ]
+  case firstRow rows of
+    Nothing -> notFound
+    Just row -> do
+      let slug = getRowString_ "slug" row
+      let name = getRowString_ "name" row
+      if slug == ""
+        then badRequest' jsonHeaders """{"error": "Project has no slug"}"""
+        else do
+          ensured <- liftEffect $ BlogDrafts.ensureDraft slug name
+          case ensured of
+            BlogDrafts.EnsureError err ->
+              badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+            BlogDrafts.EnsureOpened absPath -> do
+              openOutcome <- liftEffect $ BlogDrafts.openInVSCode absPath
+              case openOutcome of
+                BlogDrafts.OpenError err ->
+                  badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+                BlogDrafts.OpenOk p ->
+                  ok' jsonHeaders ("{\"ok\": true, \"path\": \"" <> p <> "\"}")
+
+-- =============================================================================
+-- GET /api/blog/drafts — Letters Page: all projects with blog status
+-- =============================================================================
+
+listBlogDrafts :: Database -> Aff Response
+listBlogDrafts db = do
+  rows <- queryAll db
+    """SELECT id, slug, name, domain, blog_status
+       FROM projects
+       WHERE blog_status IS NOT NULL
+       ORDER BY
+         CASE blog_status
+           WHEN 'drafted'         THEN 1
+           WHEN 'wanted_priority' THEN 2
+           WHEN 'wanted'          THEN 3
+           WHEN 'published'       THEN 4
+           WHEN 'not_needed'      THEN 5
+           ELSE 6
+         END,
+         name"""
+  enriched <- liftEffect $ buildBlogDraftsJson_ rows
+  ok' jsonHeaders enriched
+
+-- | Build the Letters Page JSON response. Reads each project's draft file
+-- | from disk (via BlogDrafts.readDraft) to include word counts and filenames.
+foreign import buildBlogDraftsJson_ :: Rows -> Effect String
+
+-- =============================================================================
+-- POST /api/projects/:id/blog/assets — upload an image for a blog draft
+-- GET  /api/projects/:id/blog/assets — list assets for a blog draft
+-- =============================================================================
+
+saveBlogAsset :: Database -> Int -> String -> Aff Response
+saveBlogAsset db projectId bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
+  Just obj -> do
+    rows <- queryAllParams db
+      "SELECT slug FROM projects WHERE id = ?"
+      [ unsafeToForeign projectId ]
+    case firstRow rows of
+      Nothing -> notFound
+      Just row -> do
+        let slug = getRowString_ "slug" row
+        case getFieldMaybe "filename" obj, getFieldMaybe "data" obj of
+          Just filename, Just base64Data -> do
+            outcome <- liftEffect $ BlogDrafts.saveBlogAsset slug filename base64Data
+            case outcome of
+              BlogDrafts.AssetSaved info ->
+                let markdown = "![" <> info.filename <> "](" <> slug <> "/" <> info.filename <> ")"
+                in ok' jsonHeaders
+                  ("{\"ok\": true, \"filename\": \"" <> info.filename <> "\", \"markdown\": \"" <> markdown <> "\"}")
+              BlogDrafts.AssetError err ->
+                badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+          _, _ -> badRequest' jsonHeaders """{"error": "Missing 'filename' and/or 'data' fields"}"""
+
+listBlogAssets :: Database -> Int -> Aff Response
+listBlogAssets db projectId = do
+  rows <- queryAllParams db
+    "SELECT slug FROM projects WHERE id = ?"
+    [ unsafeToForeign projectId ]
+  case firstRow rows of
+    Nothing -> notFound
+    Just row -> do
+      let slug = getRowString_ "slug" row
+      assets <- liftEffect $ BlogDrafts.listBlogAssets slug
+      ok' jsonHeaders (buildAssetsJson slug assets)
+
+buildAssetsJson :: String -> Array BlogDrafts.AssetInfo -> String
+buildAssetsJson slug assets =
+  let entries = map (\a ->
+        "{\"filename\": \"" <> a.filename
+        <> "\", \"size\": " <> show a.size
+        <> ", \"url\": \"/blog-assets/" <> slug <> "/" <> a.filename
+        <> "\", \"markdown\": \"![" <> a.filename <> "](" <> slug <> "/" <> a.filename <> ")\"}"
+      ) assets
+  in "{\"assets\": [" <> joinArray entries <> "], \"count\": " <> show (Array.length assets) <> "}"
+
+joinArray :: Array String -> String
+joinArray arr = case Array.uncons arr of
+  Nothing -> ""
+  Just { head: h, tail: t } -> Array.foldl (\acc s -> acc <> ", " <> s) h t
+
 addTag :: Database -> Int -> String -> Aff Response
 addTag db projectId bodyStr = case parseBody bodyStr of
   Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
@@ -373,6 +525,71 @@ addTag db projectId bodyStr = case parseBody bodyStr of
               [ unsafeToForeign projectId, unsafeToForeign tagName ]
           ok' jsonHeaders ("""{"projectId": """ <> show projectId <> """, "tag": """ <> "\"" <> tagName <> "\"" <> """}""")
 
+-- | Remove a tag from a project (by name). The tag itself is left in the
+-- | `tags` table — other projects may still reference it. Idempotent: returns
+-- | ok whether or not the link existed.
+deleteTag :: Database -> Int -> String -> Aff Response
+deleteTag db projectId tagName = do
+  run db
+    """DELETE FROM project_tags
+       WHERE project_id = ?
+         AND tag_id IN (SELECT id FROM tags WHERE name = ?)"""
+    [ unsafeToForeign projectId, unsafeToForeign tagName ]
+  ok' jsonHeaders
+    ( """{"ok": true, "projectId": """ <> show projectId
+      <> """, "tag": """ <> "\"" <> tagName <> "\"" <> "}"
+    )
+
+-- =============================================================================
+-- DELETE /api/projects/:id
+-- =============================================================================
+
+-- | Delete a project and cascade across every child table. The FKs in
+-- | schema.sql are commented out (DuckDB's FK enforcement interacts badly
+-- | with UPDATEs on referenced rows), so the cascade is done by hand.
+-- |
+-- | Guards:
+-- |   - 404 if the project does not exist
+-- |   - 400 if the project still has child projects (parent_id = :id);
+-- |     reparent or delete them first
+-- |
+-- | Child tables cleared: project_tags, project_notes, attachments,
+-- | status_history, project_servers, project_issues, agent_sessions,
+-- | dependencies (both directions), and any evolved_into back-reference
+-- | from another project gets NULL'd out.
+-- |
+-- | Attachment *files* on disk are NOT touched — only the DB rows go.
+-- | The filesystem is authoritative for bytes; the DB is authoritative
+-- | for pointers.
+deleteProject :: Database -> Int -> Aff Response
+deleteProject db projectId = do
+  let idParam = [ unsafeToForeign projectId ]
+  existing <- queryAllParams db
+    "SELECT id FROM projects WHERE id = ?" idParam
+  if isEmpty existing then notFound
+  else do
+    childRows <- queryAllParams db
+      "SELECT id FROM projects WHERE parent_id = ? LIMIT 1" idParam
+    if not (isEmpty childRows) then
+      badRequest' jsonHeaders
+        """{"error": "Project has child projects; reparent or delete them first"}"""
+    else do
+      let pid = show projectId
+      execBatch db
+        [ "DELETE FROM project_tags WHERE project_id = " <> pid
+        , "DELETE FROM project_notes WHERE project_id = " <> pid
+        , "DELETE FROM attachments WHERE project_id = " <> pid
+        , "DELETE FROM status_history WHERE project_id = " <> pid
+        , "DELETE FROM project_servers WHERE project_id = " <> pid
+        , "DELETE FROM project_issues WHERE project_id = " <> pid
+        , "DELETE FROM agent_sessions WHERE project_id = " <> pid
+        , "DELETE FROM dependencies WHERE blocker_id = " <> pid
+            <> " OR blocked_id = " <> pid
+        , "UPDATE projects SET evolved_into = NULL WHERE evolved_into = " <> pid
+        , "DELETE FROM projects WHERE id = " <> pid
+        ]
+      ok' jsonHeaders ("{\"ok\": true, \"deleted\": " <> pid <> "}")
+
 -- =============================================================================
 -- Helpers
 -- =============================================================================
@@ -394,7 +611,10 @@ buildUpdateClauses obj = { clauses, params }
     , fieldClause "preferredView" "preferred_view"
     , intFieldClause "coverAttachmentId" "cover_attachment_id"
     , fieldClause "blogStatus" "blog_status"
-    , fieldClause "blogContent" "blog_content"
+    , nullableIntFieldClause "parentId" "parent_id"
+    -- blogContent is no longer DB-owned: drafts live on disk as files
+    -- under $MARGINALIA_BLOG_DRAFTS and VS Code writes them directly.
+    -- See BlogDrafts.purs.
     ]
   fieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
   fieldClause jsonKey sqlCol = case getFieldMaybe jsonKey obj of
@@ -404,6 +624,15 @@ buildUpdateClauses obj = { clauses, params }
   intFieldClause jsonKey sqlCol = case getIntField jsonKey obj of
     Nothing -> Nothing
     Just n -> Just { clause: sqlCol <> " = ?", param: unsafeToForeign n }
+  -- | Integer field that may also be explicitly null (move-to-root semantics
+  -- | for parent_id, or clear-cover for cover_attachment_id). Missing key =
+  -- | don't update; JSON null = set NULL; JSON number = set to that int.
+  nullableIntFieldClause :: String -> String -> Maybe { clause :: String, param :: Foreign }
+  nullableIntFieldClause jsonKey sqlCol = case FO.lookup jsonKey obj of
+    Nothing -> Nothing
+    Just json -> case J.toNumber json of
+      Just n -> Just { clause: sqlCol <> " = ?", param: unsafeToForeign (Int.floor n) }
+      Nothing -> Just { clause: sqlCol <> " = ?", param: jsNull }
   present = Array.catMaybes fields
   clauses = map _.clause present
   params = map _.param present

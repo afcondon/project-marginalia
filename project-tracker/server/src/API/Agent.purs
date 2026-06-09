@@ -11,6 +11,7 @@ module API.Agent
   , agentGetProject
   , agentUpdateStatus
   , agentAddNote
+  , agentDeleteNote
   , agentAddAttachment
   , agentUploadAttachment
   , agentSearch
@@ -321,6 +322,19 @@ agentAddNote db projectId bodyStr = case parseBody bodyStr of
         case firstRow noteRows of
           Nothing   -> ok' jsonHeaders "{}"
           Just note -> ok' jsonHeaders (buildAgentNoteJson note)
+
+-- =============================================================================
+-- DELETE /api/notes/:id
+-- =============================================================================
+
+-- | Delete a note by id. Idempotent — returns ok even if the row doesn't exist,
+-- | matching the pattern of Servers.deleteServer.
+agentDeleteNote :: Database -> Int -> Aff Response
+agentDeleteNote db noteId = do
+  run db
+    "DELETE FROM project_notes WHERE id = ?"
+    [ unsafeToForeign noteId ]
+  ok' jsonHeaders ("{\"ok\": true, \"deleted\": " <> show noteId <> "}")
 
 -- =============================================================================
 -- POST /api/agent/projects/:id/attachments

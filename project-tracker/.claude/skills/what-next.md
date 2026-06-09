@@ -35,6 +35,43 @@ Then assemble a short, mixed list (see output format). **Don't dump
 everything** — three to eight suggestions total across all categories is
 the sweet spot.
 
+### Axis 0 — Hand-curated quick wins (highest priority)
+
+The morning **Raker** review (project 193) captures explicit quick-win
+candidates as marker notes with `author=quick-win` on the source project.
+These are already triaged — Andrew has read the originating note, judged it
+to be a 5–15 min task, and typed it into Raker. They take precedence over
+all heuristic axes below.
+
+```
+# All quick-win marker notes across the workspace, with their source project.
+# Iterates active projects only — quick-wins on dormant/done projects are rare.
+curl -s 'http://localhost:3100/api/projects?status=active' | jq -r '.projects[].id' | while read id; do
+  curl -s "http://localhost:3100/api/projects/$id" | jq -r --arg pid "$id" '
+    (.name as $name | .slug as $slug
+     | .notes // []
+     | map(select(.author == "quick-win"))
+     | .[]
+     | "\(.id)\t\($pid)\t\($slug)\t\($name)\t\(.content)")'
+done
+```
+
+When quick-wins exist, **lead the response with them**, labelled clearly:
+
+```
+Quick wins (already triaged via Raker — pick one and run `./raker did <note-id>` after):
+
+- [note 188] (121, Marginalia) render newlines as <p> in description box
+- [note 195] (192, Calypso) slim Main.purs to single-session shape
+```
+
+Then continue with 2–4 more candidates from the heuristic axes for variety
+("here are some bigger options if you'd rather"). Don't skip the heuristics
+entirely just because quick-wins exist — Andrew may want to do something
+slightly bigger today.
+
+If no quick-wins exist, this axis is silent — fall through to the heuristics.
+
 ### Axis 1 — Stale actives
 
 Projects marked `active` but not updated in 30+ days. These are the most

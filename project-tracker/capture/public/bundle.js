@@ -422,6 +422,59 @@
   var compare = function(dict) {
     return dict.compare;
   };
+  var max = function(dictOrd) {
+    var compare3 = compare(dictOrd);
+    return function(x) {
+      return function(y) {
+        var v = compare3(x)(y);
+        if (v instanceof LT) {
+          return y;
+        }
+        ;
+        if (v instanceof EQ) {
+          return x;
+        }
+        ;
+        if (v instanceof GT) {
+          return x;
+        }
+        ;
+        throw new Error("Failed pattern match at Data.Ord (line 181, column 3 - line 184, column 12): " + [v.constructor.name]);
+      };
+    };
+  };
+  var min = function(dictOrd) {
+    var compare3 = compare(dictOrd);
+    return function(x) {
+      return function(y) {
+        var v = compare3(x)(y);
+        if (v instanceof LT) {
+          return x;
+        }
+        ;
+        if (v instanceof EQ) {
+          return x;
+        }
+        ;
+        if (v instanceof GT) {
+          return y;
+        }
+        ;
+        throw new Error("Failed pattern match at Data.Ord (line 172, column 3 - line 175, column 12): " + [v.constructor.name]);
+      };
+    };
+  };
+  var clamp = function(dictOrd) {
+    var min1 = min(dictOrd);
+    var max1 = max(dictOrd);
+    return function(low2) {
+      return function(hi) {
+        return function(x) {
+          return min1(hi)(max1(low2)(x));
+        };
+      };
+    };
+  };
 
   // output/Data.Bounded/index.js
   var top = function(dict) {
@@ -4436,13 +4489,137 @@
           return pure12(v1.value0);
         }
         ;
-        throw new Error("Failed pattern match at Capture.API (line 52, column 21 - line 54, column 27): " + [v1.constructor.name]);
+        throw new Error("Failed pattern match at Capture.API (line 56, column 21 - line 58, column 27): " + [v1.constructor.name]);
       }
       ;
-      throw new Error("Failed pattern match at Capture.API (line 50, column 19 - line 54, column 27): " + [v.constructor.name]);
+      throw new Error("Failed pattern match at Capture.API (line 54, column 19 - line 58, column 27): " + [v.constructor.name]);
     }
     ;
-    throw new Error("Failed pattern match at Capture.API (line 48, column 3 - line 54, column 27): " + [result.constructor.name]);
+    throw new Error("Failed pattern match at Capture.API (line 52, column 3 - line 58, column 27): " + [result.constructor.name]);
+  });
+  var decodeNote = function(json) {
+    return bind2(toObject(json))(function(obj) {
+      return bind2(lookup("content")(obj))(function(contentJson) {
+        return bind2(toString(contentJson))(function(content3) {
+          var author = fromMaybe("unknown")(bind2(lookup("author")(obj))(toString));
+          var createdAt = fromMaybe("")(bind2(lookup("createdAt")(obj))(toString));
+          return pure4({
+            content: content3,
+            author,
+            createdAt
+          });
+        });
+      });
+    });
+  };
+  var decodeDossier = function(json) {
+    return bind2(toObject(json))(function(obj) {
+      return bind2(lookup("id")(obj))(function(idJson) {
+        return bind2(toNumber(idJson))(function(n) {
+          return bind2(lookup("name")(obj))(function(nameJson) {
+            return bind2(toString(nameJson))(function(name16) {
+              return bind2(lookup("domain")(obj))(function(domainJson) {
+                return bind2(toString(domainJson))(function(domain) {
+                  var status = fromMaybe("idea")(bind2(lookup("status")(obj))(toString));
+                  var description = fromMaybe("")(bind2(lookup("description")(obj))(toString));
+                  var notes = fromMaybe([])(bind2(lookup("notes")(obj))(function(notesJson) {
+                    return bind2(toArray(notesJson))(function(arr) {
+                      return traverse3(decodeNote)(arr);
+                    });
+                  }));
+                  return pure4({
+                    id: floor2(n),
+                    name: name16,
+                    domain,
+                    status,
+                    description,
+                    notes
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  };
+  var fetchDossier = function(projectId) {
+    return bind12(get3(string2)("/api/projects/" + show2(projectId)))(function(result) {
+      if (result instanceof Left) {
+        return pure12(Nothing.value);
+      }
+      ;
+      if (result instanceof Right) {
+        var v = jsonParser(result.value0.body);
+        if (v instanceof Left) {
+          return pure12(Nothing.value);
+        }
+        ;
+        if (v instanceof Right) {
+          return pure12(decodeDossier(v.value0));
+        }
+        ;
+        throw new Error("Failed pattern match at Capture.API (line 147, column 19 - line 149, column 46): " + [v.constructor.name]);
+      }
+      ;
+      throw new Error("Failed pattern match at Capture.API (line 145, column 3 - line 149, column 46): " + [result.constructor.name]);
+    });
+  };
+  var decodeActivityRow = function(json) {
+    return bind2(toObject(json))(function(obj) {
+      return bind2(lookup("id")(obj))(function(idJson) {
+        return bind2(toNumber(idJson))(function(n) {
+          return bind2(lookup("name")(obj))(function(nameJson) {
+            return bind2(toString(nameJson))(function(name16) {
+              return bind2(lookup("domain")(obj))(function(domainJson) {
+                return bind2(toString(domainJson))(function(domain) {
+                  var status = fromMaybe("idea")(bind2(lookup("status")(obj))(toString));
+                  var score = fromMaybe(0)(bind2(lookup("score")(obj))(toNumber));
+                  var description = fromMaybe("")(bind2(lookup("description")(obj))(toString));
+                  return pure4({
+                    id: floor2(n),
+                    name: name16,
+                    domain,
+                    status,
+                    score,
+                    description
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  };
+  var decodeActivityList = function(json) {
+    return bind2(toObject(json))(function(obj) {
+      return bind2(lookup("projects")(obj))(function(projsJson) {
+        return bind2(toArray(projsJson))(function(arr) {
+          return traverse3(decodeActivityRow)(arr);
+        });
+      });
+    });
+  };
+  var fetchActivity = /* @__PURE__ */ bind12(/* @__PURE__ */ get3(string2)("/api/activity?limit=200"))(function(result) {
+    if (result instanceof Left) {
+      return pure12([]);
+    }
+    ;
+    if (result instanceof Right) {
+      var v = jsonParser(result.value0.body);
+      if (v instanceof Left) {
+        return pure12([]);
+      }
+      ;
+      if (v instanceof Right) {
+        return pure12(fromMaybe([])(decodeActivityList(v.value0)));
+      }
+      ;
+      throw new Error("Failed pattern match at Capture.API (line 98, column 19 - line 100, column 66): " + [v.constructor.name]);
+    }
+    ;
+    throw new Error("Failed pattern match at Capture.API (line 96, column 3 - line 100, column 66): " + [result.constructor.name]);
   });
   var addNote = function(projectId) {
     return function(content3) {
@@ -4748,6 +4925,72 @@
     ;
     throw new Error("Failed pattern match at DOM.HTML.Indexed.InputType (line 33, column 19 - line 55, column 22): " + [v.constructor.name]);
   };
+
+  // output/Data.Number.Format/foreign.js
+  function wrap2(method2) {
+    return function(d) {
+      return function(num) {
+        return method2.apply(num, [d]);
+      };
+    };
+  }
+  var toPrecisionNative = wrap2(Number.prototype.toPrecision);
+  var toFixedNative = wrap2(Number.prototype.toFixed);
+  var toExponentialNative = wrap2(Number.prototype.toExponential);
+
+  // output/Data.Number.Format/index.js
+  var clamp2 = /* @__PURE__ */ clamp(ordInt);
+  var Precision = /* @__PURE__ */ (function() {
+    function Precision2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    Precision2.create = function(value0) {
+      return new Precision2(value0);
+    };
+    return Precision2;
+  })();
+  var Fixed = /* @__PURE__ */ (function() {
+    function Fixed2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    Fixed2.create = function(value0) {
+      return new Fixed2(value0);
+    };
+    return Fixed2;
+  })();
+  var Exponential = /* @__PURE__ */ (function() {
+    function Exponential2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    Exponential2.create = function(value0) {
+      return new Exponential2(value0);
+    };
+    return Exponential2;
+  })();
+  var toStringWith = function(v) {
+    if (v instanceof Precision) {
+      return toPrecisionNative(v.value0);
+    }
+    ;
+    if (v instanceof Fixed) {
+      return toFixedNative(v.value0);
+    }
+    ;
+    if (v instanceof Exponential) {
+      return toExponentialNative(v.value0);
+    }
+    ;
+    throw new Error("Failed pattern match at Data.Number.Format (line 59, column 1 - line 59, column 43): " + [v.constructor.name]);
+  };
+  var fixed = /* @__PURE__ */ (function() {
+    var $9 = clamp2(0)(20);
+    return function($10) {
+      return Fixed.create($9($10));
+    };
+  })();
 
   // output/Data.String.CodePoints/foreign.js
   var hasStringIterator = typeof Symbol !== "undefined" && Symbol != null && typeof Symbol.iterator !== "undefined" && typeof String.prototype[Symbol.iterator] === "function";
@@ -5342,7 +5585,7 @@
     },
     foldMap: function(dictMonoid) {
       var mempty3 = mempty(dictMonoid);
-      var append12 = append(dictMonoid.Semigroup0());
+      var append13 = append(dictMonoid.Semigroup0());
       return function(f) {
         var go2 = function(v) {
           if (v instanceof Leaf) {
@@ -5350,7 +5593,7 @@
           }
           ;
           if (v instanceof Node) {
-            return append12(go2(v.value4))(append12(f(v.value3))(go2(v.value5)));
+            return append13(go2(v.value4))(append13(f(v.value3))(go2(v.value5)));
           }
           ;
           throw new Error("Failed pattern match at Data.Map.Internal (line 181, column 10 - line 184, column 28): " + [v.constructor.name]);
@@ -6112,9 +6355,9 @@
   function addEventListener2(type) {
     return function(listener) {
       return function(useCapture) {
-        return function(target6) {
+        return function(target7) {
           return function() {
-            return target6.addEventListener(type, listener, useCapture);
+            return target7.addEventListener(type, listener, useCapture);
           };
         };
       };
@@ -6123,9 +6366,9 @@
   function removeEventListener2(type) {
     return function(listener) {
       return function(useCapture) {
-        return function(target6) {
+        return function(target7) {
           return function() {
-            return target6.removeEventListener(type, listener, useCapture);
+            return target7.removeEventListener(type, listener, useCapture);
           };
         };
       };
@@ -6458,6 +6701,11 @@
           return new Elem(ns, name16, props, children2);
         };
       };
+    };
+  };
+  var attr = function(ns) {
+    return function(v) {
+      return Attribute.create(ns)(v);
     };
   };
 
@@ -7457,9 +7705,11 @@
   var element2 = /* @__PURE__ */ (function() {
     return element(Nothing.value);
   })();
+  var h1 = /* @__PURE__ */ element2("h1");
   var input = function(props) {
     return element2("input")(props)([]);
   };
+  var p = /* @__PURE__ */ element2("p");
   var span2 = /* @__PURE__ */ element2("span");
   var textarea = function(es) {
     return element2("textarea")(es)([]);
@@ -7509,6 +7759,7 @@
   var composeKleisliFlipped3 = /* @__PURE__ */ composeKleisliFlipped(/* @__PURE__ */ bindExceptT(monadIdentity));
   var readProp2 = /* @__PURE__ */ readProp(monadIdentity);
   var readString3 = /* @__PURE__ */ readString(monadIdentity);
+  var touchHandler = unsafeCoerce2;
   var mouseHandler = unsafeCoerce2;
   var handler$prime = function(et) {
     return function(f) {
@@ -7528,6 +7779,24 @@
     var $15 = handler2(click);
     return function($16) {
       return $15(mouseHandler($16));
+    };
+  })();
+  var onTouchEnd = /* @__PURE__ */ (function() {
+    var $43 = handler2("touchend");
+    return function($44) {
+      return $43(touchHandler($44));
+    };
+  })();
+  var onTouchMove = /* @__PURE__ */ (function() {
+    var $49 = handler2("touchmove");
+    return function($50) {
+      return $49(touchHandler($50));
+    };
+  })();
+  var onTouchStart = /* @__PURE__ */ (function() {
+    var $51 = handler2("touchstart");
+    return function($52) {
+      return $51(touchHandler($52));
     };
   })();
   var addForeignPropHandler = function(key) {
@@ -7572,11 +7841,42 @@
     };
   })();
   var autofocus2 = /* @__PURE__ */ prop1("autofocus");
+  var attr2 = /* @__PURE__ */ (function() {
+    return attr(Nothing.value);
+  })();
+  var style = /* @__PURE__ */ attr2("style");
+
+  // output/Web.TouchEvent.Touch/foreign.js
+  function clientX(t) {
+    return t.clientX;
+  }
+  function clientY(t) {
+    return t.clientY;
+  }
+
+  // output/Web.TouchEvent.TouchEvent/foreign.js
+  function touches(e) {
+    return e.touches;
+  }
+
+  // output/Web.TouchEvent.TouchList/foreign.js
+  function _item2(i2, l) {
+    return l.item(i2);
+  }
+
+  // output/Web.TouchEvent.TouchList/index.js
+  var item = function(i2) {
+    return function(l) {
+      return toMaybe(_item2(i2, l));
+    };
+  };
 
   // output/Capture.App/index.js
   var value4 = /* @__PURE__ */ value3(isPropString);
   var type_4 = /* @__PURE__ */ type_3(isPropInputType);
   var map16 = /* @__PURE__ */ map(functorArray);
+  var append12 = /* @__PURE__ */ append(semigroupArray);
+  var show3 = /* @__PURE__ */ show(showInt);
   var discard2 = /* @__PURE__ */ discard(discardUnit)(bindHalogenM);
   var bind5 = /* @__PURE__ */ bind(bindHalogenM);
   var when2 = /* @__PURE__ */ when(applicativeHalogenM);
@@ -7584,6 +7884,33 @@
   var modify_3 = /* @__PURE__ */ modify_2(monadStateHalogenM);
   var pure7 = /* @__PURE__ */ pure(applicativeHalogenM);
   var $$try4 = /* @__PURE__ */ $$try(monadErrorAff);
+  var min4 = /* @__PURE__ */ min(ordInt);
+  var max4 = /* @__PURE__ */ max(ordInt);
+  var div4 = /* @__PURE__ */ div(euclideanRingInt);
+  var CaptureHome = /* @__PURE__ */ (function() {
+    function CaptureHome2() {
+    }
+    ;
+    CaptureHome2.value = new CaptureHome2();
+    return CaptureHome2;
+  })();
+  var Browse = /* @__PURE__ */ (function() {
+    function Browse2() {
+    }
+    ;
+    Browse2.value = new Browse2();
+    return Browse2;
+  })();
+  var Dossier = /* @__PURE__ */ (function() {
+    function Dossier2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    Dossier2.create = function(value0) {
+      return new Dossier2(value0);
+    };
+    return Dossier2;
+  })();
   var Dictating = /* @__PURE__ */ (function() {
     function Dictating2() {
     }
@@ -7773,6 +8100,124 @@
     CancelCapture2.value = new CancelCapture2();
     return CancelCapture2;
   })();
+  var SwitchScreen = /* @__PURE__ */ (function() {
+    function SwitchScreen2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    SwitchScreen2.create = function(value0) {
+      return new SwitchScreen2(value0);
+    };
+    return SwitchScreen2;
+  })();
+  var LoadActivity = /* @__PURE__ */ (function() {
+    function LoadActivity2() {
+    }
+    ;
+    LoadActivity2.value = new LoadActivity2();
+    return LoadActivity2;
+  })();
+  var OpenDossier = /* @__PURE__ */ (function() {
+    function OpenDossier2(value0) {
+      this.value0 = value0;
+    }
+    ;
+    OpenDossier2.create = function(value0) {
+      return new OpenDossier2(value0);
+    };
+    return OpenDossier2;
+  })();
+  var CloseDossier = /* @__PURE__ */ (function() {
+    function CloseDossier2() {
+    }
+    ;
+    CloseDossier2.value = new CloseDossier2();
+    return CloseDossier2;
+  })();
+  var SwipeStart = /* @__PURE__ */ (function() {
+    function SwipeStart2(value0, value1) {
+      this.value0 = value0;
+      this.value1 = value1;
+    }
+    ;
+    SwipeStart2.create = function(value0) {
+      return function(value1) {
+        return new SwipeStart2(value0, value1);
+      };
+    };
+    return SwipeStart2;
+  })();
+  var SwipeMove = /* @__PURE__ */ (function() {
+    function SwipeMove2(value0, value1) {
+      this.value0 = value0;
+      this.value1 = value1;
+    }
+    ;
+    SwipeMove2.create = function(value0) {
+      return function(value1) {
+        return new SwipeMove2(value0, value1);
+      };
+    };
+    return SwipeMove2;
+  })();
+  var SwipeEnd = /* @__PURE__ */ (function() {
+    function SwipeEnd2() {
+    }
+    ;
+    SwipeEnd2.value = new SwipeEnd2();
+    return SwipeEnd2;
+  })();
+  var NoOp = /* @__PURE__ */ (function() {
+    function NoOp2() {
+    }
+    ;
+    NoOp2.value = new NoOp2();
+    return NoOp2;
+  })();
+  var eqScreen = {
+    eq: function(x) {
+      return function(y) {
+        if (x instanceof CaptureHome && y instanceof CaptureHome) {
+          return true;
+        }
+        ;
+        if (x instanceof Browse && y instanceof Browse) {
+          return true;
+        }
+        ;
+        if (x instanceof Dossier && y instanceof Dossier) {
+          return x.value0 === y.value0;
+        }
+        ;
+        return false;
+      };
+    }
+  };
+  var eq22 = /* @__PURE__ */ eq(eqScreen);
+  var touchStartHandler = function(ev) {
+    var v = item(0)(touches(ev));
+    if (v instanceof Just) {
+      return new SwipeStart(clientX(v.value0), clientY(v.value0));
+    }
+    ;
+    if (v instanceof Nothing) {
+      return NoOp.value;
+    }
+    ;
+    throw new Error("Failed pattern match at Capture.App (line 335, column 3 - line 337, column 20): " + [v.constructor.name]);
+  };
+  var touchMoveHandler = function(ev) {
+    var v = item(0)(touches(ev));
+    if (v instanceof Just) {
+      return new SwipeMove(clientX(v.value0), clientY(v.value0));
+    }
+    ;
+    if (v instanceof Nothing) {
+      return NoOp.value;
+    }
+    ;
+    throw new Error("Failed pattern match at Capture.App (line 341, column 3 - line 343, column 20): " + [v.constructor.name]);
+  };
   var renderWriting = function(state3) {
     return div3([class_("capture-flow capture-write")])([textarea([class_("write-input"), value4(state3.noteText), placeholder2("Quick note..."), autofocus2(true), rows(4), onValueInput(SetNoteText.create)]), div3([class_("capture-actions")])([button([class_("capture-save"), disabled2(state3.saving || $$null2(trim(state3.noteText))), onClick(function(v) {
       return SaveNote.value;
@@ -7799,6 +8244,24 @@
       return CancelCapture.value;
     })])([text("Cancel")])])]);
   };
+  var renderTab = function(label5) {
+    return function(scr) {
+      return function(isActive) {
+        return button([class_("tab" + (function() {
+          if (isActive) {
+            return " tab-active";
+          }
+          ;
+          return "";
+        })()), onClick(function(v) {
+          return new SwitchScreen(scr);
+        })])([text(label5)]);
+      };
+    };
+  };
+  var renderTabBar = function(state3) {
+    return div3([class_("tab-bar")])([renderTab("Capture")(CaptureHome.value)(eq22(state3.screen)(CaptureHome.value)), renderTab("Browse")(Browse.value)(eq22(state3.screen)(Browse.value))]);
+  };
   var renderRecentItem = function(cap) {
     return div3([class_("recent-item recent-" + cap.captureType)])([span2([class_("recent-time")])([text(cap.timestamp)]), span2([class_("recent-project")])([text(cap.projectName)]), span2([class_("recent-content")])([text(take4(80)(cap.content))])]);
   };
@@ -7817,7 +8280,7 @@
         return div3([class_("project-strip-active")])([span2([class_("domain-dot domain-" + state3.currentProject.value0.domain)])([]), span2([class_("project-strip-name")])([text(state3.currentProject.value0.name)]), span2([class_("project-strip-domain")])([text(state3.currentProject.value0.domain)])]);
       }
       ;
-      throw new Error("Failed pattern match at Capture.App (line 156, column 7 - line 167, column 14): " + [state3.currentProject.constructor.name]);
+      throw new Error("Failed pattern match at Capture.App (line 356, column 7 - line 367, column 14): " + [state3.currentProject.constructor.name]);
     })(), span2([class_("project-strip-chevron")])([text((function() {
       if (state3.pickerOpen) {
         return "^";
@@ -7837,7 +8300,7 @@
           return false;
         }
         ;
-        throw new Error("Failed pattern match at Capture.App (line 261, column 19 - line 263, column 25): " + [state3.currentProject.constructor.name]);
+        throw new Error("Failed pattern match at Capture.App (line 461, column 19 - line 463, column 25): " + [state3.currentProject.constructor.name]);
       })();
       return div3([class_("picker-item" + (function() {
         if (isCurrent) {
@@ -7853,8 +8316,8 @@
   var renderPicker = function(state3) {
     var filtered = (function() {
       var q2 = toLower(state3.pickerSearch);
-      var $87 = $$null2(q2);
-      if ($87) {
+      var $131 = $$null2(q2);
+      if ($131) {
         return state3.projects;
       }
       ;
@@ -7865,6 +8328,36 @@
     return div3([class_("picker-overlay")])([div3([class_("picker-backdrop"), onClick(function(v) {
       return ClosePicker.value;
     })])([]), div3([class_("picker-sheet")])([input([class_("picker-search"), type_4(InputText.value), placeholder2("Search..."), value4(state3.pickerSearch), autofocus2(true), onValueInput(SetPickerSearch.create)]), div3([class_("picker-list")])(map16(renderPickerItem(state3))(filtered))])]);
+  };
+  var renderDossierNote = function(note2) {
+    return div3([class_("dossier-note")])([div3([class_("dossier-note-meta")])([text(note2.author + (" \xB7 " + note2.createdAt))]), div3([class_("dossier-note-content")])([text(note2.content)])]);
+  };
+  var renderDossierBack = /* @__PURE__ */ button([/* @__PURE__ */ class_("dossier-back"), /* @__PURE__ */ onClick(function(v) {
+    return CloseDossier.value;
+  })])([/* @__PURE__ */ text("\u2039 Browse")]);
+  var renderDossier = function(state3) {
+    if (state3.dossier instanceof Nothing) {
+      return div3([class_("dossier-mobile")])([renderDossierBack, div3([class_("dossier-loading")])([text((function() {
+        if (state3.dossierLoading) {
+          return "loading\u2026";
+        }
+        ;
+        return "";
+      })())])]);
+    }
+    ;
+    if (state3.dossier instanceof Just) {
+      return div3([class_("dossier-mobile domain-" + state3.dossier.value0.domain)])([renderDossierBack, div3([class_("dossier-head")])([h1([class_("dossier-title")])([text(state3.dossier.value0.name)]), div3([class_("dossier-meta")])([span2([class_("domain-dot domain-" + state3.dossier.value0.domain)])([]), span2([class_("dossier-domain")])([text(state3.dossier.value0.domain)]), span2([class_("dossier-status")])([text(state3.dossier.value0.status)])])]), (function() {
+        var $134 = $$null2(state3.dossier.value0.description);
+        if ($134) {
+          return text("");
+        }
+        ;
+        return p([class_("dossier-description")])([text(state3.dossier.value0.description)]);
+      })(), div3([class_("dossier-notes")])(append12([div3([class_("dossier-notes-label")])([text(show3(length(state3.dossier.value0.notes)) + " notes")])])(map16(renderDossierNote)(state3.dossier.value0.notes)))]);
+    }
+    ;
+    throw new Error("Failed pattern match at Capture.App (line 283, column 3 - line 313, column 10): " + [state3.dossier.constructor.name]);
   };
   var renderDictating = function(_state) {
     return div3([class_("capture-flow capture-dictate")])([div3([class_("dictate-indicator")])([span2([class_("dictate-dot")])([]), text("recording")]), button([class_("dictate-stop"), onClick(function(v) {
@@ -7906,7 +8399,7 @@
         return renderUrlCapture(state3);
       }
       ;
-      throw new Error("Failed pattern match at Capture.App (line 280, column 27 - line 284, column 39): " + [v.constructor.name]);
+      throw new Error("Failed pattern match at Capture.App (line 480, column 27 - line 484, column 39): " + [v.constructor.name]);
     };
   };
   var initialState = /* @__PURE__ */ (function() {
@@ -7923,7 +8416,17 @@
       urlComment: "",
       recentCaptures: [],
       saving: false,
-      error: Nothing.value
+      error: Nothing.value,
+      screen: CaptureHome.value,
+      activityRows: [],
+      browseLoading: false,
+      dossier: Nothing.value,
+      dossierLoading: false,
+      swipeStartX: Nothing.value,
+      swipeStartY: Nothing.value,
+      swipeDeltaX: 0,
+      swipeHorizontal: false,
+      swipeAnimating: false
     };
   })();
   var hasProject = function(state3) {
@@ -7935,580 +8438,25 @@
       return false;
     }
     ;
-    throw new Error("Failed pattern match at Capture.App (line 203, column 20 - line 205, column 19): " + [state3.currentProject.constructor.name]);
+    throw new Error("Failed pattern match at Capture.App (line 403, column 20 - line 405, column 19): " + [state3.currentProject.constructor.name]);
   };
-  var handleAction = function(dictMonadAff) {
-    var liftEffect8 = liftEffect(monadEffectHalogenM(dictMonadAff.MonadEffect0()));
-    var liftAff2 = liftAff(monadAffHalogenM(dictMonadAff));
-    return function(v) {
-      if (v instanceof Initialize2) {
-        return discard2(handleAction(dictMonadAff)(LoadProjects.value))(function() {
-          return bind5(liftEffect8(getStoredProjectId_))(function(storedId) {
-            return when2(storedId > 0)(bind5(get4)(function(state3) {
-              var v1 = find2(function(p2) {
-                return p2.id === storedId;
-              })(state3.projects);
-              if (v1 instanceof Just) {
-                return modify_3(function(s) {
-                  var $95 = {};
-                  for (var $96 in s) {
-                    if ({}.hasOwnProperty.call(s, $96)) {
-                      $95[$96] = s[$96];
-                    }
-                    ;
-                  }
-                  ;
-                  $95.currentProject = new Just(v1.value0);
-                  return $95;
-                });
-              }
-              ;
-              if (v1 instanceof Nothing) {
-                return pure7(unit);
-              }
-              ;
-              throw new Error("Failed pattern match at Capture.App (line 401, column 7 - line 403, column 29): " + [v1.constructor.name]);
-            }));
-          });
-        });
+  var formatScore = function(n) {
+    return toStringWith(fixed(1))(n);
+  };
+  var renderMiniCard = function(row) {
+    return div3([class_("mini-card domain-" + (row.domain + (" status-" + row.status))), onClick(function(v) {
+      return new OpenDossier(row.id);
+    })])([div3([class_("mini-card-name")])([text(row.name)]), div3([class_("mini-card-foot")])([span2([class_("mini-card-domain")])([text(row.domain)]), span2([class_("mini-card-score")])([text(formatScore(row.score))])])]);
+  };
+  var renderBrowseScreen = function(state3) {
+    return div3([class_("screen screen-browse")])([div3([class_("browse-header")])([span2([class_("browse-title")])([text("Projects")]), span2([class_("browse-subtitle")])([text("by activity")])]), (function() {
+      var $141 = state3.browseLoading && $$null(state3.activityRows);
+      if ($141) {
+        return div3([class_("browse-loading")])([text("loading\u2026")]);
       }
       ;
-      if (v instanceof LoadProjects) {
-        return bind5(liftAff2(fetchProjects))(function(projects) {
-          return modify_3(function(s) {
-            var $99 = {};
-            for (var $100 in s) {
-              if ({}.hasOwnProperty.call(s, $100)) {
-                $99[$100] = s[$100];
-              }
-              ;
-            }
-            ;
-            $99.projects = projects;
-            return $99;
-          });
-        });
-      }
-      ;
-      if (v instanceof OpenPicker) {
-        return modify_3(function(s) {
-          var $102 = {};
-          for (var $103 in s) {
-            if ({}.hasOwnProperty.call(s, $103)) {
-              $102[$103] = s[$103];
-            }
-            ;
-          }
-          ;
-          $102.pickerOpen = true;
-          $102.pickerSearch = "";
-          return $102;
-        });
-      }
-      ;
-      if (v instanceof ClosePicker) {
-        return modify_3(function(s) {
-          var $105 = {};
-          for (var $106 in s) {
-            if ({}.hasOwnProperty.call(s, $106)) {
-              $105[$106] = s[$106];
-            }
-            ;
-          }
-          ;
-          $105.pickerOpen = false;
-          return $105;
-        });
-      }
-      ;
-      if (v instanceof SetPickerSearch) {
-        return modify_3(function(s) {
-          var $108 = {};
-          for (var $109 in s) {
-            if ({}.hasOwnProperty.call(s, $109)) {
-              $108[$109] = s[$109];
-            }
-            ;
-          }
-          ;
-          $108.pickerSearch = v.value0;
-          return $108;
-        });
-      }
-      ;
-      if (v instanceof SelectProject) {
-        return discard2(liftEffect8(setStoredProjectId_(v.value0.id)))(function() {
-          return modify_3(function(s) {
-            var $112 = {};
-            for (var $113 in s) {
-              if ({}.hasOwnProperty.call(s, $113)) {
-                $112[$113] = s[$113];
-              }
-              ;
-            }
-            ;
-            $112.currentProject = new Just(v.value0);
-            $112.pickerOpen = false;
-            return $112;
-          });
-        });
-      }
-      ;
-      if (v instanceof StartDictate) {
-        return bind5(liftAff2(toAffE(startRecording_)))(function(started) {
-          return when2(started)(modify_3(function(s) {
-            var $116 = {};
-            for (var $117 in s) {
-              if ({}.hasOwnProperty.call(s, $117)) {
-                $116[$117] = s[$117];
-              }
-              ;
-            }
-            ;
-            $116.captureMode = new Just(Dictating.value);
-            $116.recording = true;
-            $116.error = Nothing.value;
-            return $116;
-          }));
-        });
-      }
-      ;
-      if (v instanceof StopDictate) {
-        return bind5(liftAff2($$try4(toAffE(stopAndTranscribe_))))(function(result) {
-          if (result instanceof Right) {
-            return modify_3(function(s) {
-              var $120 = {};
-              for (var $121 in s) {
-                if ({}.hasOwnProperty.call(s, $121)) {
-                  $120[$121] = s[$121];
-                }
-                ;
-              }
-              ;
-              $120.captureMode = new Just(new DictateReview(result.value0));
-              $120.recording = false;
-              $120.transcript = result.value0;
-              return $120;
-            });
-          }
-          ;
-          if (result instanceof Left) {
-            return modify_3(function(s) {
-              var $124 = {};
-              for (var $125 in s) {
-                if ({}.hasOwnProperty.call(s, $125)) {
-                  $124[$125] = s[$125];
-                }
-                ;
-              }
-              ;
-              $124.captureMode = Nothing.value;
-              $124.recording = false;
-              $124.error = new Just("Transcription failed \u2014 is whisper running?");
-              return $124;
-            });
-          }
-          ;
-          throw new Error("Failed pattern match at Capture.App (line 431, column 5 - line 443, column 12): " + [result.constructor.name]);
-        });
-      }
-      ;
-      if (v instanceof SetTranscript) {
-        return modify_3(function(s) {
-          var $128 = {};
-          for (var $129 in s) {
-            if ({}.hasOwnProperty.call(s, $129)) {
-              $128[$129] = s[$129];
-            }
-            ;
-          }
-          ;
-          $128.transcript = v.value0;
-          $128.captureMode = new Just(new DictateReview(v.value0));
-          return $128;
-        });
-      }
-      ;
-      if (v instanceof SaveDictation) {
-        return bind5(get4)(function(state3) {
-          if (state3.currentProject instanceof Nothing) {
-            return pure7(unit);
-          }
-          ;
-          if (state3.currentProject instanceof Just) {
-            return discard2(modify_3(function(s) {
-              var $133 = {};
-              for (var $134 in s) {
-                if ({}.hasOwnProperty.call(s, $134)) {
-                  $133[$134] = s[$134];
-                }
-                ;
-              }
-              ;
-              $133.saving = true;
-              return $133;
-            }))(function() {
-              return bind5(liftAff2(addNote(state3.currentProject.value0.id)(state3.transcript)))(function(ok) {
-                if (ok) {
-                  var cap = {
-                    projectName: state3.currentProject.value0.name,
-                    content: state3.transcript,
-                    captureType: "voice",
-                    timestamp: "just now"
-                  };
-                  return modify_3(function(s) {
-                    var $137 = {};
-                    for (var $138 in s) {
-                      if ({}.hasOwnProperty.call(s, $138)) {
-                        $137[$138] = s[$138];
-                      }
-                      ;
-                    }
-                    ;
-                    $137.captureMode = Nothing.value;
-                    $137.saving = false;
-                    $137.transcript = "";
-                    $137.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
-                    return $137;
-                  });
-                }
-                ;
-                return modify_3(function(s) {
-                  var $140 = {};
-                  for (var $141 in s) {
-                    if ({}.hasOwnProperty.call(s, $141)) {
-                      $140[$141] = s[$141];
-                    }
-                    ;
-                  }
-                  ;
-                  $140.saving = false;
-                  $140.error = new Just("Failed to save note");
-                  return $140;
-                });
-              });
-            });
-          }
-          ;
-          throw new Error("Failed pattern match at Capture.App (line 450, column 5 - line 462, column 88): " + [state3.currentProject.constructor.name]);
-        });
-      }
-      ;
-      if (v instanceof RetryDictation) {
-        return bind5(liftAff2(toAffE(startRecording_)))(function(started) {
-          return when2(started)(modify_3(function(s) {
-            var $144 = {};
-            for (var $145 in s) {
-              if ({}.hasOwnProperty.call(s, $145)) {
-                $144[$145] = s[$145];
-              }
-              ;
-            }
-            ;
-            $144.captureMode = new Just(Dictating.value);
-            $144.recording = true;
-            $144.transcript = "";
-            return $144;
-          }));
-        });
-      }
-      ;
-      if (v instanceof StartWrite) {
-        return modify_3(function(s) {
-          var $147 = {};
-          for (var $148 in s) {
-            if ({}.hasOwnProperty.call(s, $148)) {
-              $147[$148] = s[$148];
-            }
-            ;
-          }
-          ;
-          $147.captureMode = new Just(Writing.value);
-          $147.noteText = "";
-          $147.error = Nothing.value;
-          return $147;
-        });
-      }
-      ;
-      if (v instanceof SetNoteText) {
-        return modify_3(function(s) {
-          var $150 = {};
-          for (var $151 in s) {
-            if ({}.hasOwnProperty.call(s, $151)) {
-              $150[$151] = s[$151];
-            }
-            ;
-          }
-          ;
-          $150.noteText = v.value0;
-          return $150;
-        });
-      }
-      ;
-      if (v instanceof SaveNote) {
-        return bind5(get4)(function(state3) {
-          if (state3.currentProject instanceof Nothing) {
-            return pure7(unit);
-          }
-          ;
-          if (state3.currentProject instanceof Just) {
-            var text6 = trim(state3.noteText);
-            return when2(!$$null2(text6))(discard2(modify_3(function(s) {
-              var $155 = {};
-              for (var $156 in s) {
-                if ({}.hasOwnProperty.call(s, $156)) {
-                  $155[$156] = s[$156];
-                }
-                ;
-              }
-              ;
-              $155.saving = true;
-              return $155;
-            }))(function() {
-              return bind5(liftAff2(addNote(state3.currentProject.value0.id)(text6)))(function(ok) {
-                if (ok) {
-                  var cap = {
-                    projectName: state3.currentProject.value0.name,
-                    content: text6,
-                    captureType: "text",
-                    timestamp: "just now"
-                  };
-                  return modify_3(function(s) {
-                    var $159 = {};
-                    for (var $160 in s) {
-                      if ({}.hasOwnProperty.call(s, $160)) {
-                        $159[$160] = s[$160];
-                      }
-                      ;
-                    }
-                    ;
-                    $159.captureMode = Nothing.value;
-                    $159.saving = false;
-                    $159.noteText = "";
-                    $159.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
-                    return $159;
-                  });
-                }
-                ;
-                return modify_3(function(s) {
-                  var $162 = {};
-                  for (var $163 in s) {
-                    if ({}.hasOwnProperty.call(s, $163)) {
-                      $162[$163] = s[$163];
-                    }
-                    ;
-                  }
-                  ;
-                  $162.saving = false;
-                  $162.error = new Just("Failed to save note");
-                  return $162;
-                });
-              });
-            }));
-          }
-          ;
-          throw new Error("Failed pattern match at Capture.App (line 478, column 5 - line 492, column 90): " + [state3.currentProject.constructor.name]);
-        });
-      }
-      ;
-      if (v instanceof StartUrl) {
-        return modify_3(function(s) {
-          var $166 = {};
-          for (var $167 in s) {
-            if ({}.hasOwnProperty.call(s, $167)) {
-              $166[$167] = s[$167];
-            }
-            ;
-          }
-          ;
-          $166.captureMode = new Just(PastingUrl.value);
-          $166.urlText = "";
-          $166.urlComment = "";
-          $166.error = Nothing.value;
-          return $166;
-        });
-      }
-      ;
-      if (v instanceof SetUrlText) {
-        return modify_3(function(s) {
-          var $169 = {};
-          for (var $170 in s) {
-            if ({}.hasOwnProperty.call(s, $170)) {
-              $169[$170] = s[$170];
-            }
-            ;
-          }
-          ;
-          $169.urlText = v.value0;
-          return $169;
-        });
-      }
-      ;
-      if (v instanceof SetUrlComment) {
-        return modify_3(function(s) {
-          var $173 = {};
-          for (var $174 in s) {
-            if ({}.hasOwnProperty.call(s, $174)) {
-              $173[$174] = s[$174];
-            }
-            ;
-          }
-          ;
-          $173.urlComment = v.value0;
-          return $173;
-        });
-      }
-      ;
-      if (v instanceof SaveUrl) {
-        return bind5(get4)(function(state3) {
-          if (state3.currentProject instanceof Nothing) {
-            return pure7(unit);
-          }
-          ;
-          if (state3.currentProject instanceof Just) {
-            var url = trim(state3.urlText);
-            return when2(!$$null2(url))((function() {
-              var body2 = url + (function() {
-                var $178 = $$null2(trim(state3.urlComment));
-                if ($178) {
-                  return "";
-                }
-                ;
-                return "\n\n" + trim(state3.urlComment);
-              })();
-              return discard2(modify_3(function(s) {
-                var $179 = {};
-                for (var $180 in s) {
-                  if ({}.hasOwnProperty.call(s, $180)) {
-                    $179[$180] = s[$180];
-                  }
-                  ;
-                }
-                ;
-                $179.saving = true;
-                return $179;
-              }))(function() {
-                return bind5(liftAff2(addNote(state3.currentProject.value0.id)(body2)))(function(ok) {
-                  if (ok) {
-                    var cap = {
-                      projectName: state3.currentProject.value0.name,
-                      content: url,
-                      captureType: "url",
-                      timestamp: "just now"
-                    };
-                    return modify_3(function(s) {
-                      var $183 = {};
-                      for (var $184 in s) {
-                        if ({}.hasOwnProperty.call(s, $184)) {
-                          $183[$184] = s[$184];
-                        }
-                        ;
-                      }
-                      ;
-                      $183.captureMode = Nothing.value;
-                      $183.saving = false;
-                      $183.urlText = "";
-                      $183.urlComment = "";
-                      $183.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
-                      return $183;
-                    });
-                  }
-                  ;
-                  return modify_3(function(s) {
-                    var $186 = {};
-                    for (var $187 in s) {
-                      if ({}.hasOwnProperty.call(s, $187)) {
-                        $186[$187] = s[$187];
-                      }
-                      ;
-                    }
-                    ;
-                    $186.saving = false;
-                    $186.error = new Just("Failed to save URL");
-                    return $186;
-                  });
-                });
-              });
-            })());
-          }
-          ;
-          throw new Error("Failed pattern match at Capture.App (line 506, column 5 - line 521, column 89): " + [state3.currentProject.constructor.name]);
-        });
-      }
-      ;
-      if (v instanceof TakePhoto) {
-        return bind5(get4)(function(state3) {
-          if (state3.currentProject instanceof Nothing) {
-            return pure7(unit);
-          }
-          ;
-          if (state3.currentProject instanceof Just) {
-            return discard2(modify_3(function(s) {
-              var $191 = {};
-              for (var $192 in s) {
-                if ({}.hasOwnProperty.call(s, $192)) {
-                  $191[$192] = s[$192];
-                }
-                ;
-              }
-              ;
-              $191.error = Nothing.value;
-              return $191;
-            }))(function() {
-              return bind5(liftAff2(toAffE(pickAndUploadPhoto(state3.currentProject.value0.id))))(function(filename) {
-                var $194 = $$null2(filename);
-                if ($194) {
-                  return pure7(unit);
-                }
-                ;
-                var cap = {
-                  projectName: state3.currentProject.value0.name,
-                  content: filename,
-                  captureType: "photo",
-                  timestamp: "just now"
-                };
-                return modify_3(function(s) {
-                  var $195 = {};
-                  for (var $196 in s) {
-                    if ({}.hasOwnProperty.call(s, $196)) {
-                      $195[$196] = s[$196];
-                    }
-                    ;
-                  }
-                  ;
-                  $195.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
-                  return $195;
-                });
-              });
-            });
-          }
-          ;
-          throw new Error("Failed pattern match at Capture.App (line 525, column 5 - line 535, column 82): " + [state3.currentProject.constructor.name]);
-        });
-      }
-      ;
-      if (v instanceof CancelCapture) {
-        return modify_3(function(s) {
-          var $199 = {};
-          for (var $200 in s) {
-            if ({}.hasOwnProperty.call(s, $200)) {
-              $199[$200] = s[$200];
-            }
-            ;
-          }
-          ;
-          $199.captureMode = Nothing.value;
-          $199.recording = false;
-          $199.noteText = "";
-          $199.urlText = "";
-          $199.urlComment = "";
-          $199.transcript = "";
-          return $199;
-        });
-      }
-      ;
-      throw new Error("Failed pattern match at Capture.App (line 394, column 16 - line 538, column 130): " + [v.constructor.name]);
-    };
+      return div3([class_("browse-grid")])(map16(renderMiniCard)(state3.activityRows));
+    })()]);
   };
   var captureButton = function(cls) {
     return function(label5) {
@@ -8523,8 +8471,8 @@
   };
   var renderHome = function(state3) {
     return div3([class_("capture-home")])([div3([class_("capture-buttons")])([captureButton("dictate")("Dictate")(StartDictate.value)(hasProject(state3)), captureButton("write")("Write")(StartWrite.value)(hasProject(state3)), captureButton("url")("URL")(StartUrl.value)(hasProject(state3)), captureButton("photo")("Photo")(TakePhoto.value)(hasProject(state3))]), (function() {
-      var $202 = $$null(state3.recentCaptures);
-      if ($202) {
+      var $142 = $$null(state3.recentCaptures);
+      if ($142) {
         return text("");
       }
       ;
@@ -8538,17 +8486,11 @@
         return div3([class_("capture-error")])([text(state3.error.value0)]);
       }
       ;
-      throw new Error("Failed pattern match at Capture.App (line 185, column 7 - line 188, column 28): " + [state3.error.constructor.name]);
+      throw new Error("Failed pattern match at Capture.App (line 385, column 7 - line 388, column 28): " + [state3.error.constructor.name]);
     })()]);
   };
-  var render = function(state3) {
-    return div3([class_("capture-app")])([renderProjectStrip(state3), (function() {
-      if (state3.pickerOpen) {
-        return renderPicker(state3);
-      }
-      ;
-      return text("");
-    })(), (function() {
+  var renderCaptureScreen = function(state3) {
+    return div3([class_("screen screen-capture")])([renderProjectStrip(state3), (function() {
       if (state3.captureMode instanceof Nothing) {
         return renderHome(state3);
       }
@@ -8557,8 +8499,927 @@
         return renderCaptureFlow(state3)(state3.captureMode.value0);
       }
       ;
-      throw new Error("Failed pattern match at Capture.App (line 144, column 7 - line 146, column 50): " + [state3.captureMode.constructor.name]);
+      throw new Error("Failed pattern match at Capture.App (line 238, column 7 - line 240, column 50): " + [state3.captureMode.constructor.name]);
     })()]);
+  };
+  var renderSwipePane = function(state3) {
+    var tabIndex2 = (function() {
+      if (state3.screen instanceof Browse) {
+        return 1;
+      }
+      ;
+      return 0;
+    })();
+    var translate = "transform: translateX(calc(-100vw * " + (show3(tabIndex2) + (" + " + (show3(state3.swipeDeltaX) + "px));")));
+    var animatingClass = (function() {
+      if (state3.swipeAnimating) {
+        return " swipe-pane-animating";
+      }
+      ;
+      return "";
+    })();
+    return div3([class_("swipe-pane" + animatingClass), style(translate), onTouchStart(touchStartHandler), onTouchMove(touchMoveHandler), onTouchEnd(function(v) {
+      return SwipeEnd.value;
+    })])([renderCaptureScreen(state3), renderBrowseScreen(state3)]);
+  };
+  var render = function(state3) {
+    if (state3.screen instanceof Dossier) {
+      return div3([class_("capture-app capture-app-dossier")])([renderDossier(state3)]);
+    }
+    ;
+    return div3([class_("capture-app")])([renderTabBar(state3), renderSwipePane(state3), (function() {
+      if (state3.pickerOpen) {
+        return renderPicker(state3);
+      }
+      ;
+      return text("");
+    })()]);
+  };
+  var absI = function(n) {
+    var $152 = n < 0;
+    if ($152) {
+      return -n | 0;
+    }
+    ;
+    return n;
+  };
+  var handleAction = function(dictMonadAff) {
+    var liftEffect8 = liftEffect(monadEffectHalogenM(dictMonadAff.MonadEffect0()));
+    var liftAff2 = liftAff(monadAffHalogenM(dictMonadAff));
+    return function(v) {
+      if (v instanceof Initialize2) {
+        return discard2(handleAction(dictMonadAff)(LoadProjects.value))(function() {
+          return bind5(liftEffect8(getStoredProjectId_))(function(storedId) {
+            return when2(storedId > 0)(bind5(get4)(function(state3) {
+              var v1 = find2(function(p2) {
+                return p2.id === storedId;
+              })(state3.projects);
+              if (v1 instanceof Just) {
+                return modify_3(function(s) {
+                  var $155 = {};
+                  for (var $156 in s) {
+                    if ({}.hasOwnProperty.call(s, $156)) {
+                      $155[$156] = s[$156];
+                    }
+                    ;
+                  }
+                  ;
+                  $155.currentProject = new Just(v1.value0);
+                  return $155;
+                });
+              }
+              ;
+              if (v1 instanceof Nothing) {
+                return pure7(unit);
+              }
+              ;
+              throw new Error("Failed pattern match at Capture.App (line 601, column 7 - line 603, column 29): " + [v1.constructor.name]);
+            }));
+          });
+        });
+      }
+      ;
+      if (v instanceof LoadProjects) {
+        return bind5(liftAff2(fetchProjects))(function(projects) {
+          return modify_3(function(s) {
+            var $159 = {};
+            for (var $160 in s) {
+              if ({}.hasOwnProperty.call(s, $160)) {
+                $159[$160] = s[$160];
+              }
+              ;
+            }
+            ;
+            $159.projects = projects;
+            return $159;
+          });
+        });
+      }
+      ;
+      if (v instanceof OpenPicker) {
+        return modify_3(function(s) {
+          var $162 = {};
+          for (var $163 in s) {
+            if ({}.hasOwnProperty.call(s, $163)) {
+              $162[$163] = s[$163];
+            }
+            ;
+          }
+          ;
+          $162.pickerOpen = true;
+          $162.pickerSearch = "";
+          return $162;
+        });
+      }
+      ;
+      if (v instanceof ClosePicker) {
+        return modify_3(function(s) {
+          var $165 = {};
+          for (var $166 in s) {
+            if ({}.hasOwnProperty.call(s, $166)) {
+              $165[$166] = s[$166];
+            }
+            ;
+          }
+          ;
+          $165.pickerOpen = false;
+          return $165;
+        });
+      }
+      ;
+      if (v instanceof SetPickerSearch) {
+        return modify_3(function(s) {
+          var $168 = {};
+          for (var $169 in s) {
+            if ({}.hasOwnProperty.call(s, $169)) {
+              $168[$169] = s[$169];
+            }
+            ;
+          }
+          ;
+          $168.pickerSearch = v.value0;
+          return $168;
+        });
+      }
+      ;
+      if (v instanceof SelectProject) {
+        return discard2(liftEffect8(setStoredProjectId_(v.value0.id)))(function() {
+          return modify_3(function(s) {
+            var $172 = {};
+            for (var $173 in s) {
+              if ({}.hasOwnProperty.call(s, $173)) {
+                $172[$173] = s[$173];
+              }
+              ;
+            }
+            ;
+            $172.currentProject = new Just(v.value0);
+            $172.pickerOpen = false;
+            return $172;
+          });
+        });
+      }
+      ;
+      if (v instanceof StartDictate) {
+        return bind5(liftAff2(toAffE(startRecording_)))(function(started) {
+          return when2(started)(modify_3(function(s) {
+            var $176 = {};
+            for (var $177 in s) {
+              if ({}.hasOwnProperty.call(s, $177)) {
+                $176[$177] = s[$177];
+              }
+              ;
+            }
+            ;
+            $176.captureMode = new Just(Dictating.value);
+            $176.recording = true;
+            $176.error = Nothing.value;
+            return $176;
+          }));
+        });
+      }
+      ;
+      if (v instanceof StopDictate) {
+        return bind5(liftAff2($$try4(toAffE(stopAndTranscribe_))))(function(result) {
+          if (result instanceof Right) {
+            return modify_3(function(s) {
+              var $180 = {};
+              for (var $181 in s) {
+                if ({}.hasOwnProperty.call(s, $181)) {
+                  $180[$181] = s[$181];
+                }
+                ;
+              }
+              ;
+              $180.captureMode = new Just(new DictateReview(result.value0));
+              $180.recording = false;
+              $180.transcript = result.value0;
+              return $180;
+            });
+          }
+          ;
+          if (result instanceof Left) {
+            return modify_3(function(s) {
+              var $184 = {};
+              for (var $185 in s) {
+                if ({}.hasOwnProperty.call(s, $185)) {
+                  $184[$185] = s[$185];
+                }
+                ;
+              }
+              ;
+              $184.captureMode = Nothing.value;
+              $184.recording = false;
+              $184.error = new Just("Transcription failed \u2014 is whisper running?");
+              return $184;
+            });
+          }
+          ;
+          throw new Error("Failed pattern match at Capture.App (line 631, column 5 - line 643, column 12): " + [result.constructor.name]);
+        });
+      }
+      ;
+      if (v instanceof SetTranscript) {
+        return modify_3(function(s) {
+          var $188 = {};
+          for (var $189 in s) {
+            if ({}.hasOwnProperty.call(s, $189)) {
+              $188[$189] = s[$189];
+            }
+            ;
+          }
+          ;
+          $188.transcript = v.value0;
+          $188.captureMode = new Just(new DictateReview(v.value0));
+          return $188;
+        });
+      }
+      ;
+      if (v instanceof SaveDictation) {
+        return bind5(get4)(function(state3) {
+          if (state3.currentProject instanceof Nothing) {
+            return pure7(unit);
+          }
+          ;
+          if (state3.currentProject instanceof Just) {
+            return discard2(modify_3(function(s) {
+              var $193 = {};
+              for (var $194 in s) {
+                if ({}.hasOwnProperty.call(s, $194)) {
+                  $193[$194] = s[$194];
+                }
+                ;
+              }
+              ;
+              $193.saving = true;
+              return $193;
+            }))(function() {
+              return bind5(liftAff2(addNote(state3.currentProject.value0.id)(state3.transcript)))(function(ok) {
+                if (ok) {
+                  var cap = {
+                    projectName: state3.currentProject.value0.name,
+                    content: state3.transcript,
+                    captureType: "voice",
+                    timestamp: "just now"
+                  };
+                  return modify_3(function(s) {
+                    var $197 = {};
+                    for (var $198 in s) {
+                      if ({}.hasOwnProperty.call(s, $198)) {
+                        $197[$198] = s[$198];
+                      }
+                      ;
+                    }
+                    ;
+                    $197.captureMode = Nothing.value;
+                    $197.saving = false;
+                    $197.transcript = "";
+                    $197.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
+                    return $197;
+                  });
+                }
+                ;
+                return modify_3(function(s) {
+                  var $200 = {};
+                  for (var $201 in s) {
+                    if ({}.hasOwnProperty.call(s, $201)) {
+                      $200[$201] = s[$201];
+                    }
+                    ;
+                  }
+                  ;
+                  $200.saving = false;
+                  $200.error = new Just("Failed to save note");
+                  return $200;
+                });
+              });
+            });
+          }
+          ;
+          throw new Error("Failed pattern match at Capture.App (line 650, column 5 - line 662, column 88): " + [state3.currentProject.constructor.name]);
+        });
+      }
+      ;
+      if (v instanceof RetryDictation) {
+        return bind5(liftAff2(toAffE(startRecording_)))(function(started) {
+          return when2(started)(modify_3(function(s) {
+            var $204 = {};
+            for (var $205 in s) {
+              if ({}.hasOwnProperty.call(s, $205)) {
+                $204[$205] = s[$205];
+              }
+              ;
+            }
+            ;
+            $204.captureMode = new Just(Dictating.value);
+            $204.recording = true;
+            $204.transcript = "";
+            return $204;
+          }));
+        });
+      }
+      ;
+      if (v instanceof StartWrite) {
+        return modify_3(function(s) {
+          var $207 = {};
+          for (var $208 in s) {
+            if ({}.hasOwnProperty.call(s, $208)) {
+              $207[$208] = s[$208];
+            }
+            ;
+          }
+          ;
+          $207.captureMode = new Just(Writing.value);
+          $207.noteText = "";
+          $207.error = Nothing.value;
+          return $207;
+        });
+      }
+      ;
+      if (v instanceof SetNoteText) {
+        return modify_3(function(s) {
+          var $210 = {};
+          for (var $211 in s) {
+            if ({}.hasOwnProperty.call(s, $211)) {
+              $210[$211] = s[$211];
+            }
+            ;
+          }
+          ;
+          $210.noteText = v.value0;
+          return $210;
+        });
+      }
+      ;
+      if (v instanceof SaveNote) {
+        return bind5(get4)(function(state3) {
+          if (state3.currentProject instanceof Nothing) {
+            return pure7(unit);
+          }
+          ;
+          if (state3.currentProject instanceof Just) {
+            var text6 = trim(state3.noteText);
+            return when2(!$$null2(text6))(discard2(modify_3(function(s) {
+              var $215 = {};
+              for (var $216 in s) {
+                if ({}.hasOwnProperty.call(s, $216)) {
+                  $215[$216] = s[$216];
+                }
+                ;
+              }
+              ;
+              $215.saving = true;
+              return $215;
+            }))(function() {
+              return bind5(liftAff2(addNote(state3.currentProject.value0.id)(text6)))(function(ok) {
+                if (ok) {
+                  var cap = {
+                    projectName: state3.currentProject.value0.name,
+                    content: text6,
+                    captureType: "text",
+                    timestamp: "just now"
+                  };
+                  return modify_3(function(s) {
+                    var $219 = {};
+                    for (var $220 in s) {
+                      if ({}.hasOwnProperty.call(s, $220)) {
+                        $219[$220] = s[$220];
+                      }
+                      ;
+                    }
+                    ;
+                    $219.captureMode = Nothing.value;
+                    $219.saving = false;
+                    $219.noteText = "";
+                    $219.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
+                    return $219;
+                  });
+                }
+                ;
+                return modify_3(function(s) {
+                  var $222 = {};
+                  for (var $223 in s) {
+                    if ({}.hasOwnProperty.call(s, $223)) {
+                      $222[$223] = s[$223];
+                    }
+                    ;
+                  }
+                  ;
+                  $222.saving = false;
+                  $222.error = new Just("Failed to save note");
+                  return $222;
+                });
+              });
+            }));
+          }
+          ;
+          throw new Error("Failed pattern match at Capture.App (line 678, column 5 - line 692, column 90): " + [state3.currentProject.constructor.name]);
+        });
+      }
+      ;
+      if (v instanceof StartUrl) {
+        return modify_3(function(s) {
+          var $226 = {};
+          for (var $227 in s) {
+            if ({}.hasOwnProperty.call(s, $227)) {
+              $226[$227] = s[$227];
+            }
+            ;
+          }
+          ;
+          $226.captureMode = new Just(PastingUrl.value);
+          $226.urlText = "";
+          $226.urlComment = "";
+          $226.error = Nothing.value;
+          return $226;
+        });
+      }
+      ;
+      if (v instanceof SetUrlText) {
+        return modify_3(function(s) {
+          var $229 = {};
+          for (var $230 in s) {
+            if ({}.hasOwnProperty.call(s, $230)) {
+              $229[$230] = s[$230];
+            }
+            ;
+          }
+          ;
+          $229.urlText = v.value0;
+          return $229;
+        });
+      }
+      ;
+      if (v instanceof SetUrlComment) {
+        return modify_3(function(s) {
+          var $233 = {};
+          for (var $234 in s) {
+            if ({}.hasOwnProperty.call(s, $234)) {
+              $233[$234] = s[$234];
+            }
+            ;
+          }
+          ;
+          $233.urlComment = v.value0;
+          return $233;
+        });
+      }
+      ;
+      if (v instanceof SaveUrl) {
+        return bind5(get4)(function(state3) {
+          if (state3.currentProject instanceof Nothing) {
+            return pure7(unit);
+          }
+          ;
+          if (state3.currentProject instanceof Just) {
+            var url = trim(state3.urlText);
+            return when2(!$$null2(url))((function() {
+              var body2 = url + (function() {
+                var $238 = $$null2(trim(state3.urlComment));
+                if ($238) {
+                  return "";
+                }
+                ;
+                return "\n\n" + trim(state3.urlComment);
+              })();
+              return discard2(modify_3(function(s) {
+                var $239 = {};
+                for (var $240 in s) {
+                  if ({}.hasOwnProperty.call(s, $240)) {
+                    $239[$240] = s[$240];
+                  }
+                  ;
+                }
+                ;
+                $239.saving = true;
+                return $239;
+              }))(function() {
+                return bind5(liftAff2(addNote(state3.currentProject.value0.id)(body2)))(function(ok) {
+                  if (ok) {
+                    var cap = {
+                      projectName: state3.currentProject.value0.name,
+                      content: url,
+                      captureType: "url",
+                      timestamp: "just now"
+                    };
+                    return modify_3(function(s) {
+                      var $243 = {};
+                      for (var $244 in s) {
+                        if ({}.hasOwnProperty.call(s, $244)) {
+                          $243[$244] = s[$244];
+                        }
+                        ;
+                      }
+                      ;
+                      $243.captureMode = Nothing.value;
+                      $243.saving = false;
+                      $243.urlText = "";
+                      $243.urlComment = "";
+                      $243.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
+                      return $243;
+                    });
+                  }
+                  ;
+                  return modify_3(function(s) {
+                    var $246 = {};
+                    for (var $247 in s) {
+                      if ({}.hasOwnProperty.call(s, $247)) {
+                        $246[$247] = s[$247];
+                      }
+                      ;
+                    }
+                    ;
+                    $246.saving = false;
+                    $246.error = new Just("Failed to save URL");
+                    return $246;
+                  });
+                });
+              });
+            })());
+          }
+          ;
+          throw new Error("Failed pattern match at Capture.App (line 706, column 5 - line 721, column 89): " + [state3.currentProject.constructor.name]);
+        });
+      }
+      ;
+      if (v instanceof TakePhoto) {
+        return bind5(get4)(function(state3) {
+          if (state3.currentProject instanceof Nothing) {
+            return pure7(unit);
+          }
+          ;
+          if (state3.currentProject instanceof Just) {
+            return discard2(modify_3(function(s) {
+              var $251 = {};
+              for (var $252 in s) {
+                if ({}.hasOwnProperty.call(s, $252)) {
+                  $251[$252] = s[$252];
+                }
+                ;
+              }
+              ;
+              $251.error = Nothing.value;
+              return $251;
+            }))(function() {
+              return bind5(liftAff2(toAffE(pickAndUploadPhoto(state3.currentProject.value0.id))))(function(filename) {
+                var $254 = $$null2(filename);
+                if ($254) {
+                  return pure7(unit);
+                }
+                ;
+                var cap = {
+                  projectName: state3.currentProject.value0.name,
+                  content: filename,
+                  captureType: "photo",
+                  timestamp: "just now"
+                };
+                return modify_3(function(s) {
+                  var $255 = {};
+                  for (var $256 in s) {
+                    if ({}.hasOwnProperty.call(s, $256)) {
+                      $255[$256] = s[$256];
+                    }
+                    ;
+                  }
+                  ;
+                  $255.recentCaptures = cons(cap)(take(9)(s.recentCaptures));
+                  return $255;
+                });
+              });
+            });
+          }
+          ;
+          throw new Error("Failed pattern match at Capture.App (line 725, column 5 - line 735, column 82): " + [state3.currentProject.constructor.name]);
+        });
+      }
+      ;
+      if (v instanceof CancelCapture) {
+        return modify_3(function(s) {
+          var $259 = {};
+          for (var $260 in s) {
+            if ({}.hasOwnProperty.call(s, $260)) {
+              $259[$260] = s[$260];
+            }
+            ;
+          }
+          ;
+          $259.captureMode = Nothing.value;
+          $259.recording = false;
+          $259.noteText = "";
+          $259.urlText = "";
+          $259.urlComment = "";
+          $259.transcript = "";
+          return $259;
+        });
+      }
+      ;
+      if (v instanceof SwitchScreen) {
+        if (v.value0 instanceof CaptureHome) {
+          return modify_3(function(s) {
+            var $263 = {};
+            for (var $264 in s) {
+              if ({}.hasOwnProperty.call(s, $264)) {
+                $263[$264] = s[$264];
+              }
+              ;
+            }
+            ;
+            $263.screen = CaptureHome.value;
+            $263.swipeDeltaX = 0;
+            $263.swipeStartX = Nothing.value;
+            $263.swipeStartY = Nothing.value;
+            $263.swipeHorizontal = false;
+            $263.swipeAnimating = true;
+            return $263;
+          });
+        }
+        ;
+        if (v.value0 instanceof Browse) {
+          return discard2(modify_3(function(s) {
+            var $266 = {};
+            for (var $267 in s) {
+              if ({}.hasOwnProperty.call(s, $267)) {
+                $266[$267] = s[$267];
+              }
+              ;
+            }
+            ;
+            $266.screen = Browse.value;
+            $266.swipeDeltaX = 0;
+            $266.swipeStartX = Nothing.value;
+            $266.swipeStartY = Nothing.value;
+            $266.swipeHorizontal = false;
+            $266.swipeAnimating = true;
+            return $266;
+          }))(function() {
+            return handleAction(dictMonadAff)(LoadActivity.value);
+          });
+        }
+        ;
+        if (v.value0 instanceof Dossier) {
+          return handleAction(dictMonadAff)(new OpenDossier(v.value0.value0));
+        }
+        ;
+        throw new Error("Failed pattern match at Capture.App (line 744, column 23 - line 764, column 50): " + [v.value0.constructor.name]);
+      }
+      ;
+      if (v instanceof LoadActivity) {
+        return discard2(modify_3(function(s) {
+          var $271 = {};
+          for (var $272 in s) {
+            if ({}.hasOwnProperty.call(s, $272)) {
+              $271[$272] = s[$272];
+            }
+            ;
+          }
+          ;
+          $271.browseLoading = true;
+          return $271;
+        }))(function() {
+          return bind5(liftAff2(fetchActivity))(function(rows5) {
+            return modify_3(function(s) {
+              var $274 = {};
+              for (var $275 in s) {
+                if ({}.hasOwnProperty.call(s, $275)) {
+                  $274[$275] = s[$275];
+                }
+                ;
+              }
+              ;
+              $274.activityRows = rows5;
+              $274.browseLoading = false;
+              return $274;
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof OpenDossier) {
+        return discard2(modify_3(function(s) {
+          var $277 = {};
+          for (var $278 in s) {
+            if ({}.hasOwnProperty.call(s, $278)) {
+              $277[$278] = s[$278];
+            }
+            ;
+          }
+          ;
+          $277.screen = new Dossier(v.value0);
+          $277.dossier = Nothing.value;
+          $277.dossierLoading = true;
+          return $277;
+        }))(function() {
+          return bind5(liftAff2(fetchDossier(v.value0)))(function(d) {
+            return modify_3(function(s) {
+              var $280 = {};
+              for (var $281 in s) {
+                if ({}.hasOwnProperty.call(s, $281)) {
+                  $280[$281] = s[$281];
+                }
+                ;
+              }
+              ;
+              $280.dossier = d;
+              $280.dossierLoading = false;
+              return $280;
+            });
+          });
+        });
+      }
+      ;
+      if (v instanceof CloseDossier) {
+        return modify_3(function(s) {
+          var $284 = {};
+          for (var $285 in s) {
+            if ({}.hasOwnProperty.call(s, $285)) {
+              $284[$285] = s[$285];
+            }
+            ;
+          }
+          ;
+          $284.screen = Browse.value;
+          $284.dossier = Nothing.value;
+          $284.dossierLoading = false;
+          return $284;
+        });
+      }
+      ;
+      if (v instanceof SwipeStart) {
+        return bind5(get4)(function(state3) {
+          var inCaptureFlow = (function() {
+            if (state3.captureMode instanceof Just) {
+              return true;
+            }
+            ;
+            if (state3.captureMode instanceof Nothing) {
+              return false;
+            }
+            ;
+            throw new Error("Failed pattern match at Capture.App (line 793, column 25 - line 795, column 27): " + [state3.captureMode.constructor.name]);
+          })();
+          var onDossier = (function() {
+            if (state3.screen instanceof Dossier) {
+              return true;
+            }
+            ;
+            return false;
+          })();
+          return when2(!inCaptureFlow && (!state3.pickerOpen && !onDossier))(modify_3(function(s) {
+            var $291 = {};
+            for (var $292 in s) {
+              if ({}.hasOwnProperty.call(s, $292)) {
+                $291[$292] = s[$292];
+              }
+              ;
+            }
+            ;
+            $291.swipeStartX = new Just(v.value0);
+            $291.swipeStartY = new Just(v.value1);
+            $291.swipeDeltaX = 0;
+            $291.swipeHorizontal = false;
+            $291.swipeAnimating = false;
+            return $291;
+          }));
+        });
+      }
+      ;
+      if (v instanceof SwipeMove) {
+        return bind5(get4)(function(state3) {
+          if (state3.swipeStartX instanceof Just && state3.swipeStartY instanceof Just) {
+            var rawDx = v.value0 - state3.swipeStartX.value0 | 0;
+            var dy = v.value1 - state3.swipeStartY.value0 | 0;
+            var dx = (function() {
+              if (state3.screen instanceof CaptureHome) {
+                return min4(0)(rawDx);
+              }
+              ;
+              if (state3.screen instanceof Browse) {
+                return max4(0)(rawDx);
+              }
+              ;
+              if (state3.screen instanceof Dossier) {
+                return 0;
+              }
+              ;
+              throw new Error("Failed pattern match at Capture.App (line 816, column 18 - line 819, column 29): " + [state3.screen.constructor.name]);
+            })();
+            if (state3.swipeHorizontal) {
+              return modify_3(function(s) {
+                var $301 = {};
+                for (var $302 in s) {
+                  if ({}.hasOwnProperty.call(s, $302)) {
+                    $301[$302] = s[$302];
+                  }
+                  ;
+                }
+                ;
+                $301.swipeDeltaX = dx;
+                return $301;
+              });
+            }
+            ;
+            return when2(absI(rawDx) > 10 && absI(rawDx) > div4(3 * absI(dy) | 0)(2))(modify_3(function(s) {
+              var $304 = {};
+              for (var $305 in s) {
+                if ({}.hasOwnProperty.call(s, $305)) {
+                  $304[$305] = s[$305];
+                }
+                ;
+              }
+              ;
+              $304.swipeHorizontal = true;
+              $304.swipeDeltaX = dx;
+              return $304;
+            }));
+          }
+          ;
+          return pure7(unit);
+        });
+      }
+      ;
+      if (v instanceof SwipeEnd) {
+        return bind5(get4)(function(state3) {
+          if (state3.swipeHorizontal) {
+            if (state3.screen instanceof CaptureHome) {
+              var $313 = state3.swipeDeltaX < (-80 | 0);
+              if ($313) {
+                return handleAction(dictMonadAff)(new SwitchScreen(Browse.value));
+              }
+              ;
+              return modify_3(function(s) {
+                var $314 = {};
+                for (var $315 in s) {
+                  if ({}.hasOwnProperty.call(s, $315)) {
+                    $314[$315] = s[$315];
+                  }
+                  ;
+                }
+                ;
+                $314.swipeDeltaX = 0;
+                $314.swipeAnimating = true;
+                $314.swipeStartX = Nothing.value;
+                $314.swipeStartY = Nothing.value;
+                $314.swipeHorizontal = false;
+                return $314;
+              });
+            }
+            ;
+            if (state3.screen instanceof Browse) {
+              var $317 = state3.swipeDeltaX > 80;
+              if ($317) {
+                return handleAction(dictMonadAff)(new SwitchScreen(CaptureHome.value));
+              }
+              ;
+              return modify_3(function(s) {
+                var $318 = {};
+                for (var $319 in s) {
+                  if ({}.hasOwnProperty.call(s, $319)) {
+                    $318[$319] = s[$319];
+                  }
+                  ;
+                }
+                ;
+                $318.swipeDeltaX = 0;
+                $318.swipeAnimating = true;
+                $318.swipeStartX = Nothing.value;
+                $318.swipeStartY = Nothing.value;
+                $318.swipeHorizontal = false;
+                return $318;
+              });
+            }
+            ;
+            if (state3.screen instanceof Dossier) {
+              return pure7(unit);
+            }
+            ;
+            throw new Error("Failed pattern match at Capture.App (line 832, column 9 - line 853, column 33): " + [state3.screen.constructor.name]);
+          }
+          ;
+          return modify_3(function(s) {
+            var $322 = {};
+            for (var $323 in s) {
+              if ({}.hasOwnProperty.call(s, $323)) {
+                $322[$323] = s[$323];
+              }
+              ;
+            }
+            ;
+            $322.swipeDeltaX = 0;
+            $322.swipeStartX = Nothing.value;
+            $322.swipeStartY = Nothing.value;
+            $322.swipeHorizontal = false;
+            $322.swipeAnimating = false;
+            return $322;
+          });
+        });
+      }
+      ;
+      if (v instanceof NoOp) {
+        return pure7(unit);
+      }
+      ;
+      throw new Error("Failed pattern match at Capture.App (line 594, column 16 - line 863, column 20): " + [v.constructor.name]);
+    };
   };
   var component = function(dictMonadAff) {
     return mkComponent({

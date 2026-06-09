@@ -216,11 +216,23 @@ CREATE TABLE IF NOT EXISTS project_servers (
     url           TEXT,                    -- optional canonical URL, e.g. 'http://localhost:3100'
     start_command TEXT,                    -- how to launch it
     description   TEXT,
+    environment   TEXT,                    -- deployment style: 'native', 'docker', 'cloudflare-pages', etc. (legacy values like 'mbp-native' combined host+style and are being unwound — see `host`)
+    prerequisites TEXT,                    -- freeform: what must be true before running (e.g. "API must be stopped before loader runs; DuckDB lock")
+    host          TEXT,                    -- which machine: 'mbp' | 'macmini' | 'cloudflare' | 'andrew-only' | NULL. Consumed by SDI to decide spawn vs. redirect.
+    tailscale_name TEXT,                   -- routable address, e.g. 'andrews-mac-mini'. NULL if not Tailscale-routable. Stored alongside `host` because tailscale names can change while the logical host doesn't.
     created_at    TIMESTAMP DEFAULT current_timestamp
 );
 
+-- Idempotent column adds for schemas created before a given column existed.
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS environment TEXT;
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS prerequisites TEXT;
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS host TEXT;
+ALTER TABLE project_servers ADD COLUMN IF NOT EXISTS tailscale_name TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_servers_project ON project_servers(project_id);
 CREATE INDEX IF NOT EXISTS idx_servers_port ON project_servers(port);
+CREATE INDEX IF NOT EXISTS idx_servers_environment ON project_servers(environment);
+CREATE INDEX IF NOT EXISTS idx_servers_host ON project_servers(host);
 
 -- =============================================================================
 -- CONVENIENCE VIEWS
@@ -287,6 +299,208 @@ SELECT
     COUNT(*) AS project_count
 FROM projects
 GROUP BY domain, status;
+
+-- =============================================================================
+-- SUBSCRIPTIONS (Finance section)
+-- =============================================================================
+
+-- Recurring subscriptions, bills, and memberships. Powers the Finance
+-- section of the newspaper — "what's due this week" stories, monthly
+-- burn totals, cancellation deadline alerts.
+CREATE SEQUENCE IF NOT EXISTS seq_subscriptions START 1;
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id            INTEGER PRIMARY KEY DEFAULT nextval('seq_subscriptions'),
+    name          TEXT NOT NULL,               -- "Netflix", "Tailscale", "Claude Pro"
+    category      TEXT,                        -- "streaming", "tools", "insurance", "domain", "utility", "membership"
+    amount        DECIMAL(10,2),               -- 14.99
+    currency      TEXT NOT NULL DEFAULT 'EUR',
+    frequency     TEXT NOT NULL DEFAULT 'monthly',  -- "monthly", "annual", "quarterly", "weekly"
+    next_due      DATE,                        -- when the next charge hits
+    auto_renew    BOOLEAN DEFAULT true,
+    cancel_url    TEXT,                        -- direct link to cancellation page
+    notes         TEXT,
+    project_id    INTEGER,                    -- optional FK to a Marginalia project
+    active        BOOLEAN DEFAULT true,       -- false = cancelled / lapsed
+    created_at    TIMESTAMP DEFAULT current_timestamp,
+    updated_at    TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_next_due ON subscriptions(next_due);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_category ON subscriptions(category);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(active);
+
+-- =============================================================================
+-- EXERCISE LOG (Sports section)
+-- =============================================================================
+
+-- One row per workout session. The Sports section viz groups these by
+-- month × activity and counts sessions, same dot-block pattern as Finance.
+-- Later: import from Hevy CSV (weights) and Apple Health XML (cardio/other).
+CREATE SEQUENCE IF NOT EXISTS seq_exercise START 1;
+
+CREATE TABLE IF NOT EXISTS exercise_log (
+    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_exercise'),
+    activity    TEXT NOT NULL,           -- swimming, weights, walking, yoga, cycling, running
+    date        DATE NOT NULL,
+    duration    INTEGER,                 -- minutes
+    distance    DECIMAL(10,2),           -- km, nullable
+    calories    INTEGER,                 -- nullable
+    notes       TEXT,
+    source      TEXT DEFAULT 'manual',   -- manual, hevy, apple_health
+    created_at  TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_exercise_date ON exercise_log(date);
+CREATE INDEX IF NOT EXISTS idx_exercise_activity ON exercise_log(activity);
+
+-- =============================================================================
+-- DEPLOYMENTS
+-- =============================================================================
+
+-- Deployed artifacts — Cloudflare Pages, GitHub Pages, Netlify, or other
+-- static-hosting targets. Distinct from project_servers: servers are long-running
+-- processes bound to a port; deployments are published builds reachable via
+-- a stable URL. A project may have many deployments (multiple domains, staging
+-- + prod, etc.).
+CREATE SEQUENCE IF NOT EXISTS seq_deployments START 1;
+
+CREATE TABLE IF NOT EXISTS deployments (
+    id                 INTEGER PRIMARY KEY DEFAULT nextval('seq_deployments'),
+    project_id         INTEGER NOT NULL,             -- owning project
+    platform           TEXT NOT NULL,                -- 'cloudflare-pages','github-pages','netlify','self-hosted','other'
+    url                TEXT NOT NULL,                -- live URL where the deployment is reachable
+    target_name        TEXT,                         -- platform-specific identifier (CF project name, gh-pages branch, etc.)
+    source_path        TEXT,                         -- absolute local path of buildable/deployable source
+    build_command      TEXT,                         -- optional: how to build before deploy
+    deploy_command     TEXT,                         -- how to publish (required for automation)
+    last_deployed_at   TIMESTAMP,                    -- Phase 2: when last successful deploy completed
+    last_deploy_status TEXT,                         -- Phase 2: 'success'|'failure'|NULL
+    description        TEXT,
+    created_at         TIMESTAMP DEFAULT current_timestamp,
+    updated_at         TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployments_project ON deployments(project_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_platform ON deployments(platform);
+
+-- =============================================================================
+-- ENGINEERING SPINE  (goals / ADRs / coverage / realm)
+-- =============================================================================
+--
+-- Substrate the "head of engineering" auditor (Brunel) reasons over. See
+-- database/migrations/2026-06-09-engineering-spine.sql for the rationale.
+-- The realm classification is the extraction boundary for a future standalone,
+-- potentially open-source software-engineering-with-LLMs app: the engineering
+-- realm (programming/music/infrastructure) is what would ship; the life realm
+-- (house/garden/woodworking/cooking/yoga/travel) stays private.
+
+-- Classifies each projects.domain value into a realm. projects.domain stays a
+-- free TEXT column; this is a lookup joined when realm is needed. No CHECK ties
+-- goals/ADRs/coverage to realm — kept loose, matching the disabled-FK philosophy.
+CREATE TABLE IF NOT EXISTS domains (
+    name        TEXT PRIMARY KEY,                 -- matches projects.domain values
+    realm       TEXT NOT NULL DEFAULT 'life',     -- 'engineering' | 'life'
+    label       TEXT,
+    sort_order  INTEGER
+);
+
+-- woodworking is seeded 'life' (craft); flip to 'engineering' with one UPDATE.
+INSERT INTO domains (name, realm, label, sort_order) VALUES
+    ('programming',    'engineering', 'Programming',    10),
+    ('music',          'engineering', 'Music',          20),
+    ('infrastructure', 'engineering', 'Infrastructure', 30),
+    ('house',          'life',        'House',          40),
+    ('garden',         'life',        'Garden',         50),
+    ('woodworking',    'life',        'Woodworking',    60),
+    ('cooking',        'life',        'Cooking',        70),
+    ('yoga',           'life',        'Yoga',           80),
+    ('travel',         'life',        'Travel',         90)
+ON CONFLICT (name) DO NOTHING;
+
+-- Goals / non-goals — the project charter the "direction" audit checks against.
+-- Each goal has its own lifecycle: active -> achieved | dropped (with a reason).
+CREATE SEQUENCE IF NOT EXISTS seq_goals START 1;
+
+CREATE TABLE IF NOT EXISTS project_goals (
+    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_goals'),
+    project_id  INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
+    kind        TEXT NOT NULL DEFAULT 'goal',     -- 'goal' | 'non_goal'
+    text        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'achieved' | 'dropped'
+    reason      TEXT,                             -- why achieved/dropped (required in spirit when not 'active')
+    sort_order  INTEGER,
+    author      TEXT NOT NULL DEFAULT 'human',    -- 'human' | 'brunel' | agent name
+    created_at  TIMESTAMP DEFAULT current_timestamp,
+    resolved_at TIMESTAMP                         -- when it left 'active'
+);
+
+CREATE INDEX IF NOT EXISTS idx_goals_project ON project_goals(project_id);
+CREATE INDEX IF NOT EXISTS idx_goals_status  ON project_goals(status);
+
+-- ADRs — architecture decision records (Nygard). Status DAG + supersession,
+-- structurally the same shape as projects.status + evolved_into. `number` is
+-- per-project (ADR-NNN), assigned app-side as MAX(number)+1.
+CREATE SEQUENCE IF NOT EXISTS seq_adrs START 1;
+
+CREATE TABLE IF NOT EXISTS project_adrs (
+    id            INTEGER PRIMARY KEY DEFAULT nextval('seq_adrs'),
+    project_id    INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
+    number        INTEGER NOT NULL,              -- ADR-NNN within the project
+    title         TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'proposed', -- 'proposed' | 'accepted' | 'rejected' | 'superseded' | 'deprecated'
+    context       TEXT,
+    decision      TEXT,
+    consequences  TEXT,
+    supersedes_id INTEGER,                        -- another project_adrs.id this replaces
+    author        TEXT NOT NULL DEFAULT 'human',
+    created_at    TIMESTAMP DEFAULT current_timestamp,
+    decided_at    TIMESTAMP                       -- when it left 'proposed'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_adrs_project_number ON project_adrs(project_id, number);
+CREATE INDEX IF NOT EXISTS idx_adrs_project ON project_adrs(project_id);
+CREATE INDEX IF NOT EXISTS idx_adrs_status  ON project_adrs(status);
+
+-- Coverage snapshots — the hygiene time-series (tests / CI / docs). A series,
+-- not a single value, so the newspaper can draw a sparkline and Brunel can see
+-- trend. `source` records HOW each number was obtained ('estimate' is honest).
+CREATE SEQUENCE IF NOT EXISTS seq_coverage START 1;
+
+CREATE TABLE IF NOT EXISTS coverage_snapshots (
+    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_coverage'),
+    project_id  INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
+    taken_at    TIMESTAMP DEFAULT current_timestamp,
+    line_pct    DOUBLE,
+    branch_pct  DOUBLE,
+    test_count  INTEGER,
+    ci_status   TEXT,                             -- 'passing' | 'failing' | 'none' | 'unknown'
+    has_docs    BOOLEAN,
+    source      TEXT NOT NULL DEFAULT 'manual',   -- 'manual' | 'estimate' | 'tarpaulin' | 'c8' | 'spago-test' | 'jest' | …
+    note        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_coverage_project ON coverage_snapshots(project_id);
+CREATE INDEX IF NOT EXISTS idx_coverage_taken   ON coverage_snapshots(taken_at);
+
+-- The extraction boundary: every project in an engineering-realm domain.
+CREATE VIEW IF NOT EXISTS engineering_projects AS
+    SELECT p.*
+    FROM projects p
+    JOIN domains d ON d.name = p.domain
+    WHERE d.realm = 'engineering';
+
+-- Most-recent coverage snapshot per project — feeds the scorecard / sparkline.
+CREATE VIEW IF NOT EXISTS latest_coverage AS
+    SELECT c.*
+    FROM coverage_snapshots c
+    JOIN (
+        SELECT project_id, MAX(taken_at) AS max_taken
+        FROM coverage_snapshots
+        GROUP BY project_id
+    ) latest
+      ON latest.project_id = c.project_id
+     AND latest.max_taken  = c.taken_at;
 
 -- =============================================================================
 -- METADATA

@@ -12,7 +12,8 @@ import Capture.API as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..))
+import Data.Number.Format (toStringWith, fixed)
 import Data.String as String
 import Effect (Effect)
 import Effect.Aff (try)
@@ -22,6 +23,10 @@ import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Web.TouchEvent.Touch as Touch
+import Web.TouchEvent.TouchEvent (TouchEvent)
+import Web.TouchEvent.TouchEvent as TE
+import Web.TouchEvent.TouchList as TL
 
 -- =============================================================================
 -- FFI
@@ -49,6 +54,15 @@ data CaptureMode
 
 derive instance Eq CaptureMode
 
+-- | Top-level screen. Capture and Browse live side-by-side in a swipeable
+-- | pane; Dossier is an overlay reached by tapping a card on Browse.
+data Screen
+  = CaptureHome
+  | Browse
+  | Dossier Int
+
+derive instance Eq Screen
+
 -- | A recent capture for the confirmation list.
 type RecentCapture =
   { projectName :: String
@@ -73,6 +87,18 @@ type State =
   , recentCaptures :: Array RecentCapture
   , saving :: Boolean
   , error :: Maybe String
+  -- Screen + Browse/Dossier state
+  , screen :: Screen
+  , activityRows :: Array API.ActivitySummary
+  , browseLoading :: Boolean
+  , dossier :: Maybe API.MobileDossier
+  , dossierLoading :: Boolean
+  -- Swipe between Capture and Browse tabs
+  , swipeStartX :: Maybe Int
+  , swipeStartY :: Maybe Int
+  , swipeDeltaX :: Int
+  , swipeHorizontal :: Boolean
+  , swipeAnimating :: Boolean
   }
 
 data Action
@@ -98,6 +124,16 @@ data Action
   | SaveUrl
   | TakePhoto
   | CancelCapture
+  -- Screens (Capture tab <-> Browse tab, Dossier overlay)
+  | SwitchScreen Screen
+  | LoadActivity
+  | OpenDossier Int
+  | CloseDossier
+  -- Swipe gesture between Capture and Browse tabs
+  | SwipeStart Int Int
+  | SwipeMove Int Int
+  | SwipeEnd
+  | NoOp
 
 -- =============================================================================
 -- Component
@@ -128,6 +164,16 @@ initialState =
   , recentCaptures: []
   , saving: false
   , error: Nothing
+  , screen: CaptureHome
+  , activityRows: []
+  , browseLoading: false
+  , dossier: Nothing
+  , dossierLoading: false
+  , swipeStartX: Nothing
+  , swipeStartY: Nothing
+  , swipeDeltaX: 0
+  , swipeHorizontal: false
+  , swipeAnimating: false
   }
 
 -- =============================================================================
@@ -135,16 +181,170 @@ initialState =
 -- =============================================================================
 
 render :: forall m. State -> H.ComponentHTML Action () m
-render state =
-  HH.div [ HP.class_ (H.ClassName "capture-app") ]
+render state = case state.screen of
+  Dossier _ ->
+    HH.div [ HP.class_ (H.ClassName "capture-app capture-app-dossier") ]
+      [ renderDossier state ]
+  _ ->
+    HH.div [ HP.class_ (H.ClassName "capture-app") ]
+      [ renderTabBar state
+      , renderSwipePane state
+      , if state.pickerOpen then renderPicker state else HH.text ""
+      ]
+
+-- | Top tab bar — Capture | Browse. Hidden when a dossier is open.
+renderTabBar :: forall m. State -> H.ComponentHTML Action () m
+renderTabBar state =
+  HH.div [ HP.class_ (H.ClassName "tab-bar") ]
+    [ renderTab "Capture" CaptureHome (state.screen == CaptureHome)
+    , renderTab "Browse" Browse (state.screen == Browse)
+    ]
+
+renderTab :: forall m. String -> Screen -> Boolean -> H.ComponentHTML Action () m
+renderTab label scr isActive =
+  HH.button
+    [ HP.class_ (H.ClassName ("tab" <> if isActive then " tab-active" else ""))
+    , HE.onClick \_ -> SwitchScreen scr
+    ]
+    [ HH.text label ]
+
+-- | Swipeable pane containing both the Capture and Browse screens side-by-side.
+-- | Pane is 200vw wide; translateX slides between them.
+renderSwipePane :: forall m. State -> H.ComponentHTML Action () m
+renderSwipePane state =
+  let tabIndex = case state.screen of
+        Browse -> 1
+        _ -> 0
+      delta = state.swipeDeltaX
+      translate =
+        "transform: translateX(calc(-100vw * " <> show tabIndex
+          <> " + " <> show delta <> "px));"
+      animatingClass = if state.swipeAnimating then " swipe-pane-animating" else ""
+  in HH.div
+    [ HP.class_ (H.ClassName ("swipe-pane" <> animatingClass))
+    , HP.style translate
+    , HE.onTouchStart touchStartHandler
+    , HE.onTouchMove touchMoveHandler
+    , HE.onTouchEnd \_ -> SwipeEnd
+    ]
+    [ renderCaptureScreen state
+    , renderBrowseScreen state
+    ]
+
+renderCaptureScreen :: forall m. State -> H.ComponentHTML Action () m
+renderCaptureScreen state =
+  HH.div [ HP.class_ (H.ClassName "screen screen-capture") ]
     [ renderProjectStrip state
-    , if state.pickerOpen
-        then renderPicker state
-        else HH.text ""
     , case state.captureMode of
         Nothing -> renderHome state
         Just mode -> renderCaptureFlow state mode
     ]
+
+-- | Browse screen: grid of 1×1 mini-cards, sorted by activity score (server-side).
+renderBrowseScreen :: forall m. State -> H.ComponentHTML Action () m
+renderBrowseScreen state =
+  HH.div [ HP.class_ (H.ClassName "screen screen-browse") ]
+    [ HH.div [ HP.class_ (H.ClassName "browse-header") ]
+        [ HH.span [ HP.class_ (H.ClassName "browse-title") ]
+            [ HH.text "Projects" ]
+        , HH.span [ HP.class_ (H.ClassName "browse-subtitle") ]
+            [ HH.text "by activity" ]
+        ]
+    , if state.browseLoading && Array.null state.activityRows
+        then HH.div [ HP.class_ (H.ClassName "browse-loading") ]
+          [ HH.text "loading…" ]
+        else HH.div [ HP.class_ (H.ClassName "browse-grid") ]
+          (map renderMiniCard state.activityRows)
+    ]
+
+renderMiniCard :: forall m. API.ActivitySummary -> H.ComponentHTML Action () m
+renderMiniCard row =
+  HH.div
+    [ HP.class_ (H.ClassName ("mini-card domain-" <> row.domain <> " status-" <> row.status))
+    , HE.onClick \_ -> OpenDossier row.id
+    ]
+    [ HH.div [ HP.class_ (H.ClassName "mini-card-name") ]
+        [ HH.text row.name ]
+    , HH.div [ HP.class_ (H.ClassName "mini-card-foot") ]
+        [ HH.span [ HP.class_ (H.ClassName "mini-card-domain") ]
+            [ HH.text row.domain ]
+        , HH.span [ HP.class_ (H.ClassName "mini-card-score") ]
+            [ HH.text (formatScore row.score) ]
+        ]
+    ]
+
+formatScore :: Number -> String
+formatScore n = toStringWith (fixed 1) n
+
+-- | Read-only dossier view — title, description, notes. Reached by tapping a
+-- | mini-card on the Browse screen.
+renderDossier :: forall m. State -> H.ComponentHTML Action () m
+renderDossier state =
+  case state.dossier of
+    Nothing ->
+      HH.div [ HP.class_ (H.ClassName "dossier-mobile") ]
+        [ renderDossierBack
+        , HH.div [ HP.class_ (H.ClassName "dossier-loading") ]
+            [ HH.text (if state.dossierLoading then "loading…" else "") ]
+        ]
+    Just d ->
+      HH.div [ HP.class_ (H.ClassName ("dossier-mobile domain-" <> d.domain)) ]
+        [ renderDossierBack
+        , HH.div [ HP.class_ (H.ClassName "dossier-head") ]
+            [ HH.h1 [ HP.class_ (H.ClassName "dossier-title") ]
+                [ HH.text d.name ]
+            , HH.div [ HP.class_ (H.ClassName "dossier-meta") ]
+                [ HH.span [ HP.class_ (H.ClassName ("domain-dot domain-" <> d.domain)) ] []
+                , HH.span [ HP.class_ (H.ClassName "dossier-domain") ]
+                    [ HH.text d.domain ]
+                , HH.span [ HP.class_ (H.ClassName "dossier-status") ]
+                    [ HH.text d.status ]
+                ]
+            ]
+        , if String.null d.description
+            then HH.text ""
+            else HH.p [ HP.class_ (H.ClassName "dossier-description") ]
+              [ HH.text d.description ]
+        , HH.div [ HP.class_ (H.ClassName "dossier-notes") ]
+            ( [ HH.div [ HP.class_ (H.ClassName "dossier-notes-label") ]
+                  [ HH.text (show (Array.length d.notes) <> " notes") ]
+              ] <> map renderDossierNote d.notes
+            )
+        ]
+
+renderDossierBack :: forall m. H.ComponentHTML Action () m
+renderDossierBack =
+  HH.button
+    [ HP.class_ (H.ClassName "dossier-back")
+    , HE.onClick \_ -> CloseDossier
+    ]
+    [ HH.text "‹ Browse" ]
+
+renderDossierNote :: forall m. API.DossierNote -> H.ComponentHTML Action () m
+renderDossierNote note =
+  HH.div [ HP.class_ (H.ClassName "dossier-note") ]
+    [ HH.div [ HP.class_ (H.ClassName "dossier-note-meta") ]
+        [ HH.text (note.author <> " · " <> note.createdAt) ]
+    , HH.div [ HP.class_ (H.ClassName "dossier-note-content") ]
+        [ HH.text note.content ]
+    ]
+
+-- | Touch handlers — extract client X/Y from the first touch; no-op if absent.
+touchStartHandler :: TouchEvent -> Action
+touchStartHandler ev =
+  case TL.item 0 (TE.touches ev) of
+    Just t -> SwipeStart (Touch.clientX t) (Touch.clientY t)
+    Nothing -> NoOp
+
+touchMoveHandler :: TouchEvent -> Action
+touchMoveHandler ev =
+  case TL.item 0 (TE.touches ev) of
+    Just t -> SwipeMove (Touch.clientX t) (Touch.clientY t)
+    Nothing -> NoOp
+
+-- Int abs — local helper to avoid pulling in ring extras.
+absI :: Int -> Int
+absI n = if n < 0 then -n else n
 
 -- | Top strip: shows current project. Tap to open picker.
 renderProjectStrip :: forall m. State -> H.ComponentHTML Action () m
@@ -536,3 +736,128 @@ handleAction = case _ of
 
   CancelCapture ->
     H.modify_ \s -> s { captureMode = Nothing, recording = false, noteText = "", urlText = "", urlComment = "", transcript = "" }
+
+  -- =============================================================================
+  -- Screen switching
+  -- =============================================================================
+
+  SwitchScreen scr -> case scr of
+    CaptureHome ->
+      H.modify_ \s -> s
+        { screen = CaptureHome
+        , swipeDeltaX = 0
+        , swipeStartX = Nothing
+        , swipeStartY = Nothing
+        , swipeHorizontal = false
+        , swipeAnimating = true
+        }
+    Browse -> do
+      H.modify_ \s -> s
+        { screen = Browse
+        , swipeDeltaX = 0
+        , swipeStartX = Nothing
+        , swipeStartY = Nothing
+        , swipeHorizontal = false
+        , swipeAnimating = true
+        }
+      handleAction LoadActivity
+    Dossier pid -> handleAction (OpenDossier pid)
+
+  LoadActivity -> do
+    H.modify_ \s -> s { browseLoading = true }
+    rows <- liftAff API.fetchActivity
+    H.modify_ \s -> s { activityRows = rows, browseLoading = false }
+
+  OpenDossier pid -> do
+    H.modify_ \s -> s
+      { screen = Dossier pid
+      , dossier = Nothing
+      , dossierLoading = true
+      }
+    d <- liftAff $ API.fetchDossier pid
+    H.modify_ \s -> s { dossier = d, dossierLoading = false }
+
+  CloseDossier ->
+    H.modify_ \s -> s
+      { screen = Browse
+      , dossier = Nothing
+      , dossierLoading = false
+      }
+
+  -- =============================================================================
+  -- Swipe between Capture <-> Browse
+  -- =============================================================================
+
+  SwipeStart x y -> do
+    state <- H.get
+    let inCaptureFlow = case state.captureMode of
+          Just _ -> true
+          Nothing -> false
+    let onDossier = case state.screen of
+          Dossier _ -> true
+          _ -> false
+    when (not inCaptureFlow && not state.pickerOpen && not onDossier) $
+      H.modify_ \s -> s
+        { swipeStartX = Just x
+        , swipeStartY = Just y
+        , swipeDeltaX = 0
+        , swipeHorizontal = false
+        , swipeAnimating = false
+        }
+
+  SwipeMove x y -> do
+    state <- H.get
+    case state.swipeStartX, state.swipeStartY of
+      Just sx, Just sy ->
+        -- Clamp swipe to valid direction: nothing to the right of Capture,
+        -- nothing to the left of Browse. Prevents over-swipe into empty space.
+        let rawDx = x - sx
+            dy = y - sy
+            dx = case state.screen of
+              CaptureHome -> min 0 rawDx
+              Browse -> max 0 rawDx
+              Dossier _ -> 0
+        in if state.swipeHorizontal
+             then H.modify_ \s -> s { swipeDeltaX = dx }
+             else when (absI rawDx > 10 && absI rawDx > (3 * absI dy) / 2) $
+               H.modify_ \s -> s { swipeHorizontal = true, swipeDeltaX = dx }
+      _, _ -> pure unit
+
+  SwipeEnd -> do
+    state <- H.get
+    if state.swipeHorizontal
+      then do
+        let threshold = 80
+        let dx = state.swipeDeltaX
+        case state.screen of
+          CaptureHome ->
+            if dx < -threshold
+              then handleAction (SwitchScreen Browse)
+              else H.modify_ \s -> s
+                { swipeDeltaX = 0
+                , swipeAnimating = true
+                , swipeStartX = Nothing
+                , swipeStartY = Nothing
+                , swipeHorizontal = false
+                }
+          Browse ->
+            if dx > threshold
+              then handleAction (SwitchScreen CaptureHome)
+              else H.modify_ \s -> s
+                { swipeDeltaX = 0
+                , swipeAnimating = true
+                , swipeStartX = Nothing
+                , swipeStartY = Nothing
+                , swipeHorizontal = false
+                }
+          Dossier _ -> pure unit
+      else
+        H.modify_ \s -> s
+          { swipeDeltaX = 0
+          , swipeStartX = Nothing
+          , swipeStartY = Nothing
+          , swipeHorizontal = false
+          , swipeAnimating = false
+          }
+
+  NoOp -> pure unit

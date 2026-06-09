@@ -2,11 +2,17 @@ module ProjectTracker.Server.Main where
 
 import Prelude
 
+import API.Activity as Activity
 import API.Agent as Agent
 import API.Dependencies as Dependencies
+import API.Exercise as Exercise
 import API.Projects as Projects
 import API.Servers as Servers
+import API.Deployments as Deployments
 import API.Stats as Stats
+import API.Subscriptions as Subscriptions
+import BlogDrafts as BlogDrafts
+import Opener as Opener
 import Control.Monad.Error.Class (try)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -18,7 +24,7 @@ import Effect.Console (log)
 import Effect.Exception (message)
 import Effect.Ref as Ref
 import Foreign.Object as Object
-import Data.Maybe (fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe)
 import HTTPurple (Method(..), serve, ok, ok', toBuffer, toString)
 import HTTPurple.Headers (headers)
 import HTTPurple.Lookup ((!!))
@@ -37,11 +43,16 @@ data Route
   | ProjectById Int
   | ProjectTags Int
   | ProjectRename Int
+  | ProjectBlogOpen Int
   | ProjectServers Int
   | Ports
   | PortsSuggest
   | ServerById Int
+  | Deployments
+  | DeploymentById Int
+  | NoteById Int
   | Stats
+  | Activity
   | AgentProjects
   | AgentProjectById Int
   | AgentProjectStatus Int
@@ -51,6 +62,18 @@ data Route
   | AgentSearch
   | Dependencies
   | DependencyById Int Int
+  -- Finance section
+  | Subscriptions
+  | SubscriptionById Int
+  | SubscriptionsUpcoming
+  -- Letters section (blog drafts)
+  | BlogDrafts
+  | BlogAssets Int
+  -- Sports section
+  | ProjectOpen Int
+  -- Sports section
+  | ExerciseLog
+  | ExerciseSummary
 
 derive instance Generic Route _
 
@@ -60,11 +83,16 @@ route = root $ sum
   , "ProjectById": path "api/projects" (int segment)
   , "ProjectTags": path "api/projects" (suffix (int segment) "tags")
   , "ProjectRename": path "api/projects" (suffix (int segment) "rename")
+  , "ProjectBlogOpen": path "api/projects" (suffix (suffix (int segment) "blog") "open")
   , "ProjectServers": path "api/projects" (suffix (int segment) "servers")
   , "Ports": path "api/ports" noArgs
   , "PortsSuggest": path "api/ports/suggest" noArgs
   , "ServerById": path "api/servers" (int segment)
+  , "Deployments": path "api/deployments" noArgs
+  , "DeploymentById": path "api/deployments" (int segment)
+  , "NoteById": path "api/notes" (int segment)
   , "Stats": path "api/stats" noArgs
+  , "Activity": path "api/activity" noArgs
   , "AgentProjects": path "api/agent/projects" noArgs
   , "AgentProjectById": path "api/agent/projects" (int segment)
   , "AgentProjectStatus": path "api/agent/projects" (suffix (int segment) "status")
@@ -72,6 +100,14 @@ route = root $ sum
   , "AgentProjectAttachment": path "api/agent/projects" (suffix (int segment) "attachments")
   , "AgentProjectAttachmentUpload": path "api/agent/projects" (suffix (suffix (int segment) "attachments") "upload")
   , "AgentSearch": path "api/agent/search" noArgs
+  , "BlogDrafts": path "api/blog/drafts" noArgs
+  , "BlogAssets": path "api/projects" (suffix (suffix (int segment) "blog") "assets")
+  , "Subscriptions": path "api/subscriptions" noArgs
+  , "SubscriptionById": path "api/subscriptions" (int segment)
+  , "SubscriptionsUpcoming": path "api/subscriptions/upcoming" noArgs
+  , "ProjectOpen": path "api/projects" (suffix (int segment) "open")
+  , "ExerciseLog": path "api/exercise" noArgs
+  , "ExerciseSummary": path "api/exercise/summary" noArgs
   , "Dependencies": path "api/dependencies" noArgs
   , "DependencyById": path "api/dependencies" (int segment `product` int segment)
   }
@@ -116,6 +152,16 @@ main = launchAff_ do
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT"
   liftEffect $ log "Schema migrations applied"
 
+  -- One-time hoist of existing DB blog_content values into <slug>.md
+  -- files on disk. Idempotent: after the first successful pass the
+  -- blog_content column is NULLed for every migrated row, so subsequent
+  -- boots find zero rows to process.
+  summary <- BlogDrafts.migrateLegacyDrafts db
+  liftEffect $ log $ "Blog drafts migration: "
+    <> show summary.written <> " written, "
+    <> show summary.skipped <> " skipped, "
+    <> show summary.errored <> " errored"
+
   liftEffect do
     _ <- serve { port: 3100 } { route, router: mkRouter dbRef }
     log "Project Tracker API server running on http://localhost:3100"
@@ -125,13 +171,18 @@ main = launchAff_ do
     log "  GET    /api/projects/:id                 - Get project with details"
     log "  POST   /api/projects                     - Create a project"
     log "  PUT    /api/projects/:id                 - Update a project"
+    log "  DELETE /api/projects/:id                 - Delete a project (cascades; refuses if children)"
+    log "  POST   /api/projects/:id/blog/open         - Open blog draft in VS Code"
     log "  GET    /api/stats                        - Domain/status statistics"
+    log "  GET    /api/activity                     - Project activity ranking (recent notes/status/attachments)"
     log ""
     log "Agent endpoints:"
     log "  GET    /api/agent/projects               - Compact project list"
     log "  GET    /api/agent/projects/:id           - Full project detail"
     log "  POST   /api/agent/projects/:id/status      - Update status (validated)"
     log "  POST   /api/agent/projects/:id/notes       - Add a note"
+    log "  DELETE /api/notes/:id                      - Delete a note"
+    log "  DELETE /api/projects/:id/tags?name=<tag>   - Remove a tag from a project"
     log "  POST   /api/agent/projects/:id/attachments - Register an attachment reference"
     log "  POST   /api/agent/projects/:id/attachments/upload - Upload a file"
     log "  GET    /api/agent/search?q=...             - Text search"
@@ -168,6 +219,7 @@ main = launchAff_ do
         Put -> do
           bodyStr <- toString body
           Projects.updateProject db projectId bodyStr
+        Delete -> Projects.deleteProject db projectId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -175,6 +227,9 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Projects.addTag db projectId bodyStr
+        Delete -> case Object.lookup "name" query of
+          Nothing -> ok """{ "error": "Missing 'name' query parameter" }"""
+          Just tagName -> Projects.deleteTag db projectId tagName
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -182,6 +237,18 @@ main = launchAff_ do
         Post -> do
           bodyStr <- toString body
           Projects.renameProject db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectBlogOpen projectId -> case method of
+        Post -> Projects.openBlogDraft db projectId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectOpen projectId -> case method of
+        Post -> do
+          let app = fromMaybe "finder" (Object.lookup "app" query)
+          Opener.openProject db projectId app
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -208,8 +275,33 @@ main = launchAff_ do
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
+      Deployments -> case method of
+        Get -> Deployments.listDeployments db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      DeploymentById deploymentId -> case method of
+        Get -> Deployments.getDeployment db deploymentId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      NoteById noteId -> case method of
+        Delete -> Agent.agentDeleteNote db noteId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
       Stats -> case method of
         Get -> Stats.getStats db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      Activity -> case method of
+        Get -> do
+          let mHalflife = Object.lookup "halflife" query
+          let mWindow = Object.lookup "window" query
+          let mLimit = Object.lookup "limit" query
+          let mDomain = Object.lookup "domain" query
+          Activity.getActivity db mHalflife mWindow mLimit mDomain
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -276,5 +368,62 @@ main = launchAff_ do
 
       DependencyById blockerId blockedId -> case method of
         Delete -> Dependencies.deleteDependency db blockerId blockedId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Letters section — blog drafts
+      BlogDrafts -> case method of
+        Get -> Projects.listBlogDrafts db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      BlogAssets projectId -> case method of
+        Get -> Projects.listBlogAssets db projectId
+        Post -> do
+          bodyStr <- toString body
+          Projects.saveBlogAsset db projectId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Finance section — subscriptions
+      Subscriptions -> case method of
+        Get -> do
+          let mCategory = Object.lookup "category" query
+          Subscriptions.listSubscriptions db mCategory
+        Post -> do
+          bodyStr <- toString body
+          Subscriptions.createSubscription db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SubscriptionById subId -> case method of
+        Get -> Subscriptions.getSubscription db subId
+        Put -> do
+          bodyStr <- toString body
+          Subscriptions.updateSubscription db subId bodyStr
+        Delete -> Subscriptions.deleteSubscription db subId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      SubscriptionsUpcoming -> case method of
+        Get -> do
+          let days = fromMaybe "7" (Object.lookup "days" query)
+          Subscriptions.upcomingSubscriptions db days
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Sports section — exercise log
+      ExerciseLog -> case method of
+        Get -> do
+          let mActivity = Object.lookup "activity" query
+          Exercise.listExercise db mActivity
+        Post -> do
+          bodyStr <- toString body
+          Exercise.createExercise db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ExerciseSummary -> case method of
+        Get -> Exercise.monthlySummary db
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""

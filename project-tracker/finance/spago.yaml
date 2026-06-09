@@ -1,30 +1,25 @@
 package:
-  name: marginalia-capture
-  description: "Marginalia Capture — phone-first PWA for quick project captures"
+  name: marginalia-finance
+  description: "Finance section visualization — sparkline timeline + cost breakdown"
   bundle:
-    module: Capture.Main
+    module: Finance.Main
     outfile: public/bundle.js
     platform: browser
   dependencies:
     - aff
-    - aff-promise
     - affjax
     - affjax-web
-    - argonaut-codecs
     - argonaut-core
     - arrays
     - console
     - effect
     - either
     - foldable-traversable
-    - foreign
-    - foreign-object
     - halogen
+    - halogen-svg-elems
+    - integers
     - maybe
     - numbers
     - prelude
     - strings
     - tuples
-    - web-dom
-    - web-html
-    - web-touchevents

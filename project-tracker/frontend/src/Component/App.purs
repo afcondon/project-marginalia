@@ -7,12 +7,15 @@ module Component.App where
 import Prelude
 
 import API as API
+import API (SubscriptionRecord, BlogDraftRecord, BlogAssetRecord) as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
-import Data.Int (fromString) as Int
+import Data.Either (Either(..))
+import Data.Int (floor, fromString) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.String as String
-import Data.Tuple (Tuple(..))
+import Data.Traversable (traverse, traverse_)
+import Data.Tuple (Tuple(..), fst, snd)
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (liftEffect)
@@ -22,7 +25,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Types (Attachment, BlogStatus(..), Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allBlogStatuses, allStatuses, blogStatusLabel, blogStatusToString, statusLabel, statusToString, nextStatuses)
+import Types (ActivityRow, Attachment, BlogStatus(..), Project, ProjectDetail, Server, Stats, ProjectInput, Status(..), allBlogStatuses, allStatuses, blogStatusLabel, blogStatusToString, statusLabel, statusToString, nextStatuses)
 import Web.Event.Event (Event)
 import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 
@@ -31,6 +34,7 @@ import Web.UIEvent.MouseEvent (MouseEvent, toEvent)
 -- =============================================================================
 
 foreign import stopPropagation_ :: Event -> Effect Unit
+foreign import copyToClipboard :: String -> Effect Unit
 foreign import getHash_ :: Effect String
 foreign import setHash_ :: String -> Effect Unit
 foreign import onHashChange_ :: (String -> Effect Unit) -> Effect (Effect Unit)
@@ -45,6 +49,10 @@ foreign import startRecording_ :: Effect (Promise Boolean)
 foreign import stopAndTranscribe_ :: Effect (Promise String)
 foreign import isRecording_ :: Effect Boolean
 
+-- Clipboard image paste — fires callback when user pastes an image anywhere
+type ClipboardImageData = { filename :: String, base64 :: String }
+foreign import onPaste_ :: (ClipboardImageData -> Effect Unit) -> Effect (Effect Unit)
+
 type KeyEvent =
   { key :: String
   , ctrl :: Boolean
@@ -56,6 +64,11 @@ type KeyEvent =
 
 foreign import onKeyDown_ :: (KeyEvent -> Effect Unit) -> Effect (Effect Unit)
 
+-- Weather (Raker UI) cutoff persistence — localStorage for now.
+foreign import getWeatherCutoff_ :: Effect String
+foreign import setWeatherCutoff_ :: String -> Effect Unit
+foreign import nowIso_ :: Effect String
+
 -- =============================================================================
 -- Types
 -- =============================================================================
@@ -65,6 +78,7 @@ data View
   = ListView
   | DetailView Int
   | CreateView
+  | ActivityView
 
 derive instance Eq View
 
@@ -159,7 +173,6 @@ data EditableField
   | FRepo
   | FSourceUrl
   | FSourcePath
-  | FBlogContent
 
 derive instance Eq EditableField
 
@@ -170,13 +183,25 @@ fieldLabel = case _ of
   FRepo -> "repo"
   FSourceUrl -> "source url"
   FSourcePath -> "source path"
-  FBlogContent -> "blog post"
+
+-- | Which newspaper section is active. Nothing = the default project Register.
+-- | Named sections pull from different data sources — Finance from the
+-- | subscriptions table, etc. The Register layout and card renderer change
+-- | based on the active section.
+type Section = String  -- "finance" for now; more later
 
 type State =
   { projects :: Array Project
   , selectedProject :: Maybe ProjectDetail
   , stats :: Maybe Stats
   , view :: View
+  , section :: Maybe Section  -- Nothing = projects, Just "finance" = subscriptions
+  , subscriptions :: Array API.SubscriptionRecord
+  , subscriptionMonthlyBurn :: Number
+  , blogDrafts :: Array API.BlogDraftRecord
+  , lettersExpanded :: Maybe Int          -- project id of expanded row (or Nothing)
+  , lettersAssets :: Array API.BlogAssetRecord  -- assets for the expanded row
+  , lettersUploading :: Boolean           -- true while an upload is in flight
   , filterDomain :: Maybe String
   , filterStatus :: Maybe String
   , filterTag :: Maybe String
@@ -219,6 +244,53 @@ type State =
   , dossierNoteDraft :: String
   , dossierTagOpen :: Boolean       -- new-tag input visible?
   , dossierTagDraft :: String
+  -- Activity view
+  , activityRows :: Array ActivityRow
+  , activityLoading :: Boolean
+  -- Weather section: morning review, the Raker UI surface.
+  -- Loaded on demand when the WEATHER pill is clicked.
+  , weatherPending :: Array PendingSummary
+  , weatherNotes :: Array WeatherNotesGroup
+  , weatherQuickWins :: Array QuickWinNote
+  , weatherQuickWinDraft :: String
+  , weatherEditingId :: Maybe Int    -- project id whose summary we're editing
+  , weatherEditDraft :: String       -- editor content for the in-progress edit
+  , weatherCutoff :: Maybe String    -- ISO timestamp (true UTC) of last review
+  , weatherLoading :: Boolean
+  }
+
+-- | One pending summary update: a project whose `description` contains the `---`
+-- | divider, split into the proposed-new and current-of-record halves.
+type PendingSummary =
+  { projectId :: Int
+  , projectName :: String
+  , projectSlug :: Maybe String
+  , status :: Status
+  , newSummary :: String
+  , oldSummary :: String
+  }
+
+-- | A group of recent notes on a single project, for the digest pane.
+type WeatherNotesGroup =
+  { projectId :: Int
+  , projectName :: String
+  , projectSlug :: Maybe String
+  , notes :: Array
+      { id :: Int
+      , content :: String
+      , author :: Maybe String
+      , createdAt :: Maybe String
+      }
+  }
+
+-- | A filed quick-win marker note (`author = "quick-win"`), shown so the user
+-- | can see what's already in the queue and `did` it once done.
+type QuickWinNote =
+  { noteId :: Int
+  , projectId :: Int
+  , projectName :: String
+  , content :: String
+  , createdAt :: Maybe String
   }
 
 data Action
@@ -227,6 +299,9 @@ data Action
   | LoadAllProjects
   | LoadPorts
   | LoadStats
+  | SetSection (Maybe Section)  -- switch newspaper section
+  | LoadSubscriptions
+  | LoadBlogDrafts
   | SetFilterDomain String
   | SetFilterStatus String
   | SetFilterTag String
@@ -283,6 +358,37 @@ data Action
   | DossierCancelTag
   -- Blog-post classification
   | SetBlogStatus (Maybe BlogStatus) MouseEvent
+  -- Blog draft editing via VS Code. File on disk is source of truth.
+  | OpenBlogInVSCode Int
+  | ReloadBlogDraft Int
+  | CopyImageMarkdown String   -- markdown string to copy, e.g. "![alt](url)"
+  -- Letters Page: inline blog status changes (promote/demote)
+  | LettersSetStatus Int String  -- project id, new blog_status string
+  | LettersToggleExpand Int String  -- project id, slug — expand/collapse row
+  | LettersPasteImage { filename :: String, base64 :: String }  -- clipboard paste
+  | LettersCopyMarkdown String  -- copy asset markdown to clipboard
+  -- Open project in an external app via the /api/projects/:id/open endpoint
+  | OpenInApp String            -- "finder" | "vscode" | "iterm"
+  -- Activity view
+  | ShowActivity
+  | LoadActivity
+  -- Manual pin/unpin. Toggles the `pinned` tag on the project; the activity
+  -- endpoint gives that tag a 3× score multiplier. MouseEvent argument lets
+  -- us stopPropagation so clicking the pin inside a clickable row/card
+  -- doesn't also trigger the row's primary action.
+  | TogglePin Int Boolean MouseEvent
+  -- Weather section: the Raker UI for morning review.
+  | LoadWeather
+  | WeatherApprove Int             -- project id
+  | WeatherReject Int              -- project id
+  | WeatherStartEdit Int String    -- project id, current new-summary
+  | WeatherSetEditDraft String
+  | WeatherSubmitEdit Int          -- project id
+  | WeatherCancelEdit
+  | WeatherSetQuickWinDraft String
+  | WeatherSubmitQuickWins
+  | WeatherDidQuickWin Int         -- note id
+  | WeatherAdvanceCutoff           -- mark digest reviewed
 
 -- =============================================================================
 -- Component
@@ -304,6 +410,13 @@ initialState =
   , selectedProject: Nothing
   , stats: Nothing
   , view: ListView
+  , section: Nothing
+  , subscriptions: []
+  , subscriptionMonthlyBurn: 0.0
+  , blogDrafts: []
+  , lettersExpanded: Nothing
+  , lettersAssets: []
+  , lettersUploading: false
   , filterDomain: Nothing
   , filterStatus: Nothing
   , filterTag: Nothing
@@ -340,6 +453,16 @@ initialState =
   , dossierNoteDraft: ""
   , dossierTagOpen: false
   , dossierTagDraft: ""
+  , activityRows: []
+  , activityLoading: false
+  , weatherPending: []
+  , weatherNotes: []
+  , weatherQuickWins: []
+  , weatherQuickWinDraft: ""
+  , weatherEditingId: Nothing
+  , weatherEditDraft: ""
+  , weatherCutoff: Nothing
+  , weatherLoading: false
   }
 
 -- =============================================================================
@@ -363,7 +486,12 @@ render state =
               Just detail -> case parseViewKind detail.preferredView of
                 DossierView  -> renderDossier state detail
                 MagazineView -> renderMagazine state detail
-            ListView -> renderProjectList state
+            ActivityView -> renderActivityPage state
+            ListView -> case state.section of
+              Just "finance" -> renderFinanceSection state
+              Just "letters" -> renderLettersSection state
+              Just "weather" -> renderWeatherSection state
+              _              -> renderProjectList state
         ]
     -- Keyboard shortcut hint (shown when no card is focused on the list)
     , if state.view == ListView && state.focusIndex < 0
@@ -472,6 +600,12 @@ renderHeader state =
                       [ HH.text "Clear" ]
                     else HH.text ""
                 , HH.button
+                    [ HP.class_ (H.ClassName "btn btn-icon activity-icon-btn")
+                    , HP.title "Activity"
+                    , HE.onClick \_ -> ShowActivity
+                    ]
+                    [ HH.text "\x223F" ]
+                , HH.button
                     [ HP.class_ (H.ClassName "btn btn-primary")
                     , HE.onClick \_ -> ShowCreateForm
                     ]
@@ -506,7 +640,32 @@ renderStatusFilterLight state status =
 renderDomainFilterBar :: forall m. State -> H.ComponentHTML Action () m
 renderDomainFilterBar state =
   HH.div [ HP.class_ (H.ClassName "header-domains") ]
-    (renderDomainPills state <> renderDepthPills state)
+    (renderSectionPills state <> renderDomainPills state <> renderDepthPills state)
+
+-- | Section pills — newspaper sections beyond the project domains.
+-- | FINANCE (subscriptions), LETTERS (blog drafts), WEATHER (Raker morning
+-- | review). More to come (Culture, Sports...).
+renderSectionPills :: forall m. State -> Array (H.ComponentHTML Action () m)
+renderSectionPills state =
+  [ renderSectionPill state "finance" "FINANCE" (Array.length state.subscriptions)
+  , renderSectionPill state "letters" "LETTERS" (Array.length state.blogDrafts)
+  , renderSectionPill state "weather" "WEATHER" (Array.length state.weatherPending)
+  ]
+
+renderSectionPill :: forall m. State -> String -> String -> Int -> H.ComponentHTML Action () m
+renderSectionPill state sectionId label count =
+  let isActive = state.section == Just sectionId
+      activeClass = if isActive then " filter-pill-active section-pill-active" else ""
+  in HH.button
+    [ HP.class_ (H.ClassName ("filter-pill section-pill section-" <> sectionId <> activeClass))
+    , HE.onClick \_ -> SetSection (if isActive then Nothing else Just sectionId)
+    ]
+    [ HH.text label
+    , if count > 0
+        then HH.span [ HP.class_ (H.ClassName "pill-count") ]
+          [ HH.text (" (" <> show count <> ")") ]
+        else HH.text ""
+    ]
 
 -- | Always-visible P0/P1/P2 radio buttons.
 -- | P0 = leaves (no children), P1 = parents (have children but no grandchildren),
@@ -613,6 +772,542 @@ renderProjectList state =
     ]
 
 -- =============================================================================
+-- Finance Section — subscription cards
+-- =============================================================================
+
+renderFinanceSection :: forall m. State -> H.ComponentHTML Action () m
+renderFinanceSection state =
+  HH.div [ HP.class_ (H.ClassName "finance-section") ]
+    [ HH.div [ HP.class_ (H.ClassName "finance-header") ]
+        [ HH.span [ HP.class_ (H.ClassName "finance-burn") ]
+            [ HH.text ("~" <> show (Int.floor state.subscriptionMonthlyBurn) <> "/mo") ]
+        , HH.span [ HP.class_ (H.ClassName "finance-count") ]
+            [ HH.text (show (Array.length state.subscriptions) <> " active") ]
+        ]
+    , if Array.null state.subscriptions
+        then HH.div [ HP.class_ (H.ClassName "empty-state") ]
+          [ HH.text "No subscriptions tracked yet." ]
+        else HH.div [ HP.class_ (H.ClassName "project-cards") ]
+          (Array.mapWithIndex (\i s -> renderSubscriptionCard i s) state.subscriptions)
+    ]
+
+renderSubscriptionCard :: forall m. Int -> API.SubscriptionRecord -> H.ComponentHTML Action () m
+renderSubscriptionCard _idx sub =
+  let catClass = " sub-cat-" <> sub.category
+      urgencyClass = ""  -- TODO: highlight if next_due is within 7 days
+      tierCls = if sub.amount >= 30.0 then " tier-regular" else " tier-small"
+  in HH.div
+    [ HP.class_ (H.ClassName ("project-card subscription-card" <> catClass <> tierCls <> urgencyClass)) ]
+    [ HH.div [ HP.class_ (H.ClassName "card-header") ]
+        [ HH.h3 [ HP.class_ (H.ClassName "card-title") ]
+            [ HH.text sub.name ]
+        , HH.div [ HP.class_ (H.ClassName "sub-amount") ]
+            [ HH.text (show sub.amount <> " " <> sub.currency)
+            , HH.span [ HP.class_ (H.ClassName "sub-frequency") ]
+                [ HH.text ("/" <> freqAbbrev sub.frequency) ]
+            ]
+        ]
+    , HH.div [ HP.class_ (H.ClassName "card-meta") ]
+        [ HH.span [ HP.class_ (H.ClassName "sub-category") ]
+            [ HH.text sub.category ]
+        , if String.null sub.nextDue
+            then HH.text ""
+            else HH.span [ HP.class_ (H.ClassName "sub-next-due") ]
+              [ HH.text ("due " <> String.take 10 sub.nextDue) ]
+        ]
+    , if String.null sub.notes
+        then HH.text ""
+        else HH.p [ HP.class_ (H.ClassName "card-description") ]
+          [ HH.text sub.notes ]
+    ]
+
+freqAbbrev :: String -> String
+freqAbbrev = case _ of
+  "monthly"   -> "mo"
+  "annual"    -> "yr"
+  "quarterly" -> "qtr"
+  "weekly"    -> "wk"
+  _           -> "?"
+
+-- =============================================================================
+-- Letters Section — blog draft queue
+-- =============================================================================
+
+renderLettersSection :: forall m. State -> H.ComponentHTML Action () m
+renderLettersSection state =
+  let drafted  = Array.filter (\d -> d.blogStatus == "drafted") state.blogDrafts
+      priority = Array.filter (\d -> d.blogStatus == "wanted_priority") state.blogDrafts
+      wanted   = Array.filter (\d -> d.blogStatus == "wanted") state.blogDrafts
+      published = Array.filter (\d -> d.blogStatus == "published") state.blogDrafts
+      notNeeded = Array.filter (\d -> d.blogStatus == "not_needed") state.blogDrafts
+  in HH.div [ HP.class_ (H.ClassName "letters-section") ]
+    [ HH.div [ HP.class_ (H.ClassName "letters-header") ]
+        [ HH.span [ HP.class_ (H.ClassName "letters-title") ]
+            [ HH.text "The Letters Page" ]
+        , HH.span [ HP.class_ (H.ClassName "letters-count") ]
+            [ HH.text (show (Array.length state.blogDrafts) <> " entries") ]
+        ]
+    , if Array.null state.blogDrafts
+        then HH.div [ HP.class_ (H.ClassName "empty-state") ]
+          [ HH.text "No blog posts tracked yet. Set a project's blog status to get started." ]
+        else HH.div_
+          [ renderLettersGroup state "Drafted"  "drafted"         drafted
+          , renderLettersGroup state "Priority" "wanted_priority" priority
+          , renderLettersGroup state "Wanted"   "wanted"          wanted
+          , renderLettersGroup state "Published" "published"      published
+          , renderLettersGroup state "Not Needed" "not_needed"    notNeeded
+          ]
+    ]
+
+renderLettersGroup :: forall m. State -> String -> String -> Array API.BlogDraftRecord -> H.ComponentHTML Action () m
+renderLettersGroup state label statusKey drafts =
+  if Array.null drafts
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName ("letters-group letters-group-" <> statusKey)) ]
+      [ HH.h3 [ HP.class_ (H.ClassName "letters-group-label") ]
+          [ HH.text label
+          , HH.span [ HP.class_ (H.ClassName "letters-group-count") ]
+              [ HH.text (" (" <> show (Array.length drafts) <> ")") ]
+          ]
+      , HH.table [ HP.class_ (H.ClassName "letters-table") ]
+          [ HH.thead_
+              [ HH.tr_
+                  [ HH.th_ [ HH.text "Project" ]
+                  , HH.th_ [ HH.text "Domain" ]
+                  , HH.th_ [ HH.text "File" ]
+                  , HH.th [ HP.class_ (H.ClassName "letters-col-words") ] [ HH.text "Words" ]
+                  , HH.th_ [ HH.text "" ]
+                  ]
+              ]
+          , HH.tbody_
+              (Array.concatMap (renderLettersRowWithExpand state statusKey) drafts)
+          ]
+      ]
+
+-- | Render a table row + optional expanded panel below it.
+-- | Returns 1 or 2 <tr> elements (data row + expansion row).
+renderLettersRowWithExpand :: forall m. State -> String -> API.BlogDraftRecord -> Array (H.ComponentHTML Action () m)
+renderLettersRowWithExpand state groupStatus draft =
+  let isExpanded = state.lettersExpanded == Just draft.id
+      expandClass = if isExpanded then " letters-row-expanded" else ""
+      dataRow = HH.tr
+        [ HP.class_ (H.ClassName ("letters-row" <> (if draft.hasFile then "" else " letters-row-nofile") <> expandClass))
+        , HE.onClick \_ -> LettersToggleExpand draft.id draft.slug
+        ]
+        [ HH.td [ HP.class_ (H.ClassName "letters-name") ]
+            [ HH.text draft.name ]
+        , HH.td [ HP.class_ (H.ClassName "letters-domain") ]
+            [ HH.text draft.domain ]
+        , HH.td [ HP.class_ (H.ClassName "letters-file") ]
+            [ HH.text (if draft.hasFile then draft.filename else "\x2014") ]
+        , HH.td [ HP.class_ (H.ClassName "letters-words") ]
+            [ HH.text (if draft.hasFile then show draft.wordCount else "\x2014") ]
+        , HH.td [ HP.class_ (H.ClassName "letters-actions") ]
+            (letterActions groupStatus draft)
+        ]
+  in if isExpanded
+    then [ dataRow, renderLettersExpanded state draft ]
+    else [ dataRow ]
+
+-- | Expanded panel: paste zone + asset thumbnails, shown as a full-width row.
+renderLettersExpanded :: forall m. State -> API.BlogDraftRecord -> H.ComponentHTML Action () m
+renderLettersExpanded state draft =
+  HH.tr [ HP.class_ (H.ClassName "letters-expand-row") ]
+    [ HH.td [ HP.colSpan 5 ]
+        [ HH.div [ HP.class_ (H.ClassName "letters-expand-panel") ]
+            [ HH.div [ HP.class_ (H.ClassName "letters-paste-zone") ]
+                [ HH.text
+                    (if state.lettersUploading
+                      then "Uploading\x2026"
+                      else "Paste screenshot (Cmd+V) to attach to this post")
+                ]
+            , if Array.null state.lettersAssets
+                then HH.text ""
+                else HH.div [ HP.class_ (H.ClassName "letters-asset-grid") ]
+                  (map renderLettersAsset state.lettersAssets)
+            ]
+        ]
+    ]
+
+renderLettersAsset :: forall m. API.BlogAssetRecord -> H.ComponentHTML Action () m
+renderLettersAsset asset =
+  HH.button
+    [ HP.class_ (H.ClassName "letters-asset-thumb")
+    , HE.onClick \_ -> LettersCopyMarkdown asset.markdown
+    , HP.title ("Click to copy: " <> asset.markdown)
+    , HP.type_ HP.ButtonButton
+    ]
+    [ HH.img [ HP.src asset.url, HP.alt asset.filename ]
+    , HH.span [ HP.class_ (H.ClassName "letters-asset-name") ]
+        [ HH.text asset.filename ]
+    ]
+
+-- | Inline promote/demote buttons based on current status group.
+-- | Wanted: promote to Priority, demote to Not Needed
+-- | Priority: demote to Wanted
+-- | Drafted/Published/Not Needed: Edit/Start button only (no triage arrows)
+letterActions :: forall m. String -> API.BlogDraftRecord -> Array (H.ComponentHTML Action () m)
+letterActions groupStatus draft = case groupStatus of
+  "wanted" ->
+    [ arrowBtn "\x2191" "Promote to Priority" (LettersSetStatus draft.id "wanted_priority") "letters-promote"
+    , arrowBtn "\x2193" "Demote to Not Needed" (LettersSetStatus draft.id "not_needed") "letters-demote"
+    , editBtn
+    ]
+  "wanted_priority" ->
+    [ arrowBtn "\x2193" "Demote to Wanted" (LettersSetStatus draft.id "wanted") "letters-demote"
+    , arrowBtn "\x00d7" "Not Needed" (LettersSetStatus draft.id "not_needed") "letters-remove"
+    , editBtn
+    ]
+  _ -> [ editBtn ]
+  where
+  editBtn = HH.button
+    [ HP.class_ (H.ClassName "blog-action-btn")
+    , HE.onClick \_ -> OpenBlogInVSCode draft.id
+    , HP.title "Open draft in VS Code"
+    ]
+    [ HH.text (if draft.hasFile then "Edit" else "Start") ]
+  arrowBtn label title action cls = HH.button
+    [ HP.class_ (H.ClassName ("letters-arrow-btn " <> cls))
+    , HE.onClick \_ -> action
+    , HP.title title
+    ]
+    [ HH.text label ]
+
+-- =============================================================================
+-- Weather Section — Raker morning review
+-- =============================================================================
+-- |
+-- | Three-pane page driven by Marginalia state:
+-- |   1. Pending summary updates — projects whose `description` carries a
+-- |      `---` divider. Approve / reject / edit each.
+-- |   2. Recent notes digest — notes added since the user's last review,
+-- |      grouped by project.
+-- |   3. Quick wins — capture box for filing `<id>: <one-liner>` marker
+-- |      notes (`author = "quick-win"`) that /what-next surfaces; plus the
+-- |      already-filed list with × buttons that delete via `./raker did`'s
+-- |      same DELETE endpoint.
+-- |
+-- | The "advance cutoff" footer button sets `weatherCutoff` (localStorage)
+-- | so future loads don't re-show the same notes. Per Andrew's spec:
+-- | reading-and-not-promoting IS the decision, so non-promoted notes drop
+-- | out of future digests by virtue of the cutoff move.
+
+renderWeatherSection :: forall m. State -> H.ComponentHTML Action () m
+renderWeatherSection state =
+  HH.div [ HP.class_ (H.ClassName "weather-section") ]
+    [ HH.div [ HP.class_ (H.ClassName "weather-header") ]
+        [ HH.h2 [ HP.class_ (H.ClassName "weather-title") ]
+            [ HH.text "Today's Outlook" ]
+        , HH.div [ HP.class_ (H.ClassName "weather-meta") ]
+            [ HH.text $ case state.weatherCutoff of
+                Nothing -> "First review"
+                Just iso -> "Last reviewed " <> iso
+            ]
+        ]
+    , if state.weatherLoading
+        then HH.div [ HP.class_ (H.ClassName "weather-loading") ]
+              [ HH.text "Loading…" ]
+        else HH.div_
+              [ renderWeatherPending state
+              , renderWeatherNotes state
+              , renderWeatherQuickWins state
+              , renderWeatherFooter state
+              ]
+    ]
+
+-- | Pending summary updates pane. Each card shows NEW above OLD with
+-- | per-update approve/reject/edit affordances.
+renderWeatherPending :: forall m. State -> H.ComponentHTML Action () m
+renderWeatherPending state =
+  HH.section [ HP.class_ (H.ClassName "weather-pane weather-pane-pending") ]
+    [ HH.h3_ [ HH.text $ "Summary updates (" <> show (Array.length state.weatherPending) <> ")" ]
+    , if Array.null state.weatherPending
+        then HH.p [ HP.class_ (H.ClassName "weather-empty") ]
+              [ HH.text "No pending summary updates." ]
+        else HH.div_ (map (renderPendingCard state) state.weatherPending)
+    ]
+
+renderPendingCard :: forall m. State -> PendingSummary -> H.ComponentHTML Action () m
+renderPendingCard state p =
+  let isEditing = state.weatherEditingId == Just p.projectId
+  in HH.div [ HP.class_ (H.ClassName "weather-pending-card") ]
+    [ HH.div [ HP.class_ (H.ClassName "weather-pending-head") ]
+        [ HH.span [ HP.class_ (H.ClassName "weather-pending-name") ]
+            [ HH.text p.projectName ]
+        , HH.span [ HP.class_ (H.ClassName "weather-pending-meta") ]
+            [ HH.text $ "id=" <> show p.projectId <> " · " <> statusLabel p.status ]
+        ]
+    , if isEditing
+        then renderPendingEditor state p
+        else renderPendingDiff p
+    , if isEditing
+        then HH.div [ HP.class_ (H.ClassName "weather-pending-actions") ]
+            [ HH.button
+                [ HP.class_ (H.ClassName "btn btn-primary")
+                , HE.onClick \_ -> WeatherSubmitEdit p.projectId
+                ]
+                [ HH.text "Save edit" ]
+            , HH.button
+                [ HP.class_ (H.ClassName "btn")
+                , HE.onClick \_ -> WeatherCancelEdit
+                ]
+                [ HH.text "Cancel" ]
+            ]
+        else HH.div [ HP.class_ (H.ClassName "weather-pending-actions") ]
+            [ HH.button
+                [ HP.class_ (H.ClassName "btn btn-primary")
+                , HE.onClick \_ -> WeatherApprove p.projectId
+                , HP.title "Replace description with the NEW summary"
+                ]
+                [ HH.text "Approve" ]
+            , HH.button
+                [ HP.class_ (H.ClassName "btn")
+                , HE.onClick \_ -> WeatherReject p.projectId
+                , HP.title "Revert to OLD summary, drop the proposal"
+                ]
+                [ HH.text "Reject" ]
+            , HH.button
+                [ HP.class_ (H.ClassName "btn")
+                , HE.onClick \_ -> WeatherStartEdit p.projectId p.newSummary
+                , HP.title "Edit the proposed summary before saving"
+                ]
+                [ HH.text "Edit" ]
+            ]
+    ]
+
+renderPendingDiff :: forall m. PendingSummary -> H.ComponentHTML Action () m
+renderPendingDiff p =
+  HH.div [ HP.class_ (H.ClassName "weather-pending-diff") ]
+    [ HH.div [ HP.class_ (H.ClassName "weather-pending-half weather-pending-new") ]
+        [ HH.div [ HP.class_ (H.ClassName "weather-pending-label") ] [ HH.text "NEW" ]
+        , renderMultiParagraph p.newSummary
+        ]
+    , HH.div [ HP.class_ (H.ClassName "weather-pending-half weather-pending-old") ]
+        [ HH.div [ HP.class_ (H.ClassName "weather-pending-label") ] [ HH.text "OLD" ]
+        , renderMultiParagraph p.oldSummary
+        ]
+    ]
+
+renderPendingEditor :: forall m. State -> PendingSummary -> H.ComponentHTML Action () m
+renderPendingEditor state _p =
+  HH.textarea
+    [ HP.class_ (H.ClassName "weather-pending-editor")
+    , HP.value state.weatherEditDraft
+    , HP.rows 12
+    , HE.onValueInput WeatherSetEditDraft
+    ]
+
+-- | Recent notes digest pane. Groups notes by project, prints in full.
+renderWeatherNotes :: forall m. State -> H.ComponentHTML Action () m
+renderWeatherNotes state =
+  let totalNotes = Array.foldl (\acc g -> acc + Array.length g.notes) 0 state.weatherNotes
+  in HH.section [ HP.class_ (H.ClassName "weather-pane weather-pane-notes") ]
+    [ HH.h3_ [ HH.text $ "Notes since last review (" <> show totalNotes <> ")" ]
+    , if Array.null state.weatherNotes
+        then HH.p [ HP.class_ (H.ClassName "weather-empty") ]
+              [ HH.text "No new notes since your last review." ]
+        else HH.div_ (map renderWeatherNotesGroup state.weatherNotes)
+    ]
+
+renderWeatherNotesGroup :: forall m. WeatherNotesGroup -> H.ComponentHTML Action () m
+renderWeatherNotesGroup g =
+  HH.div [ HP.class_ (H.ClassName "weather-notes-group") ]
+    [ HH.h4 [ HP.class_ (H.ClassName "weather-notes-project") ]
+        [ HH.text $ g.projectName <> " (id=" <> show g.projectId <> ")" ]
+    , HH.div_ (map renderWeatherNote g.notes)
+    ]
+
+renderWeatherNote
+  :: forall m
+   . { id :: Int, content :: String, author :: Maybe String, createdAt :: Maybe String }
+  -> H.ComponentHTML Action () m
+renderWeatherNote n =
+  HH.div [ HP.class_ (H.ClassName "weather-note") ]
+    [ HH.div [ HP.class_ (H.ClassName "weather-note-meta") ]
+        [ HH.text $ fromMaybe "" n.createdAt
+            <> " · "
+            <> fromMaybe "?" n.author
+            <> " · note " <> show n.id
+        ]
+    , renderMultiParagraph n.content
+    ]
+
+-- | Quick-wins pane: capture box on top, filed list below.
+renderWeatherQuickWins :: forall m. State -> H.ComponentHTML Action () m
+renderWeatherQuickWins state =
+  HH.section [ HP.class_ (H.ClassName "weather-pane weather-pane-quickwins") ]
+    [ HH.h3_ [ HH.text $ "Quick wins (" <> show (Array.length state.weatherQuickWins) <> " filed)" ]
+    , HH.p [ HP.class_ (H.ClassName "weather-help") ]
+        [ HH.text "Format: `<project-id>: <one-liner>` per line. Each line files a marker note (author=quick-win) on that project so /what-next can surface it." ]
+    , HH.textarea
+        [ HP.class_ (H.ClassName "weather-quickwin-input")
+        , HP.value state.weatherQuickWinDraft
+        , HP.placeholder "121: render newlines as <p> in description box"
+        , HP.rows 4
+        , HE.onValueInput WeatherSetQuickWinDraft
+        ]
+    , HH.div [ HP.class_ (H.ClassName "weather-quickwin-actions") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "btn btn-primary")
+            , HP.disabled (String.null (String.trim state.weatherQuickWinDraft))
+            , HE.onClick \_ -> WeatherSubmitQuickWins
+            ]
+            [ HH.text "File quick wins" ]
+        ]
+    , if Array.null state.weatherQuickWins
+        then HH.p [ HP.class_ (H.ClassName "weather-empty") ]
+              [ HH.text "No quick wins on file." ]
+        else HH.ul [ HP.class_ (H.ClassName "weather-quickwin-list") ]
+              (map renderQuickWinRow state.weatherQuickWins)
+    ]
+
+renderQuickWinRow :: forall m. QuickWinNote -> H.ComponentHTML Action () m
+renderQuickWinRow q =
+  HH.li [ HP.class_ (H.ClassName "weather-quickwin-row") ]
+    [ HH.span [ HP.class_ (H.ClassName "weather-quickwin-project") ]
+        [ HH.text $ q.projectName <> " — " ]
+    , HH.span [ HP.class_ (H.ClassName "weather-quickwin-content") ]
+        [ HH.text q.content ]
+    , HH.button
+        [ HP.class_ (H.ClassName "btn btn-mini weather-quickwin-did")
+        , HE.onClick \_ -> WeatherDidQuickWin q.noteId
+        , HP.title "Mark this quick win as done — deletes the marker note"
+        ]
+        [ HH.text "did" ]
+    ]
+
+-- | Footer: advance the cutoff so the digest above shrinks next time.
+renderWeatherFooter :: forall m. State -> H.ComponentHTML Action () m
+renderWeatherFooter _state =
+  HH.div [ HP.class_ (H.ClassName "weather-footer") ]
+    [ HH.button
+        [ HP.class_ (H.ClassName "btn btn-primary")
+        , HE.onClick \_ -> WeatherAdvanceCutoff
+        , HP.title "Mark this digest reviewed; only newer notes will appear next time."
+        ]
+        [ HH.text "Done with review (advance cutoff)" ]
+    ]
+
+-- | Render a multi-paragraph string by splitting on blank lines and
+-- | wrapping each paragraph in <p>. Single newlines within a paragraph
+-- | are preserved as <br>. Cheap-and-cheerful — sufficient for the diff
+-- | view and notes digest. (See note 189 on Marginalia.)
+renderMultiParagraph :: forall m. String -> H.ComponentHTML Action () m
+renderMultiParagraph s =
+  let paragraphs = String.split (String.Pattern "\n\n") s
+  in HH.div [ HP.class_ (H.ClassName "multi-paragraph") ]
+       (map paragraphToHtml paragraphs)
+  where
+  paragraphToHtml :: String -> H.ComponentHTML Action () m
+  paragraphToHtml para =
+    let lines = String.split (String.Pattern "\n") para
+    in HH.p_ (Array.intercalate [ HH.br_ ] (map (\l -> [ HH.text l ]) lines))
+
+-- =============================================================================
+-- Activity Page
+-- =============================================================================
+-- |
+-- | A table view of projects ranked by recent activity. Consumes the
+-- | `/api/activity` endpoint; presents one row per project with score
+-- | breakdown so the user can judge whether the ranking is sound. This is a
+-- | staging ground for a richer visualization later (likely in Gazetteer,
+-- | with heuristic toggles).
+
+renderActivityPage :: forall m. State -> H.ComponentHTML Action () m
+renderActivityPage state =
+  HH.div [ HP.class_ (H.ClassName "activity-page") ]
+    [ HH.div [ HP.class_ (H.ClassName "activity-header") ]
+        [ HH.h2 [ HP.class_ (H.ClassName "activity-title") ]
+            [ HH.text "Activity" ]
+        , HH.p [ HP.class_ (H.ClassName "activity-lede") ]
+            [ HH.text "Projects ranked by recent notes and status transitions (weights 1.0 and 3.0), plus the newest three attachments per project (weight 0.5 each). Each event decays with a 30-day half-life; project creation itself counts only for the first week." ]
+        ]
+    , if state.activityLoading
+        then HH.div [ HP.class_ (H.ClassName "empty-state") ] [ HH.text "Loading\x2026" ]
+        else if Array.null state.activityRows
+          then HH.div [ HP.class_ (H.ClassName "empty-state") ] [ HH.text "No activity data yet." ]
+          else HH.table [ HP.class_ (H.ClassName "activity-table") ]
+            [ HH.thead_
+                [ HH.tr_
+                    [ HH.th [ HP.class_ (H.ClassName "activity-col-rank") ] [ HH.text "#" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-pin") ] [ HH.text "" ]
+                    , HH.th_ [ HH.text "Project" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-status") ] [ HH.text "" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") ] [ HH.text "Score" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") ] [ HH.text "7d" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") ] [ HH.text "30d" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") ] [ HH.text "90d" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") , HP.title "Human / Agent notes (30d)" ] [ HH.text "H/A" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") , HP.title "Status transitions (30d)" ] [ HH.text "st" ]
+                    , HH.th [ HP.class_ (H.ClassName "activity-col-num") , HP.title "Attachments (30d)" ] [ HH.text "at" ]
+                    , HH.th_ [ HH.text "Last" ]
+                    ]
+                ]
+            , HH.tbody_ (Array.mapWithIndex renderActivityRow state.activityRows)
+            ]
+    ]
+
+renderActivityRow :: forall m. Int -> ActivityRow -> H.ComponentHTML Action () m
+renderActivityRow idx row =
+  HH.tr
+    [ HP.class_ (H.ClassName ("activity-row" <> if row.pinned then " activity-row-pinned" else ""))
+    , HE.onClick \_ -> SelectProject row.id
+    ]
+    [ HH.td [ HP.class_ (H.ClassName "activity-rank") ] [ HH.text (show (idx + 1)) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-pin-cell") ]
+        [ renderPinButton row.id row.pinned ]
+    , HH.td [ HP.class_ (H.ClassName "activity-name-cell") ]
+        [ HH.span [ HP.class_ (H.ClassName "activity-name") ] [ HH.text row.name ]
+        , HH.span [ HP.class_ (H.ClassName "activity-domain") ]
+            [ HH.text (row.domain <> fromMaybe "" (map (\s -> " / " <> s) row.subdomain)) ]
+        ]
+    , HH.td [ HP.class_ (H.ClassName "activity-status-cell") ]
+        [ HH.span
+            [ HP.class_ (H.ClassName ("status-light status-light-" <> statusToString row.status <> " current"))
+            , HP.title (statusLabel row.status)
+            ]
+            []
+        ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num activity-score") ]
+        [ HH.text (formatScore row.score) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num") ] [ HH.text (show row.notes7d) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num") ] [ HH.text (show row.notes30d) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num") ] [ HH.text (show row.notes90d) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num activity-ha") ]
+        [ HH.text (show row.notesHuman30d <> "/" <> show row.notesAgent30d) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num") ] [ HH.text (show row.statusChanges30d) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-num") ] [ HH.text (show row.attachments30d) ]
+    , HH.td [ HP.class_ (H.ClassName "activity-last") ]
+        [ HH.text (formatLastDate row.lastActivityAt) ]
+    ]
+
+-- | Star toggle for pinned state. Unicode ★ (filled) / ☆ (hollow) — visible in
+-- | all browsers, kept restrained so the pin doesn't shout.
+renderPinButton :: forall m. Int -> Boolean -> H.ComponentHTML Action () m
+renderPinButton projectId pinned =
+  HH.button
+    [ HP.class_ (H.ClassName ("pin-btn" <> if pinned then " pinned" else ""))
+    , HP.title (if pinned then "Unpin (remove activity boost)" else "Pin (boost in activity rankings)")
+    , HE.onClick \e -> TogglePin projectId pinned e
+    ]
+    [ HH.text (if pinned then "\x2605" else "\x2606") ]
+
+-- | Render a score with one decimal, dropping the trailing ".0" for whole numbers.
+formatScore :: Number -> String
+formatScore n =
+  let scaled = Int.floor (n * 10.0 + 0.5)
+      whole = scaled `div` 10
+      frac = scaled `mod` 10
+  in if frac == 0 then show whole else show whole <> "." <> show frac
+
+-- | Take the YYYY-MM-DD prefix of an ISO-8601 timestamp. Good enough for
+-- | an eyeball signal; relative formatting ("3d ago") can come later.
+formatLastDate :: Maybe String -> String
+formatLastDate mIso = case mIso of
+  Nothing -> "\x2014"
+  Just iso -> String.take 10 iso
+
+-- =============================================================================
 -- Project Card (Task 2: status dot + popover; Task 3: quick edit button)
 -- =============================================================================
 
@@ -633,7 +1328,8 @@ renderProjectCard state idx project =
         [ HH.h3 [ HP.class_ (H.ClassName "card-title") ]
             [ HH.text project.name ]
         , HH.div [ HP.class_ (H.ClassName "card-header-controls") ]
-            [ renderStatusControl project
+            [ renderPinButton project.id (Array.elem "pinned" project.tags)
+            , renderStatusControl project
             ]
         ]
     , HH.div [ HP.class_ (H.ClassName "card-meta") ]
@@ -653,10 +1349,12 @@ renderProjectCard state idx project =
         Nothing -> HH.text ""
         Just desc -> HH.p [ HP.class_ (H.ClassName "card-description") ]
           [ HH.text (truncate 120 desc) ]
-    , if Array.null project.tags
+    -- "pinned" is rendered as the star control above; filter it from the tag row.
+    , let visibleTags = Array.filter (_ /= "pinned") project.tags
+      in if Array.null visibleTags
         then HH.text ""
         else HH.div [ HP.class_ (H.ClassName "card-tags") ]
-          (map renderTag project.tags)
+          (map renderTag visibleTags)
     -- Cover image (if any) goes last so it can absorb whatever vertical
     -- space is left after the text has laid out. It docks to the
     -- bottom-right of the card via CSS.
@@ -753,30 +1451,46 @@ renderLoading =
 
 renderServerRow :: forall m. Server -> H.ComponentHTML Action () m
 renderServerRow server =
-  HH.div [ HP.class_ (H.ClassName "server-row") ]
-    [ HH.span [ HP.class_ (H.ClassName "server-role") ]
-        [ HH.text server.role ]
-    , HH.span [ HP.class_ (H.ClassName "server-port") ]
-        [ HH.text (case server.port of
-            Just p -> ":" <> show p
-            Nothing -> "(no port)") ]
-    , case server.url of
-        Nothing -> HH.text ""
-        Just u -> HH.a
-          [ HP.class_ (H.ClassName "server-link")
-          , HP.href u
-          , HP.target "_blank"
-          , HP.title "Open in new tab"
-          ]
-          [ HH.text "↗" ]
-    , HH.span [ HP.class_ (H.ClassName "server-desc") ]
-        [ HH.text (fromMaybe "" server.description) ]
-    , HH.button
-        [ HP.class_ (H.ClassName "btn btn-back server-delete")
-        , HE.onClick \_ -> DeleteServerAction server.id
-        , HP.title "Delete this server"
+  HH.div [ HP.class_ (H.ClassName "server-row-wrap") ]
+    [ HH.div [ HP.class_ (H.ClassName "server-row") ]
+        [ HH.span [ HP.class_ (H.ClassName "server-role") ]
+            [ HH.text server.role ]
+        , case server.environment of
+            Nothing -> HH.text ""
+            Just env -> HH.span
+              [ HP.class_ (H.ClassName "server-env")
+              , HP.title "environment"
+              ]
+              [ HH.text env ]
+        , HH.span [ HP.class_ (H.ClassName "server-port") ]
+            [ HH.text (case server.port of
+                Just p -> ":" <> show p
+                Nothing -> "(no port)") ]
+        , case server.url of
+            Nothing -> HH.text ""
+            Just u -> HH.a
+              [ HP.class_ (H.ClassName "server-link")
+              , HP.href u
+              , HP.target "_blank"
+              , HP.title "Open in new tab"
+              ]
+              [ HH.text "↗" ]
+        , HH.span [ HP.class_ (H.ClassName "server-desc") ]
+            [ HH.text (fromMaybe "" server.description) ]
+        , HH.button
+            [ HP.class_ (H.ClassName "btn btn-back server-delete")
+            , HE.onClick \_ -> DeleteServerAction server.id
+            , HP.title "Delete this server"
+            ]
+            [ HH.text "×" ]
         ]
-        [ HH.text "×" ]
+    , case server.prerequisites of
+        Nothing -> HH.text ""
+        Just pr -> HH.div
+          [ HP.class_ (H.ClassName "server-prereq")
+          , HP.title "prerequisites"
+          ]
+          [ HH.text ("⚠ " <> pr) ]
     ]
 
 -- | Render image previews and links for attachments.
@@ -817,7 +1531,7 @@ renderDossier state detail =
             , renderDossierNotes state detail
             ]
         , HH.aside [ HP.class_ (H.ClassName "dossier-marginalia") ]
-            [ marginaliaSection "Status" (renderStatusEditor state detail)
+            [ marginaliaSection "Status" (renderStatusMachine detail)
             , marginaliaSection "Domain" (renderDomainEditor state detail)
             , marginaliaSection "Identifier" (renderIdentifierBlock detail)
             , marginaliaSection "Tags" (renderTagsEditor state detail)
@@ -855,6 +1569,7 @@ renderDossierTopStrip detail =
             [ HH.text "next ›" ]
         ]
     , renderViewSwitcher currentKind
+    , renderPinButton detail.id (Array.elem "pinned" detail.tags)
     , HH.button
         [ HP.class_ (H.ClassName "dossier-close")
         , HE.onClick \_ -> CloseDetail
@@ -1055,6 +1770,228 @@ marginaliaSection label body =
     , HH.div [ HP.class_ (H.ClassName "marginalia-body") ] [ body ]
     ]
 
+-- =============================================================================
+-- Status State-Machine widget (project sierra-lima-tango-xray / 181)
+-- =============================================================================
+-- |
+-- | A visualisation of the project-status lifecycle DAG, rendered as an ASCII
+-- | diagram inside a <pre> block and styled as a Victorian newspaper advert.
+-- | Three visual states per pill: current (reverse-video), reachable (bold
+-- | ink), unreachable (faded). Arrows are drawn only from the current state
+-- | outward — the *absence* of arrows to a pill is what signals "can't get
+-- | there from here", per the project's brief.
+-- |
+-- | **Implementation**: the diagram is a 13×41 character grid. A `baseSMGrid`
+-- | has the 8 pill boxes pre-drawn as literal text (borders + labels). For a
+-- | given current status, `smArrowsFor` emits a list of per-char stamps for
+-- | the valid outgoing transitions; `smApplyStamps` overlays those on the
+-- | grid. The rendered <pre> splits label rows into text chunks + styled
+-- | pill spans so each pill can be clicked and individually styled.
+-- |
+-- | **v1 coverage**: 15 of the 22 directed edges render clean arrows. The
+-- | remaining 7 (idea→defunct, someday→{dormant,defunct}, blocked→{dormant,
+-- | defunct}, defunct→{idea,someday}) are long multi-turn paths that would
+-- | clash with pill bodies; for those, the target pill's ss-reachable
+-- | underline alone signals reachability. See project 181 notes.
+
+-- | Status → the 7-char padded display string. Uniform width means uniform
+-- | pill geometry, so arrows land at predictable offsets without layout maths.
+padStatusLabel :: Status -> String
+padStatusLabel = case _ of
+  Idea    -> "idea   "
+  Someday -> "someday"
+  Active  -> "active "
+  Dormant -> "dormant"
+  Blocked -> "blocked"
+  Done    -> "done   "
+  Defunct -> "defunct"
+  Evolved -> "evolved"
+
+-- | Given the project's current status, classify any other status as
+-- | current / reachable / unreachable. Drives the CSS class on each pill.
+classifyStatus :: Status -> Status -> String
+classifyStatus current s
+  | current == s                         = "ss-current"
+  | Array.elem s (nextStatuses current)  = "ss-reachable"
+  | otherwise                            = "ss-unreachable"
+
+-- | A single-character stamp onto the diagram grid. `ch` is a 1-codepoint
+-- | string (all the chars we use — box-drawing, arrows, corners — live in
+-- | the BMP, so 1 UTF-16 code unit each).
+type SMStamp = { row :: Int, col :: Int, ch :: String }
+
+smStamp :: Int -> Int -> String -> SMStamp
+smStamp r c ch = { row: r, col: c, ch }
+
+-- | Stamps for a horizontal `─` run, inclusive of both ends.
+smHDashes :: Int -> Int -> Int -> Array SMStamp
+smHDashes row fromCol toCol =
+  map (\c -> smStamp row c "─") (Array.range fromCol toCol)
+
+-- | Stamps for a vertical `│` run, inclusive of both ends.
+smVBars :: Int -> Int -> Int -> Array SMStamp
+smVBars col fromRow toRow =
+  map (\r -> smStamp r col "│") (Array.range fromRow toRow)
+
+-- | Horizontal arrow pointing right: `─...─→` from fromCol to toCol.
+smHArrowRight :: Int -> Int -> Int -> Array SMStamp
+smHArrowRight row fromCol toCol =
+  smHDashes row fromCol (toCol - 1) <> [ smStamp row toCol "→" ]
+
+-- | Horizontal arrow pointing left: `←─...─` from fromCol to toCol.
+smHArrowLeft :: Int -> Int -> Int -> Array SMStamp
+smHArrowLeft row fromCol toCol =
+  [ smStamp row fromCol "←" ] <> smHDashes row (fromCol + 1) toCol
+
+-- | Per-edge arrow design. Every edge from `nextStatuses` should have a case;
+-- | edges that would need a visually ugly long route return [] and let the
+-- | target pill's underline carry the reachability signal alone.
+smEdge :: Status -> Status -> Array SMStamp
+smEdge from to = case from, to of
+
+  -- from Idea (top-left)
+  Idea, Someday -> smHArrowRight 1 11 29
+  Idea, Active  -> [ smStamp 3 10 "│", smStamp 4 10 "╰" ]
+                   <> smHDashes 4 11 13
+                   <> [ smStamp 4 14 "→" ]
+  Idea, Dormant -> [ smStamp 3 5 "│", smStamp 4 5 "↓" ]
+  Idea, Defunct -> []  -- long V through dormant's column, skipped
+
+  -- from Someday (top-right)
+  Someday, Idea    -> smHArrowLeft 1 11 29
+  Someday, Active  -> [ smStamp 3 30 "│", smStamp 4 30 "╯" ]
+                      <> smHDashes 4 27 29
+                      <> [ smStamp 4 26 "←" ]
+  Someday, Dormant -> []  -- cross-grid diagonal, skipped
+  Someday, Defunct -> []  -- biggest diagonal, skipped
+
+  -- from Active (hub)
+  Active, Done    -> [ smStamp 8 20 "│", smStamp 9 20 "↓" ]
+  Active, Dormant -> [ smStamp 6 11 "←" ] <> smHDashes 6 12 14
+  Active, Blocked -> smHDashes 6 26 28 <> [ smStamp 6 29 "→" ]
+  Active, Defunct -> [ smStamp 8 15 "│", smStamp 9 15 "╯" ]
+                     <> smHDashes 9 12 14
+                     <> [ smStamp 9 11 "←" ]
+  Active, Evolved -> [ smStamp 8 25 "│", smStamp 9 25 "╰" ]
+                     <> smHDashes 9 26 28
+                     <> [ smStamp 9 29 "→" ]
+
+  -- from Dormant (middle-left)
+  Dormant, Active  -> smHDashes 6 11 13 <> [ smStamp 6 14 "→" ]
+  Dormant, Someday -> [ smStamp 4 10 "│", smStamp 3 10 "╰" ]
+                      <> smHDashes 3 11 28
+                      <> [ smStamp 3 29 "→" ]
+  Dormant, Defunct -> [ smStamp 8 5 "│", smStamp 9 5 "↓" ]
+
+  -- from Blocked (middle-right)
+  Blocked, Active  -> [ smStamp 6 26 "←" ] <> smHDashes 6 27 29
+  Blocked, Dormant -> []  -- horizontal through active, skipped
+  Blocked, Defunct -> []  -- diagonal across, skipped
+
+  -- from Done (bottom-center)
+  Done, Active -> [ smStamp 8 20 "↑", smStamp 9 20 "│" ]
+
+  -- from Defunct (bottom-left)
+  Defunct, Idea    -> []  -- long V up through dormant, skipped
+  Defunct, Someday -> []  -- biggest diagonal, skipped
+
+  -- Evolved is terminal
+  _, _ -> []
+
+smArrowsFor :: Status -> Array SMStamp
+smArrowsFor current = Array.concatMap (smEdge current) (nextStatuses current)
+
+-- | 13 × 41 base grid: 8 pills drawn as literal text, spaces everywhere else.
+-- | Arrow stamps overlay onto this; never onto the pill label regions, which
+-- | keeps the ASCII alignment tight when label spans replace them at render.
+baseSMGrid :: Array String
+baseSMGrid =
+  [ "┌─────────┐                   ┌─────────┐"  --  0
+  , "│ idea    │                   │ someday │"  --  1 (label row)
+  , "└─────────┘                   └─────────┘"  --  2
+  , "                                         "  --  3
+  , "                                         "  --  4
+  , "┌─────────┐    ┌─────────┐    ┌─────────┐"  --  5
+  , "│ dormant │    │ active  │    │ blocked │"  --  6 (label row)
+  , "└─────────┘    └─────────┘    └─────────┘"  --  7
+  , "                                         "  --  8
+  , "                                         "  --  9
+  , "┌─────────┐    ┌─────────┐    ┌─────────┐"  -- 10
+  , "│ defunct │    │ done    │    │ evolved │"  -- 11 (label row)
+  , "└─────────┘    └─────────┘    └─────────┘"  -- 12
+  ]
+
+-- | Overlay each stamp's char at (row, col) in the grid. Stamps applied in
+-- | order; later stamps win on collision (none should collide in practice).
+smApplyStamps :: Array String -> Array SMStamp -> Array String
+smApplyStamps grid stamps = Array.foldl applyOne grid stamps
+  where
+  applyOne :: Array String -> SMStamp -> Array String
+  applyOne g s = fromMaybe g do
+    row <- Array.index g s.row
+    let before = String.take s.col row
+    let after  = String.drop (s.col + 1) row
+    Array.updateAt s.row (before <> s.ch <> after) g
+
+-- | Render a label row: walk `labels` in column order, emitting text between
+-- | labels and a clickable pill span for each. `slice` extracts the row's
+-- | current char range, so any arrow stamps that landed in the inter-pill
+-- | gaps are preserved.
+smLabelRow
+  :: forall m
+   . Int
+  -> Status
+  -> Array (Tuple Int Status)
+  -> String
+  -> Array (H.ComponentHTML Action () m)
+smLabelRow projectId current labels row = go 0 labels
+  where
+  go cursor rest = case Array.uncons rest of
+    Nothing -> [ HH.text (String.drop cursor row <> "\n") ]
+    Just { head: tup, tail } ->
+      let
+        col    = fst tup
+        status = snd tup
+        cls    = classifyStatus current status
+        base   = [ HP.class_ (H.ClassName ("sm-pill " <> cls)) ]
+        attrs  = if cls == "ss-reachable"
+                 then base <> [ HE.onClick \e -> QuickStatusChange projectId status e ]
+                 else base
+      in
+        [ HH.text (slice cursor (col - 1) row)
+        , HH.span attrs [ HH.text (padStatusLabel status) ]
+        ]
+        <> go (col + 7) tail
+  slice :: Int -> Int -> String -> String
+  slice fromCol toCol s
+    | toCol < fromCol = ""
+    | otherwise = String.take (toCol - fromCol + 1) (String.drop fromCol s)
+
+smRenderRow
+  :: forall m
+   . Int -> Status -> Int -> String
+  -> Array (H.ComponentHTML Action () m)
+smRenderRow projectId current idx row = case idx of
+  1  -> smLabelRow projectId current [Tuple 2 Idea, Tuple 32 Someday] row
+  6  -> smLabelRow projectId current [Tuple 2 Dormant, Tuple 17 Active, Tuple 32 Blocked] row
+  11 -> smLabelRow projectId current [Tuple 2 Defunct, Tuple 17 Done, Tuple 32 Evolved] row
+  _  -> [ HH.text (row <> "\n") ]
+
+renderStatusMachine :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderStatusMachine detail =
+  let
+    current    = detail.status
+    stampedGrid = smApplyStamps baseSMGrid (smArrowsFor current)
+    rows       = Array.concat
+                 (Array.mapWithIndex
+                   (\idx row -> smRenderRow detail.id current idx row)
+                   stampedGrid)
+  in HH.div [ HP.class_ (H.ClassName "state-machine-advert") ]
+    [ HH.div [ HP.class_ (H.ClassName "sm-title") ]
+        [ HH.text "Status!" ]
+    , HH.pre [ HP.class_ (H.ClassName "sm-diagram") ] rows
+    ]
+
 -- | Status editor: shows the current status, clicking reveals a row of
 -- | valid-transition pills (enforces the lifecycle DAG via nextStatuses).
 renderStatusEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
@@ -1123,11 +2060,12 @@ renderIdentifierBlock detail =
 -- | Tags editor: existing tags + "+ add" to open an inline input.
 renderTagsEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
 renderTagsEditor state detail =
-  HH.div [ HP.class_ (H.ClassName "tags-editor") ]
-    [ if Array.null detail.tags
+  let visibleTags = Array.filter (_ /= "pinned") detail.tags
+  in HH.div [ HP.class_ (H.ClassName "tags-editor") ]
+    [ if Array.null visibleTags
         then HH.span [ HP.class_ (H.ClassName "tags-empty") ] [ HH.text "—" ]
         else HH.div [ HP.class_ (H.ClassName "tag-pill-row") ]
-          (map (\t -> HH.span [ HP.class_ (H.ClassName "tag-pill") ] [ HH.text t ]) detail.tags)
+          (map (\t -> HH.span [ HP.class_ (H.ClassName "tag-pill") ] [ HH.text t ]) visibleTags)
     , if state.dossierTagOpen
         then HH.form
           [ HP.class_ (H.ClassName "tag-add-form")
@@ -1159,10 +2097,7 @@ renderBlogEditor state detail =
   HH.div [ HP.class_ (H.ClassName "blog-editor") ]
     [ HH.div [ HP.class_ (H.ClassName "blog-status-row") ]
         (map (renderBlogStatusButton detail.blogStatus) allBlogStatuses)
-    , case detail.blogStatus of
-        Just BlogDrafted   -> renderBlogContentEditor state detail
-        Just BlogPublished -> renderBlogContentEditor state detail
-        _                  -> HH.text ""
+    , renderBlogContentEditor state detail
     ]
 
 renderBlogStatusButton :: forall m. Maybe BlogStatus -> BlogStatus -> H.ComponentHTML Action () m
@@ -1178,36 +2113,78 @@ renderBlogStatusButton currentStatus status =
     ]
     [ HH.text (blogStatusLabel status) ]
 
+-- | Read-only preview of the draft plus action buttons. The textarea is
+-- | gone: drafts are edited in VS Code (click "Edit in VS Code") and the
+-- | file on disk is the source of truth. "Reload" refetches the project
+-- | after the user saves in the editor.
 renderBlogContentEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
-renderBlogContentEditor state detail =
-  case state.dossierEditField of
-    Just FBlogContent ->
-      HH.div [ HP.class_ (H.ClassName "blog-content-edit") ]
-        [ HH.textarea
-            [ HP.class_ (H.ClassName "blog-content-input")
-            , HP.value state.dossierEditValue
-            , HP.autofocus true
-            , HP.rows 12
-            , HP.placeholder "# Heading\n\nMarkdown body…"
-            , HE.onValueInput DossierSetEditValue
-            , HE.onBlur \_ -> DossierCommitEdit
+renderBlogContentEditor _state detail =
+  let mContent = detail.blogContent
+      hasContent = case mContent of
+        Just s  -> not (String.null s)
+        Nothing -> false
+      editLabel = if hasContent then "Edit in VS Code" else "Start draft in VS Code"
+  in HH.div [ HP.class_ (H.ClassName "blog-content-view") ]
+    [ HH.div [ HP.class_ (H.ClassName "blog-actions-row") ]
+        [ HH.button
+            [ HP.class_ (H.ClassName "blog-action-btn")
+            , HE.onClick \_ -> OpenBlogInVSCode detail.id
+            , HP.title "Open the draft file in VS Code"
             ]
-        , HH.div [ HP.class_ (H.ClassName "dossier-edit-hint") ]
-            [ HH.text "Blur to save · Esc to cancel" ]
+            [ HH.text editLabel ]
+        , HH.button
+            [ HP.class_ (H.ClassName "blog-action-btn secondary")
+            , HE.onClick \_ -> ReloadBlogDraft detail.id
+            , HP.title "Re-read the draft file from disk"
+            ]
+            [ HH.text "Reload" ]
         ]
-    _ ->
-      let currentContent = fromMaybe "" detail.blogContent
-      in HH.div
-        [ HP.class_ (H.ClassName "blog-content editable")
-        , HE.onClick \_ -> DossierStartEdit FBlogContent currentContent
-        , HP.title "Click to edit blog post"
-        ]
-        [ if String.null currentContent
-            then HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
-              [ HH.text "No draft yet. Click to start writing." ]
-            else HH.pre [ HP.class_ (H.ClassName "blog-content-body") ]
-              [ HH.text currentContent ]
-        ]
+    , case mContent of
+        Nothing ->
+          HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
+            [ HH.text "No draft yet. Click ‘Start draft in VS Code’." ]
+        Just "" ->
+          HH.p [ HP.class_ (H.ClassName "blog-content-empty") ]
+            [ HH.text "Draft file is empty." ]
+        Just body ->
+          HH.pre [ HP.class_ (H.ClassName "blog-content-body") ]
+            [ HH.text body ]
+    , renderBlogImageStrip detail
+    ]
+
+-- | Horizontal strip of image thumbnails from the project's attachments.
+-- | Click a thumbnail to copy `![alt](url)` to the clipboard so it can
+-- | be pasted into the draft in VS Code. Rendered only when the project
+-- | actually has image attachments.
+renderBlogImageStrip :: forall m. ProjectDetail -> H.ComponentHTML Action () m
+renderBlogImageStrip detail =
+  let images = Array.filter isImageAttachment detail.attachments
+  in if Array.null images
+    then HH.text ""
+    else HH.div [ HP.class_ (H.ClassName "blog-image-strip") ]
+      [ HH.div [ HP.class_ (H.ClassName "blog-image-strip-label") ]
+          [ HH.text "Images — click to copy markdown" ]
+      , HH.div [ HP.class_ (H.ClassName "blog-image-strip-row") ]
+          (map renderBlogImageThumb images)
+      ]
+
+renderBlogImageThumb :: forall m. Attachment -> H.ComponentHTML Action () m
+renderBlogImageThumb att = case att.url of
+  Nothing -> HH.text ""
+  Just url ->
+    let alt = fromMaybe att.filename att.description
+        md  = "![" <> alt <> "](" <> url <> ")"
+    in HH.button
+      [ HP.class_ (H.ClassName "blog-image-thumb")
+      , HE.onClick \_ -> CopyImageMarkdown md
+      , HP.title ("Copy " <> md)
+      , HP.type_ HP.ButtonButton
+      ]
+      [ HH.img
+          [ HP.src url
+          , HP.alt alt
+          ]
+      ]
 
 -- | Parent block: shows the parent project (clickable) or "(none)".
 renderParentBlock :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
@@ -1280,11 +2257,29 @@ renderHistoryBlock detail =
 -- | External links: repo, url, source path. Each click-to-edit.
 renderExternalEditor :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
 renderExternalEditor state detail =
-  HH.dl [ HP.class_ (H.ClassName "external-dl") ]
-    [ renderExternalField state FRepo "repo" detail.repo
-    , renderExternalField state FSourceUrl "url" detail.sourceUrl
-    , renderExternalField state FSourcePath "path" detail.sourcePath
+  HH.div_
+    [ HH.dl [ HP.class_ (H.ClassName "external-dl") ]
+        [ renderExternalField state FRepo "repo" detail.repo
+        , renderExternalField state FSourceUrl "url" detail.sourceUrl
+        , renderExternalField state FSourcePath "path" detail.sourcePath
+        ]
+    , case detail.sourcePath of
+        Just sp | not (String.null sp) ->
+          HH.div [ HP.class_ (H.ClassName "open-in-buttons") ]
+            [ openBtn "finder" "Finder"
+            , openBtn "vscode" "VS Code"
+            , openBtn "iterm" "iTerm"
+            ]
+        _ -> HH.text ""
     ]
+  where
+  openBtn app label =
+    HH.button
+      [ HP.class_ (H.ClassName "open-in-btn")
+      , HE.onClick \_ -> OpenInApp app
+      , HP.title ("Open in " <> label)
+      ]
+      [ HH.text label ]
 
 renderExternalField
   :: forall m. State -> EditableField -> String -> Maybe String
@@ -1652,6 +2647,10 @@ handleAction = case _ of
     { emitter: keyEmitter, listener: keyListener } <- liftEffect HS.create
     _ <- liftEffect $ onKeyDown_ (\ke -> HS.notify keyListener (KeyDown ke))
     void $ H.subscribe keyEmitter
+    -- Subscribe to paste events (for blog asset upload)
+    { emitter: pasteEmitter, listener: pasteListener } <- liftEffect HS.create
+    _ <- liftEffect $ onPaste_ (\imgData -> HS.notify pasteListener (LettersPasteImage imgData))
+    void $ H.subscribe pasteEmitter
     -- Read initial hash for deep linking
     hash <- liftEffect getHash_
     when (not (String.null hash)) do
@@ -1681,9 +2680,35 @@ handleAction = case _ of
     mStats <- liftAff API.fetchStats
     H.modify_ \s -> s { stats = mStats }
 
+  SetSection mSec -> do
+    H.modify_ \s -> s { section = mSec }
+    case mSec of
+      Just "finance" -> handleAction LoadSubscriptions
+      Just "letters" -> handleAction LoadBlogDrafts
+      Just "weather" -> handleAction LoadWeather
+      _ -> pure unit
+
+  LoadSubscriptions -> do
+    mResp <- liftAff API.fetchSubscriptions
+    case mResp of
+      Nothing -> pure unit
+      Just resp ->
+        H.modify_ \s -> s
+          { subscriptions = resp.subscriptions
+          , subscriptionMonthlyBurn = resp.monthlyBurn
+          }
+
+  LoadBlogDrafts -> do
+    mResp <- liftAff API.fetchBlogDrafts
+    case mResp of
+      Nothing -> pure unit
+      Just resp ->
+        H.modify_ \s -> s { blogDrafts = resp.drafts }
+
   SetFilterDomain val -> do
     let mDomain = if String.null val then Nothing else Just val
-    H.modify_ \s -> s { filterDomain = mDomain }
+    -- Switching to a domain clears the Finance section
+    H.modify_ \s -> s { filterDomain = mDomain, section = Nothing }
     handleAction LoadProjects
 
   SetFilterStatus val -> do
@@ -1874,6 +2899,94 @@ handleAction = case _ of
           handleAction LoadAllProjects
           handleAction LoadProjects
 
+  OpenBlogInVSCode projectId -> do
+    res <- liftAff $ API.openBlogInVSCode projectId
+    case res of
+      Left err ->
+        H.modify_ \s -> s { error = Just ("Open in VS Code failed: " <> err) }
+      Right _ -> do
+        -- Refetch so a freshly-created template file shows up in the preview.
+        mNew <- liftAff $ API.fetchProject projectId
+        H.modify_ \s -> s { selectedProject = mNew, error = Nothing }
+
+  OpenInApp app -> do
+    st <- H.get
+    case st.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        res <- liftAff $ API.openInApp detail.id app
+        case res of
+          Left err ->
+            H.modify_ \s -> s { error = Just ("Open in " <> app <> " failed: " <> err) }
+          Right _ -> pure unit
+
+  ReloadBlogDraft projectId -> do
+    mNew <- liftAff $ API.fetchProject projectId
+    H.modify_ \s -> s { selectedProject = mNew }
+
+  CopyImageMarkdown md ->
+    liftEffect $ copyToClipboard md
+
+  LettersSetStatus projectId newStatus -> do
+    let input = emptyProjectInput { blogStatus = newStatus }
+    _ <- liftAff $ API.updateProject projectId input
+    -- Refresh the letters table
+    handleAction LoadBlogDrafts
+
+  LettersToggleExpand projectId _slug -> do
+    st <- H.get
+    if st.lettersExpanded == Just projectId
+      then H.modify_ \s -> s { lettersExpanded = Nothing, lettersAssets = [] }
+      else do
+        assets <- liftAff $ API.fetchBlogAssets projectId
+        H.modify_ \s -> s { lettersExpanded = Just projectId, lettersAssets = assets }
+
+  LettersPasteImage imgData -> do
+    st <- H.get
+    case st.lettersExpanded of
+      Nothing -> pure unit
+      Just projectId -> do
+        H.modify_ \s -> s { lettersUploading = true }
+        result <- liftAff $ API.uploadBlogAsset projectId imgData.filename imgData.base64
+        case result of
+          Left err ->
+            H.modify_ \s -> s { lettersUploading = false, error = Just ("Upload failed: " <> err) }
+          Right info -> do
+            liftEffect $ copyToClipboard info.markdown
+            -- Refresh assets list
+            assets <- liftAff $ API.fetchBlogAssets projectId
+            H.modify_ \s -> s { lettersUploading = false, lettersAssets = assets }
+
+  LettersCopyMarkdown md ->
+    liftEffect $ copyToClipboard md
+
+  ShowActivity -> do
+    liftEffect $ setHash_ "activity"
+    H.modify_ \s -> s { view = ActivityView, activityLoading = true }
+    rows <- liftAff API.fetchActivity
+    H.modify_ \s -> s { activityRows = rows, activityLoading = false }
+
+  LoadActivity -> do
+    H.modify_ \s -> s { activityLoading = true }
+    rows <- liftAff API.fetchActivity
+    H.modify_ \s -> s { activityRows = rows, activityLoading = false }
+
+  TogglePin projectId currentlyPinned mouseEvent -> do
+    liftEffect $ stopPropagation_ (toEvent mouseEvent)
+    if currentlyPinned
+      then liftAff $ API.removeTag projectId "pinned"
+      else liftAff $ API.addTag projectId "pinned"
+    -- Refresh whichever view is current so the UI reflects the change.
+    state <- H.get
+    handleAction LoadAllProjects
+    case state.view of
+      ActivityView -> handleAction LoadActivity
+      ListView     -> handleAction LoadProjects
+      DetailView pid -> do
+        mDetail <- liftAff $ API.fetchProject pid
+        H.modify_ \s -> s { selectedProject = mDetail }
+      CreateView -> pure unit
+
   ClearFilters -> do
     liftEffect $ setHash_ ""
     H.modify_ \s -> s
@@ -1973,6 +3086,7 @@ handleAction = case _ of
           mDetail <- liftAff $ API.fetchProject pid
           H.modify_ \s -> s { selectedProject = mDetail }
         Just CreateView -> handleAction ShowCreateForm
+        Just ActivityView -> handleAction ShowActivity
         Nothing -> pure unit
 
   AutoSave _ -> pure unit
@@ -2090,6 +3204,94 @@ handleAction = case _ of
         ListView -> handleListViewKey ke state
         DetailView _ -> handleDetailViewKey ke
         CreateView -> handleCreateViewKey ke
+        -- Activity page: no bespoke shortcuts yet. Escape returns to list.
+        ActivityView -> when (ke.key == "Escape") (handleAction ClearFilters)
+
+  -- =========================================================================
+  -- Weather (Raker UI)
+  -- =========================================================================
+
+  LoadWeather -> do
+    H.modify_ \s -> s { weatherLoading = true }
+    cutoffStr <- liftEffect getWeatherCutoff_
+    let cutoff = if String.null cutoffStr then Nothing else Just cutoffStr
+    -- 1. Pending summary updates: descriptions containing the divider.
+    allProjects <- liftAff $ API.fetchProjects Nothing Nothing Nothing Nothing Nothing
+    let pending = Array.mapMaybe pendingFromProject allProjects
+    -- 2. Active-project details for notes digest + quick-wins. Sequential fetch
+    --    is fine for ~30 projects; converge with a server-side endpoint later.
+    let activeIds = map _.id (Array.filter (\p -> p.status == Active) allProjects)
+    details <- traverse (liftAff <<< API.fetchProject) activeIds
+    let validDetails = Array.mapMaybe identity details
+    let notesGroups = Array.mapMaybe (notesGroupFromDetail cutoff) validDetails
+    let quickWins = Array.concatMap quickWinsFromDetail validDetails
+    H.modify_ \s -> s
+      { weatherPending = pending
+      , weatherNotes = notesGroups
+      , weatherQuickWins = quickWins
+      , weatherCutoff = cutoff
+      , weatherLoading = false
+      }
+
+  WeatherApprove projectId -> do
+    state <- H.get
+    case Array.find (\p -> p.projectId == projectId) state.weatherPending of
+      Nothing -> pure unit
+      Just p -> do
+        let input = emptyProjectInput { description = p.newSummary }
+        _ <- liftAff $ API.updateProject projectId input
+        handleAction LoadWeather
+
+  WeatherReject projectId -> do
+    state <- H.get
+    case Array.find (\p -> p.projectId == projectId) state.weatherPending of
+      Nothing -> pure unit
+      Just p -> do
+        let input = emptyProjectInput { description = p.oldSummary }
+        _ <- liftAff $ API.updateProject projectId input
+        handleAction LoadWeather
+
+  WeatherStartEdit projectId draft ->
+    H.modify_ \s -> s { weatherEditingId = Just projectId, weatherEditDraft = draft }
+
+  WeatherSetEditDraft draft ->
+    H.modify_ \s -> s { weatherEditDraft = draft }
+
+  WeatherSubmitEdit projectId -> do
+    state <- H.get
+    let trimmed = String.trim state.weatherEditDraft
+    when (not (String.null trimmed)) do
+      let input = emptyProjectInput { description = trimmed }
+      _ <- liftAff $ API.updateProject projectId input
+      H.modify_ \s -> s { weatherEditingId = Nothing, weatherEditDraft = "" }
+      handleAction LoadWeather
+
+  WeatherCancelEdit ->
+    H.modify_ \s -> s { weatherEditingId = Nothing, weatherEditDraft = "" }
+
+  WeatherSetQuickWinDraft draft ->
+    H.modify_ \s -> s { weatherQuickWinDraft = draft }
+
+  WeatherSubmitQuickWins -> do
+    state <- H.get
+    let parsed = parseQuickWinLines state.weatherQuickWinDraft
+    -- File each as an author=quick-win marker note. Sequential is fine — at
+    -- most a handful of lines per review.
+    traverse_
+      (\qw -> liftAff $ API.addNoteAs "quick-win" qw.projectId qw.content)
+      parsed
+    H.modify_ \s -> s { weatherQuickWinDraft = "" }
+    handleAction LoadWeather
+
+  WeatherDidQuickWin noteId -> do
+    _ <- liftAff $ API.deleteNote noteId
+    handleAction LoadWeather
+
+  WeatherAdvanceCutoff -> do
+    nowStr <- liftEffect nowIso_
+    liftEffect $ setWeatherCutoff_ nowStr
+    H.modify_ \s -> s { weatherCutoff = Just nowStr }
+    handleAction LoadWeather
 
 -- =============================================================================
 -- Helpers
@@ -2108,8 +3310,116 @@ buildInput state =
   , statusReason: ""
   , preferredView: ""
   , blogStatus: ""
-  , blogContent: ""
   }
+
+-- =============================================================================
+-- Weather helpers — pure functions over Project / ProjectDetail data
+-- =============================================================================
+
+-- | Detect the divider used in the living-summaries protocol. The CLI writes
+-- | "<new>\n\n---\n<old>"; tolerate the simpler "<new>\n---\n<old>" too.
+weatherDividerPatterns :: Array String.Pattern
+weatherDividerPatterns =
+  [ String.Pattern "\n\n---\n\n"
+  , String.Pattern "\n\n---\n"
+  , String.Pattern "\n---\n"
+  ]
+
+-- | Split a description on the first matching divider, return the two halves
+-- | trimmed. Nothing if no divider is present.
+splitOnDivider :: String -> Maybe { newSummary :: String, oldSummary :: String }
+splitOnDivider s = go weatherDividerPatterns
+  where
+  go = case _ of
+    [] -> Nothing
+    pats ->
+      case Array.uncons pats of
+        Nothing -> Nothing
+        Just { head: pat, tail: rest } -> case String.indexOf pat s of
+          Nothing -> go rest
+          Just _ ->
+            let parts = String.split pat s
+            in case Array.uncons parts of
+              Just { head, tail } | not (Array.null tail) -> Just
+                { newSummary: String.trim head
+                , oldSummary: String.trim (String.joinWith (asPatternString pat) tail)
+                }
+              _ -> Nothing
+
+  asPatternString :: String.Pattern -> String
+  asPatternString (String.Pattern p) = p
+
+pendingFromProject :: Project -> Maybe PendingSummary
+pendingFromProject p = case p.description of
+  Nothing -> Nothing
+  Just d -> case splitOnDivider d of
+    Nothing -> Nothing
+    Just { newSummary, oldSummary } -> Just
+      { projectId: p.id
+      , projectName: p.name
+      , projectSlug: p.slug
+      , status: p.status
+      , newSummary: newSummary
+      , oldSummary: oldSummary
+      }
+
+-- | A note's createdAt is later than the cutoff. Strings compare correctly
+-- | when both are ISO timestamps in the same timezone convention.
+isAfterCutoff
+  :: Maybe String
+  -> { id :: Int, content :: String, author :: Maybe String, createdAt :: Maybe String }
+  -> Boolean
+isAfterCutoff cutoff n = case cutoff, n.createdAt of
+  _, Nothing -> false
+  Nothing, Just _ -> true
+  Just c, Just c' -> c' > c
+
+notesGroupFromDetail :: Maybe String -> ProjectDetail -> Maybe WeatherNotesGroup
+notesGroupFromDetail cutoff d =
+  let recent = Array.filter (isAfterCutoff cutoff) d.notes
+  in if Array.null recent
+       then Nothing
+       else Just
+         { projectId: d.id
+         , projectName: d.name
+         , projectSlug: d.slug
+         , notes: recent
+         }
+
+quickWinsFromDetail :: ProjectDetail -> Array QuickWinNote
+quickWinsFromDetail d = Array.mapMaybe toQuickWin d.notes
+  where
+  toQuickWin n = case n.author of
+    Just "quick-win" -> Just
+      { noteId: n.id
+      , projectId: d.id
+      , projectName: d.name
+      , content: n.content
+      , createdAt: n.createdAt
+      }
+    _ -> Nothing
+
+-- | Parse the multi-line draft from the quick-wins textarea. Each non-blank
+-- | line is "<project-id>: <one-liner>"; lines that don't parse are silently
+-- | dropped (the user sees them stay in the textarea — should reword).
+parseQuickWinLines :: String -> Array { projectId :: Int, content :: String }
+parseQuickWinLines draft =
+  Array.mapMaybe parseLine (String.split (String.Pattern "\n") draft)
+  where
+  parseLine raw =
+    let trimmed = String.trim raw
+    in if String.null trimmed then Nothing
+       else case String.indexOf (String.Pattern ":") trimmed of
+         Nothing -> Nothing
+         Just _ ->
+           case Array.uncons (String.split (String.Pattern ":") trimmed) of
+             Nothing -> Nothing
+             Just { head, tail } -> case Int.fromString (String.trim head) of
+               Nothing -> Nothing
+               Just pid ->
+                 let content = String.trim (String.joinWith ":" tail)
+                 in if String.null content then Nothing
+                    else Just { projectId: pid, content }
 
 -- | A minimal ProjectInput with all fields empty. Used for quick status changes.
 emptyProjectInput :: ProjectInput
@@ -2125,7 +3435,6 @@ emptyProjectInput =
   , statusReason: ""
   , preferredView: ""
   , blogStatus: ""
-  , blogContent: ""
   }
 
 -- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
@@ -2144,7 +3453,6 @@ detailToInput d =
   , statusReason: ""
   , preferredView: ""   -- blank means "don't update" (see buildUpdateBody)
   , blogStatus: ""      -- blank means "don't update"
-  , blogContent: ""     -- blank means "don't update"
   }
 
 -- | Copy a detail into a ProjectInput with a single field overridden.
@@ -2158,7 +3466,6 @@ detailToInputWith field value d =
     FRepo        -> base { repo = value }
     FSourceUrl   -> base { sourceUrl = value }
     FSourcePath  -> base { sourcePath = value }
-    FBlogContent -> base { blogContent = value }
 
 -- | Cycle the currently-selected project in the detail panel by `delta`
 -- | (1 for next, -1 for previous), wrapping around the visible project list.
@@ -2362,11 +3669,13 @@ viewToHash = case _ of
   ListView -> ""
   DetailView pid -> "project/" <> show pid
   CreateView -> "new"
+  ActivityView -> "activity"
 
 parseHash :: String -> Maybe View
 parseHash hash = case hash of
   "" -> Just ListView
   "new" -> Just CreateView
+  "activity" -> Just ActivityView
   _ ->
     if String.take 8 hash == "project/" then
       Int.fromString (String.drop 8 hash) <#> DetailView

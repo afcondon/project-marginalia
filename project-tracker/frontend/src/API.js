@@ -45,9 +45,82 @@ export const buildCreateBody = (input) => {
 export const buildNoteBody = (content) =>
   JSON.stringify({ content, author: "human" });
 
+// Variant of buildNoteBody that lets the caller pick the author.
+// Used by the Weather section to file `author: "quick-win"` marker notes.
+export const buildNoteBodyAs = (author) => (content) =>
+  JSON.stringify({ content, author });
+
 // Build JSON body for POST /api/projects/:id/tags
 export const buildTagBody = (tag) =>
   JSON.stringify({ tag });
+
+// Parse the subscription list response. Returns a plain JS object that
+// PureScript can destructure via its SubscriptionResponse row type.
+export const parseSubscriptionResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      subscriptions: (d.subscriptions || []).map(s => ({
+        id: s.id || 0,
+        name: s.name || '',
+        category: s.category || '',
+        amount: s.amount || 0,
+        currency: s.currency || 'EUR',
+        frequency: s.frequency || 'monthly',
+        nextDue: s.nextDue || '',
+        autoRenew: s.autoRenew !== false,
+        notes: s.notes || '',
+        projectId: s.projectId || 0,
+        active: s.active !== false,
+      })),
+      count: d.count || 0,
+      monthlyBurn: d.monthlyBurn || 0,
+    };
+  } catch {
+    return { subscriptions: [], count: 0, monthlyBurn: 0 };
+  }
+};
+
+// Parse the blog drafts response (Letters section).
+export const parseBlogDraftsResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return {
+      drafts: (d.drafts || []).map(r => ({
+        id: r.id || 0,
+        slug: r.slug || '',
+        name: r.name || '',
+        domain: r.domain || '',
+        blogStatus: r.blogStatus || '',
+        filename: r.filename || '',
+        wordCount: r.wordCount || 0,
+        hasFile: r.hasFile === true,
+      })),
+      count: d.count || 0,
+    };
+  } catch {
+    return { drafts: [], count: 0 };
+  }
+};
+
+// Parse the blog assets response.
+export const parseBlogAssetsResponse_ = (str) => {
+  try {
+    const d = JSON.parse(str);
+    return (d.assets || []).map(a => ({
+      filename: a.filename || '',
+      size: a.size || 0,
+      url: a.url || '',
+      markdown: a.markdown || '',
+    }));
+  } catch {
+    return [];
+  }
+};
+
+// Build JSON body for uploading a blog asset (base64-encoded image).
+export const buildAssetUploadBody = (filename) => (data) =>
+  JSON.stringify({ filename, data });
 
 // Build JSON body for creating a child project under a parent
 export const buildChildBody = (parentId) => (name) => (domain) =>
@@ -72,6 +145,7 @@ export const buildUpdateBody = (input) => {
   if (input.statusReason) body.statusReason = input.statusReason;
   if (input.preferredView) body.preferredView = input.preferredView;
   if (input.blogStatus) body.blogStatus = input.blogStatus;
-  if (input.blogContent) body.blogContent = input.blogContent;
+  // blogContent is no longer sent from the UI: drafts live on disk and
+  // VS Code writes them directly. See BlogDrafts.purs on the server.
   return JSON.stringify(body);
 };

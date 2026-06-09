@@ -12,15 +12,30 @@ It's authoritative, fast, and structured.
 
 ## Where it runs
 
-- **API base URL**: `http://localhost:3100`
-- **Frontend**: `http://localhost:3101`
-- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb`
+- **API base URL**: `http://localhost:3100` (MBP), or `http://andrews-mac-mini:3100` over Tailscale once project #203 lands. Override with the `MARGINALIA_API` env var when running outside the canonical machine.
+- **Frontend**: same host, port `3101`.
+- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb` on whichever machine is canonical.
 
 If the API isn't responding, the tracker isn't running. Start it with:
 
 ```
 cd ~/work/afc-work/agent-teams/project-tracker && node server/run.js
 ```
+
+### Multi-host topology (project #202)
+
+The registry knows which machine each service runs on. Server entries
+have two fields used by host-aware tooling:
+
+- `host` — tagged value (`mbp` | `macmini` | `cloudflare` | `andrew-only`).
+  Stable across infrastructure swaps; consumed by SDI to decide whether
+  to spawn locally or redirect.
+- `tailscaleName` — routable address (`andrews-mac-mini`, etc.). Can
+  change when a Tailscale node is renamed or replaced.
+
+Always fill both when registering a new server (see "Writing back"
+below). The full plan and migration sequence lives at
+`project-tracker/docs/multi-host-topology.md`.
 
 ### On a different machine
 
@@ -78,9 +93,12 @@ sorted by port. Each entry has:
 - `projectId`, `projectName`, `projectSlug` — who owns it
 - `role` — `api`, `frontend`, `websocket`, `worker`, `whisper`, etc.
 - `port` — the TCP port (may be null for workers without a port)
-- `url` — canonical URL (e.g. `http://localhost:3100`)
-- `startCommand` — **polymorphic start instruction** (see below)
+- `url` — canonical URL (e.g. `http://localhost:3100` for mbp-local; `http://andrews-mac-mini:8090` for a service intended to be reached via Tailscale)
+- `startCommand` — **polymorphic start instruction** (see below). NULL when the service is managed by another launcher (e.g. DeepStar #191) — registry rows with NULL startCommand are documentation/collision-avoidance only, not actionable by SDI.
 - `description` — human-readable note
+- `host` — `mbp` | `macmini` | `cloudflare` | `andrew-only` | NULL. **Set this on every new entry** — SDI uses it to decide spawn vs. redirect.
+- `tailscaleName` — e.g. `andrews-mac-mini`. NULL for non-Tailscale-routable hosts (cloudflare, andrew-only).
+- `environment` — *legacy* — deployment style (`native`, `docker`, `cloudflare-pages`). Older rows have combined values like `mbp-native` that bundled host + style; those have been unwound by setting `host` separately, but `environment` is still populated. Don't use `environment` as a host signal in new code; use `host`.
 
 The response also includes a `collisions` object mapping any port with more
 than one claimant to a list of claimants — use this to detect conflicts.
@@ -124,6 +142,11 @@ Body: same shape as POST, partial — only include fields you want to change.
 # change status in particular you usually want the lifecycle-validated
 # agent endpoint below instead.
 #
+# parentId is nullable-aware: JSON number reparents to that project id,
+# JSON null moves the project to root (clears parent_id), missing key
+# leaves parent_id untouched. This is how the frontend and gazetteer
+# drag-to-reparent work is implemented.
+#
 # Additional updatable fields beyond the POST shape:
 #   "coverAttachmentId": 43        (int; id of an existing attachment to
 #                                    use as the hero screenshot on the
@@ -135,14 +158,24 @@ Body: same shape as POST, partial — only include fields you want to change.
 #                                    blogStatus is "drafted" or "published")
 
 POST /api/projects/:id/servers
-Body: { "role": "api", "port": 3100, "url": "http://localhost:3100",
-        "startCommand": "cd /absolute/path && node server/run.js",
-        "description": "..." }
+Body: { "role":          "api",
+        "port":          3100,
+        "url":           "http://localhost:3100",
+        "startCommand":  "cd /absolute/path && node server/run.js",
+        "description":   "...",
+        "host":          "mbp",                   # required-in-spirit; SDI keys on this
+        "tailscaleName": "andrews-macbook-pro",   # NULL ok for cloudflare / andrew-only
+        "environment":   "native"                 # optional; deployment style only
+      }
 
 DELETE /api/servers/:id
 
 POST /api/agent/projects/:id/notes
 Body: { "content": "...", "author": "claude" }
+
+DELETE /api/notes/:id
+# Idempotent — returns { "ok": true, "deleted": N } even if the row is gone.
+# No PUT endpoint; to amend a note, DELETE + POST a fresh one.
 
 POST /api/agent/projects/:id/attachments
 Body: { "filename":    "report.md",
@@ -157,6 +190,10 @@ Body: { "filename":    "report.md",
 
 POST /api/projects/:id/tags
 Body: { "tag": "library" }
+
+DELETE /api/projects/:id/tags?name=<tag>
+# Tag name in query param. Idempotent — ok whether or not the link existed.
+# The tag itself stays in the tags table; only the project→tag link is removed.
 
 POST /api/agent/projects/:id/status
 Body: { "status": "active", "reason": "optional explanation" }
@@ -258,6 +295,170 @@ for p in json.load(urllib.request.urlopen('http://localhost:3100/api/projects'))
     urllib.request.urlopen(req).read()
 ```
 
+## Living summaries — the `description` field as Claude-maintained context
+
+The `description` field is a **project summary**, not a session log.
+The test it has to pass: a Claude with no prior context, reading just
+the descriptions of all active projects, gets a faithful overview of
+the system without re-deriving it from notes, code, or git history.
+
+That means the description answers **what is this project, where does
+it stand, and where is it going next** — in timeless prose. Multi-
+paragraph is fine. Dated activity, decisions made today, problems hit,
+things deferred — those go in **notes**
+(`POST /api/agent/projects/:id/notes`), which is the dated record. The
+description is the timeless current view on top of that record.
+
+### What to write
+
+Aim for ~3–6 sentences (one paragraph) for small projects, up to three
+short paragraphs for large ones, structured roughly as:
+
+1. **What it is.** One or two sentences. Position it in the wider
+   system if relevant (parent project, sibling projects, what it
+   replaces, what it feeds into).
+2. **Current state.** What exists now — the components, the shape, the
+   key behaviours a fresh observer needs to navigate it. State, not
+   history. Don't say "added X today"; say "has X".
+3. **Near-term direction.** One sentence on what's next, if there's a
+   clear pointing.
+
+No leading dates. No "today". No "I" or "the session". No changelog
+bullets. No "Deferred:" sections — deferred work is a note, not part
+of the description.
+
+### Description vs. note — the rule of thumb
+
+If a sentence still reads naturally six months from now, it belongs in
+the description. If it only makes sense in the context of a specific
+session ("today's gap closes here", "the bug was…", "earlier we
+tried…"), it belongs in a note.
+
+#### Anti-pattern (do not write this)
+
+```
+**2026-05-04 (afternoon)** — Big Calypso UX session: 6→7 panes, sticky
+toolbar, comment-toggle, persistence dir, Cmd-N keymap…
+
+Promoted Hylograph's three sub-tabs to top-level panes; layout reflows
+over `1fr` columns…
+
+**Deferred**: pragma framework (`-- @bpm 120` declarations applied on
+▶ fire) and config persistence to `current.tidal`.
+```
+
+This is a session log. A fresh Claude learns what was done on one
+afternoon, not what Calypso *is*. If Andrew approves it as-is, the
+durable summary is destroyed and replaced by a dated changelog that
+ages out of usefulness within days.
+
+#### Good shape (write this)
+
+```
+Live-coding webapp for purerl-tidal. The floating-atelier sibling of
+Atelier (#158, PureScript Playground): cloned wholesale, then strips
+the compile pipeline and swaps the BEAM adapter for a purerl-tidal
+WebSocket adapter. Sonic output happens in the rig; the webapp
+doesn't see it.
+
+Seven side-by-side panes, each toggled by Cmd-1..Cmd-7… The topbar
+BPM widget commits via `bpm <n>` through `/eval`, which routes to
+link-spike's `/link/set-tempo` OSC handler.
+
+Near-term: pragma framework and config persistence to `current.tidal`.
+```
+
+A fresh Claude reading this knows what the project is, what shape it's
+in, and what to expect next. The session-specific stuff — *which* pane
+was added today, which bug was fixed — lives in notes, where it
+belongs.
+
+### End-of-session update protocol
+
+When a session has done substantive work on a tracked project — built
+something, learned something non-obvious, made a decision, hit a
+notable wall — refresh that project's `description` so it still
+describes the project accurately. **"Refresh" means re-derive the
+summary from the new state of the project; it does not mean append a
+session report.** If the existing description still describes the
+project accurately, leave it alone and write a note instead.
+
+Use the **additive-with-divider** form:
+
+```
+[new summary — written to describe the project as it now stands]
+
+---
+[previous description, preserved verbatim]
+```
+
+Mechanics:
+
+- New summary on top, then a `---` on its own line, then the old text
+  unchanged.
+- Write via `PUT /api/projects/:id` with the combined `description`.
+- The `---` is the signal that this is a **pending update** awaiting
+  human approval — it is the contract between Claude and Raker.
+
+### Morning flush (Raker, project 193)
+
+Once a day, Raker surfaces every project whose `description` contains
+a `---` divider, presenting the new-vs-old diff for review. Andrew
+approves, edits, or rewrites; on approval the below-divider text is
+dropped and the field becomes just the new summary. **Andrew is
+approving a candidate replacement summary** — your job above the
+divider is to make that replacement worth approving on its own merits,
+not merely "newer".
+
+The shape of this protocol matches the shape of attention:
+end-of-session has the highest **context** but lowest **attention**;
+morning has the highest **attention** but decayed context. The divider
+is the handoff. Claude proposes, Andrew disposes.
+
+### When to update
+
+- **Do** update when the project genuinely now reads differently — new
+  components exist, the shape has changed, a constraint has resolved
+  or been added, the near-term direction has shifted.
+- **Skip** for trivial sessions: a one-line fix, a lookup-only query,
+  re-running an existing command. Write a note instead if anything is
+  worth recording at all.
+- **Skip** if the existing description still describes the project
+  accurately. A correct summary doesn't need to be touched just
+  because work happened — write a note for the work.
+- **Skip** for projects you only touched tangentially. Update the one
+  whose summary is now most stale relative to reality.
+
+### Stacking — handling a description that already has a `---`
+
+If you go to update a description and find it already contains a
+divider (a previous unflushed proposal Andrew hasn't reviewed yet), do
+**not** stack dividers. Replace the above-divider text with your new
+summary; leave the original old text below the divider untouched. Each
+refinement during the day is still a complete project summary, not an
+addition to a running session log.
+
+```
+[your newer summary — still a project summary, not a longer log]
+
+---
+[ORIGINAL old text — same as before, NOT yesterday's "new summary"]
+```
+
+This keeps the diff Raker shows Andrew always "current proposal vs.
+last-approved baseline", regardless of how many times Claude refined
+the proposal during the day.
+
+### Mechanism
+
+```
+PUT /api/projects/:id
+Body: { "description": "[new summary]\n\n---\n[old summary]" }
+```
+
+That's it — no schema changes, no new endpoints. The convention lives
+entirely in the content of one existing field.
+
 ## The polymorphic start_command
 
 The `startCommand` field is **whatever-it-takes to start this server**.
@@ -314,13 +515,21 @@ asks you to figure it out:
    - Python script: `cd <abs-source-path> && python3 <script>`
    - Docker: `cd <abs-source-path> && docker compose up -d`
 3. **Test it**: run it in a subshell and verify the port becomes reachable
-4. **If it works**, POST it to marginalia:
+4. **Decide the host**: which machine does this run on? `mbp` if it's
+   a dev tool that lives on the laptop; `macmini` if always-on
+   infrastructure that should be Tailscale-reachable; `cloudflare` for
+   static hosting; `andrew-only` for things that exist only when
+   physically using the rig (rare). Always set this — SDI's spawn-vs-
+   redirect decision keys on it.
+5. **If it works**, POST it to marginalia:
    ```
    curl -s -X POST http://localhost:3100/api/projects/<id>/servers \
      -H 'Content-Type: application/json' \
      -d '{"role":"api","port":3100,"url":"http://localhost:3100",
           "startCommand":"cd /abs/path && node server/run.js",
-          "description":"HTTPurple API"}'
+          "description":"HTTPurple API",
+          "host":"mbp",
+          "tailscaleName":"andrews-macbook-pro"}'
    ```
 5. **If it doesn't work**, iterate. Don't register broken commands.
 6. **When in doubt**, write a markdown runbook at
@@ -339,6 +548,11 @@ asks you to figure it out:
   port. The `/api/ports/suggest` endpoint does this for you automatically.
 - **Don't silently overwrite** existing server entries. Fetch what's there,
   decide if you want to replace, DELETE the old one, POST the new one.
+- **Always set `host` on new server entries.** SDI defaults to "ignore
+  unknown host" rather than "spawn anyway", so a missing host means SDI
+  won't bind the port at all. Pair it with a `tailscaleName` when
+  applicable (`andrews-macbook-pro`, `andrews-mac-mini`). See the
+  multi-host runbook at `project-tracker/docs/multi-host-topology.md`.
 
 ## Why this skill exists
 

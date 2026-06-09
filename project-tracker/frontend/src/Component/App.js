@@ -1,9 +1,50 @@
 // FFI for App component
 export const stopPropagation_ = (event) => () => { event.stopPropagation(); };
 
+// Copy a string to the clipboard. Fire-and-forget: the Promise is not
+// awaited and its rejection is swallowed so a failed copy never throws
+// into the Halogen event loop. Requires a secure context (localhost or
+// HTTPS); on a plain-HTTP LAN IP this will silently log a warning.
+export const copyToClipboard = (s) => () => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(s).catch((err) => {
+      console.warn("clipboard.writeText failed:", (err && err.message) || err);
+    });
+  } else {
+    console.warn("clipboard API unavailable (non-secure context?)");
+  }
+};
+
 // Hash routing
 export const getHash_ = () => window.location.hash.slice(1);
 export const setHash_ = (hash) => () => { window.location.hash = hash; };
+
+// Weather (Raker UI) cutoff: when the user last marked their digest reviewed.
+// Stored in localStorage as an ISO string for now; will move to a server
+// endpoint once the CLI surface is retired so both clients share state.
+const WEATHER_CUTOFF_KEY = "marginalia.weather.cutoff";
+
+// Returns the current cutoff or "" if unset. PureScript treats "" as Nothing
+// via Data.String.null in the Halogen layer.
+export const getWeatherCutoff_ = () => {
+  try {
+    return localStorage.getItem(WEATHER_CUTOFF_KEY) || "";
+  } catch (e) {
+    return "";
+  }
+};
+
+export const setWeatherCutoff_ = (iso) => () => {
+  try {
+    localStorage.setItem(WEATHER_CUTOFF_KEY, iso);
+  } catch (e) {
+    // SecurityError, QuotaExceededError, etc — silent. The next scan
+    // will re-show the same digest, which is the safe failure mode.
+  }
+};
+
+// Current ISO timestamp in true UTC. Used when the user advances the cutoff.
+export const nowIso_ = () => new Date().toISOString();
 
 // Subscribe to hashchange events. Calls the callback with the new hash.
 // Returns an unsubscribe effect.
@@ -126,4 +167,51 @@ export const stopAndTranscribe_ = () => {
 // Check if currently recording
 export const isRecording_ = () => {
   return _mediaRecorder !== null && _mediaRecorder.state === "recording";
+};
+
+// ============================================================================
+// Clipboard image paste — reads image data from a ClipboardEvent
+// ============================================================================
+
+// Read clipboard image data as base64. Called from a paste event handler.
+// Returns a Promise that resolves to { filename, base64 } or null if no image.
+export const readClipboardImage_ = (event) => {
+  return new Promise((resolve) => {
+    const items = event.clipboardData && event.clipboardData.items;
+    if (!items) { resolve(null); return; }
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const blob = item.getAsFile();
+        if (!blob) { resolve(null); return; }
+        const ext = item.type.split('/')[1] || 'png';
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const filename = 'screenshot-' + ts + '.' + ext;
+        const reader = new FileReader();
+        reader.onload = () => {
+          // Strip the data:image/...;base64, prefix
+          const base64 = reader.result.split(',')[1] || '';
+          resolve({ filename, base64 });
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+        return;
+      }
+    }
+    resolve(null);
+  });
+};
+
+// Global paste listener — fires callback with { filename, base64 } when
+// the user pastes an image anywhere on the page. Returns an unsubscribe effect.
+export const onPaste_ = (callback) => () => {
+  const handler = (e) => {
+    readClipboardImage_(e).then((result) => {
+      if (result) {
+        e.preventDefault();
+        callback(result)();
+      }
+    });
+  };
+  window.addEventListener('paste', handler);
+  return () => window.removeEventListener('paste', handler);
 };
