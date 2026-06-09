@@ -385,6 +385,124 @@ CREATE INDEX IF NOT EXISTS idx_deployments_project ON deployments(project_id);
 CREATE INDEX IF NOT EXISTS idx_deployments_platform ON deployments(platform);
 
 -- =============================================================================
+-- ENGINEERING SPINE  (goals / ADRs / coverage / realm)
+-- =============================================================================
+--
+-- Substrate the "head of engineering" auditor (Brunel) reasons over. See
+-- database/migrations/2026-06-09-engineering-spine.sql for the rationale.
+-- The realm classification is the extraction boundary for a future standalone,
+-- potentially open-source software-engineering-with-LLMs app: the engineering
+-- realm (programming/music/infrastructure) is what would ship; the life realm
+-- (house/garden/woodworking/cooking/yoga/travel) stays private.
+
+-- Classifies each projects.domain value into a realm. projects.domain stays a
+-- free TEXT column; this is a lookup joined when realm is needed. No CHECK ties
+-- goals/ADRs/coverage to realm — kept loose, matching the disabled-FK philosophy.
+CREATE TABLE IF NOT EXISTS domains (
+    name        TEXT PRIMARY KEY,                 -- matches projects.domain values
+    realm       TEXT NOT NULL DEFAULT 'life',     -- 'engineering' | 'life'
+    label       TEXT,
+    sort_order  INTEGER
+);
+
+-- woodworking is seeded 'life' (craft); flip to 'engineering' with one UPDATE.
+INSERT INTO domains (name, realm, label, sort_order) VALUES
+    ('programming',    'engineering', 'Programming',    10),
+    ('music',          'engineering', 'Music',          20),
+    ('infrastructure', 'engineering', 'Infrastructure', 30),
+    ('house',          'life',        'House',          40),
+    ('garden',         'life',        'Garden',         50),
+    ('woodworking',    'life',        'Woodworking',    60),
+    ('cooking',        'life',        'Cooking',        70),
+    ('yoga',           'life',        'Yoga',           80),
+    ('travel',         'life',        'Travel',         90)
+ON CONFLICT (name) DO NOTHING;
+
+-- Goals / non-goals — the project charter the "direction" audit checks against.
+-- Each goal has its own lifecycle: active -> achieved | dropped (with a reason).
+CREATE SEQUENCE IF NOT EXISTS seq_goals START 1;
+
+CREATE TABLE IF NOT EXISTS project_goals (
+    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_goals'),
+    project_id  INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
+    kind        TEXT NOT NULL DEFAULT 'goal',     -- 'goal' | 'non_goal'
+    text        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'achieved' | 'dropped'
+    reason      TEXT,                             -- why achieved/dropped (required in spirit when not 'active')
+    sort_order  INTEGER,
+    author      TEXT NOT NULL DEFAULT 'human',    -- 'human' | 'brunel' | agent name
+    created_at  TIMESTAMP DEFAULT current_timestamp,
+    resolved_at TIMESTAMP                         -- when it left 'active'
+);
+
+CREATE INDEX IF NOT EXISTS idx_goals_project ON project_goals(project_id);
+CREATE INDEX IF NOT EXISTS idx_goals_status  ON project_goals(status);
+
+-- ADRs — architecture decision records (Nygard). Status DAG + supersession,
+-- structurally the same shape as projects.status + evolved_into. `number` is
+-- per-project (ADR-NNN), assigned app-side as MAX(number)+1.
+CREATE SEQUENCE IF NOT EXISTS seq_adrs START 1;
+
+CREATE TABLE IF NOT EXISTS project_adrs (
+    id            INTEGER PRIMARY KEY DEFAULT nextval('seq_adrs'),
+    project_id    INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
+    number        INTEGER NOT NULL,              -- ADR-NNN within the project
+    title         TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'proposed', -- 'proposed' | 'accepted' | 'rejected' | 'superseded' | 'deprecated'
+    context       TEXT,
+    decision      TEXT,
+    consequences  TEXT,
+    supersedes_id INTEGER,                        -- another project_adrs.id this replaces
+    author        TEXT NOT NULL DEFAULT 'human',
+    created_at    TIMESTAMP DEFAULT current_timestamp,
+    decided_at    TIMESTAMP                       -- when it left 'proposed'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_adrs_project_number ON project_adrs(project_id, number);
+CREATE INDEX IF NOT EXISTS idx_adrs_project ON project_adrs(project_id);
+CREATE INDEX IF NOT EXISTS idx_adrs_status  ON project_adrs(status);
+
+-- Coverage snapshots — the hygiene time-series (tests / CI / docs). A series,
+-- not a single value, so the newspaper can draw a sparkline and Brunel can see
+-- trend. `source` records HOW each number was obtained ('estimate' is honest).
+CREATE SEQUENCE IF NOT EXISTS seq_coverage START 1;
+
+CREATE TABLE IF NOT EXISTS coverage_snapshots (
+    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_coverage'),
+    project_id  INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
+    taken_at    TIMESTAMP DEFAULT current_timestamp,
+    line_pct    DOUBLE,
+    branch_pct  DOUBLE,
+    test_count  INTEGER,
+    ci_status   TEXT,                             -- 'passing' | 'failing' | 'none' | 'unknown'
+    has_docs    BOOLEAN,
+    source      TEXT NOT NULL DEFAULT 'manual',   -- 'manual' | 'estimate' | 'tarpaulin' | 'c8' | 'spago-test' | 'jest' | …
+    note        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_coverage_project ON coverage_snapshots(project_id);
+CREATE INDEX IF NOT EXISTS idx_coverage_taken   ON coverage_snapshots(taken_at);
+
+-- The extraction boundary: every project in an engineering-realm domain.
+CREATE VIEW IF NOT EXISTS engineering_projects AS
+    SELECT p.*
+    FROM projects p
+    JOIN domains d ON d.name = p.domain
+    WHERE d.realm = 'engineering';
+
+-- Most-recent coverage snapshot per project — feeds the scorecard / sparkline.
+CREATE VIEW IF NOT EXISTS latest_coverage AS
+    SELECT c.*
+    FROM coverage_snapshots c
+    JOIN (
+        SELECT project_id, MAX(taken_at) AS max_taken
+        FROM coverage_snapshots
+        GROUP BY project_id
+    ) latest
+      ON latest.project_id = c.project_id
+     AND latest.max_taken  = c.taken_at;
+
+-- =============================================================================
 -- METADATA
 -- =============================================================================
 
