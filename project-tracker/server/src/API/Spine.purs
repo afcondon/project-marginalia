@@ -18,6 +18,12 @@ module API.Spine
   , listAdrOrphans
   , exportRealm
   , addProvenance
+  , createGoal
+  , updateGoal
+  , createAdr
+  , updateAdr
+  , linkAdrGoal
+  , unlinkAdrGoal
   ) where
 
 import Prelude
@@ -25,13 +31,17 @@ import Prelude
 import Data.Argonaut.Core (Json)
 import Data.Argonaut.Core (toObject, toString) as J
 import Data.Argonaut.Parser (jsonParser)
+import Data.Array (elem, null) as Array
 import Data.Either (Either(..))
+import Data.Foldable (foldl)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Nullable (toNullable)
+import Data.String.Common (joinWith)
+import Data.Tuple (Tuple(..))
 import Database.DuckDB (Database, Rows, queryAll, queryAllParams, run)
 import Effect.Aff (Aff)
-import Foreign (unsafeToForeign)
+import Foreign (Foreign, unsafeToForeign)
 import Foreign.Object (Object, lookup) as FO
 import HTTPurple (Response, ok', badRequest')
 import HTTPurple.Headers (ResponseHeaders, headers)
@@ -172,8 +182,154 @@ addProvenance db pid bodyStr = case parseBody bodyStr of
         ok' jsonHeaders """{"ok":true}"""
 
 -- =============================================================================
+-- Wave 2 — Brunel's authoring surface (goals / ADRs / links)
+-- =============================================================================
+
+-- | Create a goal or non-goal. Returns the created row (via RETURNING).
+createGoal :: Database -> Int -> String -> Aff Response
+createGoal db pid bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders invalidJson
+  Just obj -> case getField "text" obj of
+    Nothing -> badRequest' jsonHeaders """{"error":"text is required"}"""
+    Just text ->
+      let kind = fromMaybe "goal" (getField "kind" obj)
+      in
+        if not (Array.elem kind [ "goal", "non_goal" ])
+          then badRequest' jsonHeaders """{"error":"kind must be goal | non_goal"}"""
+          else do
+            rows <- queryAllParams db
+              "INSERT INTO project_goals (project_id, kind, text, author, sort_order) VALUES (?, ?, ?, ?, ?) RETURNING *"
+              [ unsafeToForeign pid
+              , unsafeToForeign kind
+              , unsafeToForeign text
+              , unsafeToForeign (fromMaybe "brunel" (getField "author" obj))
+              , unsafeToForeign (toNullable (getField "sortOrder" obj >>= Int.fromString))
+              ]
+            ok' jsonHeaders (rowsToJson rows)
+
+-- | Transition a goal's status: active -> achieved | dropped (sets resolved_at
+-- | + reason), or back to active (clears them).
+updateGoal :: Database -> Int -> String -> Aff Response
+updateGoal db goalId bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders invalidJson
+  Just obj -> case getField "status" obj of
+    Nothing -> badRequest' jsonHeaders """{"error":"status is required (active | achieved | dropped)"}"""
+    Just "active" -> do
+      rows <- queryAllParams db
+        "UPDATE project_goals SET status = 'active', reason = NULL, resolved_at = NULL WHERE id = ? RETURNING *"
+        [ unsafeToForeign goalId ]
+      ok' jsonHeaders (rowsToJson rows)
+    Just status | Array.elem status [ "achieved", "dropped" ] -> do
+      rows <- queryAllParams db
+        "UPDATE project_goals SET status = ?, reason = ?, resolved_at = current_timestamp WHERE id = ? RETURNING *"
+        [ unsafeToForeign status
+        , unsafeToForeign (toNullable (getField "reason" obj))
+        , unsafeToForeign goalId
+        ]
+      ok' jsonHeaders (rowsToJson rows)
+    Just _ -> badRequest' jsonHeaders """{"error":"status must be active | achieved | dropped"}"""
+
+-- | Create an ADR. `number` is assigned app-side as MAX(number)+1 per project,
+-- | computed in the INSERT … SELECT so it's one statement.
+createAdr :: Database -> Int -> String -> Aff Response
+createAdr db pid bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders invalidJson
+  Just obj -> case getField "title" obj of
+    Nothing -> badRequest' jsonHeaders """{"error":"title is required"}"""
+    Just title ->
+      let status = fromMaybe "proposed" (getField "status" obj)
+      in
+        if not (Array.elem status adrStatuses)
+          then badRequest' jsonHeaders adrStatusError
+          else do
+            rows <- queryAllParams db
+              ( "INSERT INTO project_adrs (project_id, number, title, status, context, decision, consequences, supersedes_id, author) "
+                  <> "SELECT ?, COALESCE(MAX(number), 0) + 1, ?, ?, ?, ?, ?, ?, ? FROM project_adrs WHERE project_id = ? RETURNING *"
+              )
+              [ unsafeToForeign pid
+              , unsafeToForeign title
+              , unsafeToForeign status
+              , unsafeToForeign (toNullable (getField "context" obj))
+              , unsafeToForeign (toNullable (getField "decision" obj))
+              , unsafeToForeign (toNullable (getField "consequences" obj))
+              , unsafeToForeign (toNullable (getField "supersedesId" obj >>= Int.fromString))
+              , unsafeToForeign (fromMaybe "brunel" (getField "author" obj))
+              , unsafeToForeign pid
+              ]
+            ok' jsonHeaders (rowsToJson rows)
+
+-- | Update an ADR's provided fields. Moving status off 'proposed' stamps
+-- | decided_at. Status, if given, must be a valid Nygard state.
+updateAdr :: Database -> Int -> String -> Aff Response
+updateAdr db adrId bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders invalidJson
+  Just obj ->
+    let mStatus = getField "status" obj
+    in case mStatus of
+      Just s | not (Array.elem s adrStatuses) -> badRequest' jsonHeaders adrStatusError
+      _ ->
+        let
+          base = buildStringUpdates
+            [ Tuple "status" mStatus
+            , Tuple "title" (getField "title" obj)
+            , Tuple "context" (getField "context" obj)
+            , Tuple "decision" (getField "decision" obj)
+            , Tuple "consequences" (getField "consequences" obj)
+            ]
+          supersedes = case getField "supersedesId" obj >>= Int.fromString of
+            Nothing -> { clauses: [], params: [] }
+            Just sid -> { clauses: [ "supersedes_id = ?" ], params: [ unsafeToForeign sid ] }
+          decided = case mStatus of
+            Just s | s /= "proposed" -> [ "decided_at = current_timestamp" ]
+            _ -> []
+          clauses = base.clauses <> supersedes.clauses <> decided
+          params = base.params <> supersedes.params <> [ unsafeToForeign adrId ]
+        in
+          if Array.null clauses then badRequest' jsonHeaders """{"error":"no fields to update"}"""
+          else do
+            rows <- queryAllParams db
+              ("UPDATE project_adrs SET " <> joinWith ", " clauses <> " WHERE id = ? RETURNING *")
+              params
+            ok' jsonHeaders (rowsToJson rows)
+
+-- | Link an ADR to a goal it pursues (idempotent).
+linkAdrGoal :: Database -> String -> Aff Response
+linkAdrGoal db bodyStr = case parseBody bodyStr of
+  Nothing -> badRequest' jsonHeaders invalidJson
+  Just obj -> case getField "adrId" obj >>= Int.fromString, getField "goalId" obj >>= Int.fromString of
+    Just a, Just g -> do
+      run db "INSERT INTO adr_goals (adr_id, goal_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
+        [ unsafeToForeign a, unsafeToForeign g ]
+      ok' jsonHeaders """{"ok":true}"""
+    _, _ -> badRequest' jsonHeaders """{"error":"adrId and goalId are required"}"""
+
+-- | Remove an ADR↔goal link (ok whether or not it existed).
+unlinkAdrGoal :: Database -> Int -> Int -> Aff Response
+unlinkAdrGoal db adrId goalId = do
+  run db "DELETE FROM adr_goals WHERE adr_id = ? AND goal_id = ?"
+    [ unsafeToForeign adrId, unsafeToForeign goalId ]
+  ok' jsonHeaders """{"ok":true}"""
+
+-- =============================================================================
 -- Local helpers (mirrored from API.Projects, which doesn't export them)
 -- =============================================================================
+
+invalidJson :: String
+invalidJson = """{"error":"Invalid JSON body"}"""
+
+adrStatuses :: Array String
+adrStatuses = [ "proposed", "accepted", "rejected", "superseded", "deprecated" ]
+
+adrStatusError :: String
+adrStatusError = """{"error":"status must be proposed | accepted | rejected | superseded | deprecated"}"""
+
+-- | Build "col = ?" SET clauses + matching params for the present string fields.
+buildStringUpdates :: Array (Tuple String (Maybe String)) -> { clauses :: Array String, params :: Array Foreign }
+buildStringUpdates = foldl step { clauses: [], params: [] }
+  where
+  step acc (Tuple col mv) = case mv of
+    Nothing -> acc
+    Just v -> { clauses: acc.clauses <> [ col <> " = ?" ], params: acc.params <> [ unsafeToForeign v ] }
 
 jsonHeaders :: ResponseHeaders
 jsonHeaders = headers

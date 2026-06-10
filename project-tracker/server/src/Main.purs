@@ -86,6 +86,10 @@ data Route
   | EngineeringGoalHealth
   | AdrOrphans
   | ExportRealm String
+  | GoalById Int
+  | AdrById Int
+  | AdrGoals
+  | AdrGoalLink Int Int
 
 derive instance Generic Route _
 
@@ -133,6 +137,10 @@ route = root $ sum
   , "EngineeringGoalHealth": path "api/engineering/goal-health" noArgs
   , "AdrOrphans": path "api/adrs/orphans" noArgs
   , "ExportRealm": path "api/export/realm" segment
+  , "GoalById": path "api/goals" (int segment)
+  , "AdrById": path "api/adrs" (int segment)
+  , "AdrGoals": path "api/adr-goals" noArgs
+  , "AdrGoalLink": path "api/adr-goals" (int segment `product` int segment)
   }
 
 -- =============================================================================
@@ -459,11 +467,17 @@ main = launchAff_ do
 
       ProjectGoals pid -> case method of
         Get -> Spine.listGoals db pid
+        Post -> do
+          bodyStr <- toString body
+          Spine.createGoal db pid bodyStr
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
       ProjectAdrs pid -> case method of
         Get -> Spine.listAdrs db pid
+        Post -> do
+          bodyStr <- toString body
+          Spine.createAdr db pid bodyStr
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
@@ -502,5 +516,31 @@ main = launchAff_ do
 
       ExportRealm realm -> case method of
         Get -> Spine.exportRealm db realm
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      GoalById goalId -> case method of
+        Put -> do
+          bodyStr <- toString body
+          Spine.updateGoal db goalId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      AdrById adrId -> case method of
+        Put -> do
+          bodyStr <- toString body
+          Spine.updateAdr db adrId bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      AdrGoals -> case method of
+        Post -> do
+          bodyStr <- toString body
+          Spine.linkAdrGoal db bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      AdrGoalLink adrId goalId -> case method of
+        Delete -> Spine.unlinkAdrGoal db adrId goalId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
