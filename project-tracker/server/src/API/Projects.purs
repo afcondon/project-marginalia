@@ -261,6 +261,23 @@ updateProject db projectId bodyStr = case parseBody bodyStr of
   Just obj -> do
     let newStatus = getFieldMaybe "status" obj
 
+    -- If the body carries a status, capture the *current* status BEFORE the
+    -- UPDATE runs, so we can decide whether this PUT is a real transition
+    -- (record in status_history with a correct old_status) or a no-op
+    -- (skip recording — don't pollute history with same-value writes from
+    -- callers that PUT the full project object on every save). The frontend
+    -- editor does exactly that, which is why status_history accumulated
+    -- hundreds of empty-old bogus rows before this guard was added.
+    mOldStatus <- case newStatus of
+      Nothing -> pure Nothing
+      Just _  -> do
+        oldRows <- queryAllParams db
+          "SELECT status FROM projects WHERE id = ?"
+          [ unsafeToForeign projectId ]
+        pure $ case firstRow oldRows of
+          Nothing -> Nothing
+          Just row -> Just (getRowString_ "status" row)
+
     -- Build and execute UPDATE with only provided fields
     let updates = buildUpdateClauses obj
     case updates.clauses of
@@ -271,18 +288,18 @@ updateProject db projectId bodyStr = case parseBody bodyStr of
         let params = updates.params <> [ unsafeToForeign projectId ]
         run db sql params
 
-        -- If status changed, record in history
-        case newStatus of
-          Nothing -> pure unit
-          Just status -> do
+        -- Record in history only when status is present AND actually changed.
+        case newStatus, mOldStatus of
+          Just status, Just oldStatus | oldStatus /= status -> do
             let reason = fromMaybe "Updated via API" (getFieldMaybe "statusReason" obj)
             run db
               "INSERT INTO status_history (project_id, old_status, new_status, reason, author) VALUES (?, ?, ?, ?, 'api')"
               [ unsafeToForeign projectId
-              , unsafeToForeign "" -- old_status not critical, avoids subquery FK issues
+              , unsafeToForeign oldStatus
               , unsafeToForeign status
               , unsafeToForeign reason
               ]
+          _, _ -> pure unit
 
         rows <- queryAllParams db "SELECT * FROM project_with_tags WHERE id = ?"
           [ unsafeToForeign projectId ]

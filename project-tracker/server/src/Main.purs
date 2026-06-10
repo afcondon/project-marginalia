@@ -2,11 +2,13 @@ module ProjectTracker.Server.Main where
 
 import Prelude
 
+import API.Activity as Activity
 import API.Agent as Agent
 import API.Dependencies as Dependencies
 import API.Exercise as Exercise
 import API.Projects as Projects
 import API.Servers as Servers
+import API.Deployments as Deployments
 import API.Stats as Stats
 import API.Subscriptions as Subscriptions
 import BlogDrafts as BlogDrafts
@@ -46,8 +48,11 @@ data Route
   | Ports
   | PortsSuggest
   | ServerById Int
+  | Deployments
+  | DeploymentById Int
   | NoteById Int
   | Stats
+  | Activity
   | AgentProjects
   | AgentProjectById Int
   | AgentProjectStatus Int
@@ -83,8 +88,11 @@ route = root $ sum
   , "Ports": path "api/ports" noArgs
   , "PortsSuggest": path "api/ports/suggest" noArgs
   , "ServerById": path "api/servers" (int segment)
+  , "Deployments": path "api/deployments" noArgs
+  , "DeploymentById": path "api/deployments" (int segment)
   , "NoteById": path "api/notes" (int segment)
   , "Stats": path "api/stats" noArgs
+  , "Activity": path "api/activity" noArgs
   , "AgentProjects": path "api/agent/projects" noArgs
   , "AgentProjectById": path "api/agent/projects" (int segment)
   , "AgentProjectStatus": path "api/agent/projects" (suffix (int segment) "status")
@@ -166,6 +174,7 @@ main = launchAff_ do
     log "  DELETE /api/projects/:id                 - Delete a project (cascades; refuses if children)"
     log "  POST   /api/projects/:id/blog/open         - Open blog draft in VS Code"
     log "  GET    /api/stats                        - Domain/status statistics"
+    log "  GET    /api/activity                     - Project activity ranking (recent notes/status/attachments)"
     log ""
     log "Agent endpoints:"
     log "  GET    /api/agent/projects               - Compact project list"
@@ -266,6 +275,16 @@ main = launchAff_ do
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
+      Deployments -> case method of
+        Get -> Deployments.listDeployments db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      DeploymentById deploymentId -> case method of
+        Get -> Deployments.getDeployment db deploymentId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
       NoteById noteId -> case method of
         Delete -> Agent.agentDeleteNote db noteId
         Options -> ok' corsHeaders ""
@@ -273,6 +292,16 @@ main = launchAff_ do
 
       Stats -> case method of
         Get -> Stats.getStats db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      Activity -> case method of
+        Get -> do
+          let mHalflife = Object.lookup "halflife" query
+          let mWindow = Object.lookup "window" query
+          let mLimit = Object.lookup "limit" query
+          let mDomain = Object.lookup "domain" query
+          Activity.getActivity db mHalflife mWindow mLimit mDomain
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
