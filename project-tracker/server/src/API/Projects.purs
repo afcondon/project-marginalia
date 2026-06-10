@@ -31,6 +31,7 @@ import Database.DuckDB (Database, Rows, queryAll, queryAllParams, exec, execBatc
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
+import API.Infovore as Infovore
 import BlogDrafts as BlogDrafts
 import Filesystem (RenameOutcome(..)) as FS
 import Filesystem (renameProjectDirectory) as FS
@@ -115,7 +116,13 @@ listProjects db mDomain mStatus mTag mAncestor mSearch = do
   let sql = baseSql <> domainClause <> statusClause <> tagClause <> ancestorClause <> searchClause <> groupClause <> orderClause
   let params = buildFilterParams mDomain mStatus mTag mAncestor mSearch
   rows <- queryAllParams db sql params
-  ok' jsonHeaders (buildProjectListJson rows)
+  -- Federate the markdown life-project source into the Register. An ancestor
+  -- (hierarchy) query is DB-only: life-projects aren't part of any project
+  -- tree, so they must not leak into a descendants-of-X view.
+  json <- case mAncestor of
+    Just _ -> pure (buildProjectListJson rows)
+    Nothing -> liftEffect $ Infovore.federatedListJson rows mDomain mStatus mTag mSearch
+  ok' jsonHeaders json
 
 buildFilterParams :: Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Array Foreign
 buildFilterParams mDomain mStatus mTag mAncestor mSearch =
@@ -157,7 +164,14 @@ getProject db projectId = do
                 p.created_at, p.updated_at"""
     idParam
   case firstRow projectRows of
-    Nothing -> notFound
+    Nothing -> do
+      -- Not in the DB — it may be a markdown life-project (e.g. after the
+      -- weave→drop migration removes its tracker row). Fall back to the
+      -- Infovore source before giving up.
+      mJson <- liftEffect $ Infovore.detailJson projectId
+      case mJson of
+        Just json -> ok' jsonHeaders json
+        Nothing -> notFound
     Just project -> do
       -- Blog drafts are file-sourced: read <slug>.md from disk and splice
       -- its contents into the row so buildProjectDetailJson sees it as
