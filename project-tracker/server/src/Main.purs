@@ -9,6 +9,7 @@ import API.Exercise as Exercise
 import API.Projects as Projects
 import API.Servers as Servers
 import API.Deployments as Deployments
+import API.Spine as Spine
 import API.Stats as Stats
 import API.Subscriptions as Subscriptions
 import BlogDrafts as BlogDrafts
@@ -74,6 +75,17 @@ data Route
   -- Sports section
   | ExerciseLog
   | ExerciseSummary
+  -- Engineering spine (Humboldt)
+  | ProjectDossier Int
+  | ProjectGoals Int
+  | ProjectAdrs Int
+  | ProjectCoverage Int
+  | ProjectProvenance Int
+  | ProjectHealth Int
+  | EngineeringProjects
+  | EngineeringGoalHealth
+  | AdrOrphans
+  | ExportRealm String
 
 derive instance Generic Route _
 
@@ -110,6 +122,17 @@ route = root $ sum
   , "ExerciseSummary": path "api/exercise/summary" noArgs
   , "Dependencies": path "api/dependencies" noArgs
   , "DependencyById": path "api/dependencies" (int segment `product` int segment)
+  -- Engineering spine (Humboldt)
+  , "ProjectDossier": path "api/projects" (suffix (int segment) "dossier")
+  , "ProjectGoals": path "api/projects" (suffix (int segment) "goals")
+  , "ProjectAdrs": path "api/projects" (suffix (int segment) "adrs")
+  , "ProjectCoverage": path "api/projects" (suffix (int segment) "coverage")
+  , "ProjectProvenance": path "api/projects" (suffix (int segment) "provenance")
+  , "ProjectHealth": path "api/projects" (suffix (int segment) "health")
+  , "EngineeringProjects": path "api/engineering/projects" noArgs
+  , "EngineeringGoalHealth": path "api/engineering/goal-health" noArgs
+  , "AdrOrphans": path "api/adrs/orphans" noArgs
+  , "ExportRealm": path "api/export/realm" segment
   }
 
 -- =============================================================================
@@ -425,5 +448,59 @@ main = launchAff_ do
 
       ExerciseSummary -> case method of
         Get -> Exercise.monthlySummary db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      -- Engineering spine (Humboldt)
+      ProjectDossier pid -> case method of
+        Get -> Spine.getDossier db pid
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectGoals pid -> case method of
+        Get -> Spine.listGoals db pid
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectAdrs pid -> case method of
+        Get -> Spine.listAdrs db pid
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectCoverage pid -> case method of
+        Get -> Spine.listCoverage db pid
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectProvenance pid -> case method of
+        Get -> Spine.listProvenance db pid
+        Post -> do
+          bodyStr <- toString body
+          Spine.addProvenance db pid bodyStr
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ProjectHealth pid -> case method of
+        Get -> Spine.listHealth db pid
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      EngineeringProjects -> case method of
+        Get -> Spine.listEngineeringProjects db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      EngineeringGoalHealth -> case method of
+        Get -> Spine.listGoalHealth db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      AdrOrphans -> case method of
+        Get -> Spine.listAdrOrphans db
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      ExportRealm realm -> case method of
+        Get -> Spine.exportRealm db realm
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
