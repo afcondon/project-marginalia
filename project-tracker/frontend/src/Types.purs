@@ -167,6 +167,7 @@ type Project =
   , tags :: Array String
   , coverUrl :: Maybe String
   , blogStatus :: Maybe BlogStatus
+  , humanSummary :: Maybe String
   }
 
 -- =============================================================================
@@ -399,6 +400,7 @@ decodeProject json = case toObject json of
        , tags: decodeStringArray "tags" obj
        , coverUrl: optString "coverUrl" obj
        , blogStatus: optBlogStatus "blogStatus" obj
+       , humanSummary: optString "humanSummary" obj
        }
 
 decodeProjectList :: Json -> Either JsonDecodeError (Array Project)

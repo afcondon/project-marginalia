@@ -4511,3 +4511,50 @@ a.attachment-marg-filename:hover {
   background: var(--color-text);
   color: var(--color-surface);
 }
+
+/* =============================================================================
+   Editorial human summaries — aggregate (P1/P2) cards as newspaper articles
+   The owner's voice (projects.human_summary), set in serif body copy flowing
+   through ruled columns. Distinct from .card-description, which is the
+   truncated agent summary shown on leaf cards.
+   ============================================================================= */
+
+.project-card .card-human-summary {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text);
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  column-count: 2;
+  column-gap: var(--space-6);
+  column-rule: 1px solid var(--color-border);
+  margin-top: var(--space-2);
+}
+
+.project-card .card-human-summary p {
+  margin: 0;
+}
+
+/* Drop cap — old-style face, two lines tall */
+.project-card .card-human-summary p::first-letter {
+  font-family: 'Old Standard TT', Georgia, serif;
+  font-size: 2.4em;
+  font-weight: 700;
+  float: left;
+  line-height: 0.85;
+  padding-right: 0.08em;
+}
+
+/* The Lead gets the full broadsheet treatment: three columns */
+.project-card.tier-lead .card-human-summary {
+  column-count: 3;
+  font-size: var(--text-base);
+}
+
+/* With a cover image present, drop to a single wider column so the
+   text and image don't fight for the card's width */
+.project-card.has-cover .card-human-summary {
+  column-count: 1;
+}

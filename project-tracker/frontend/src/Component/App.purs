@@ -1315,13 +1315,28 @@ renderProjectCard :: forall m. State -> Int -> Project -> H.ComponentHTML Action
 renderProjectCard state idx project =
   let isFocused = state.focusIndex == idx
       focusClass = if isFocused then " card-focused" else ""
-      tier = pickTier idx project
+      -- Editorial human summary: shown on aggregate cards (height >= 1, i.e.
+      -- P1/P2 parents) when the owner has written one. These cards become the
+      -- paper's "articles" — full text in newspaper columns, not the
+      -- truncated agent description — and are promoted to at least Feature
+      -- so the columns have width to work with.
+      editorial = case project.humanSummary of
+        Just hs | projectHeight state.allProjects project.id >= 1 -> Just hs
+        _ -> Nothing
+      baseTier = pickTier idx project
+      tier = case editorial, baseTier of
+        Just _, Regular -> Feature
+        Just _, Small   -> Feature
+        _, _            -> baseTier
       tierCls = " " <> tierClass tier
+      editorialCls = case editorial of
+        Just _  -> " has-human-summary"
+        Nothing -> ""
       coverCls = case project.coverUrl of
         Nothing -> ""
         Just _  -> " has-cover"
   in HH.div
-    [ HP.class_ (H.ClassName ("project-card card-domain-" <> project.domain <> tierCls <> coverCls <> focusClass))
+    [ HP.class_ (H.ClassName ("project-card card-domain-" <> project.domain <> tierCls <> coverCls <> editorialCls <> focusClass))
     , HE.onClick \_ -> SelectProject project.id
     ]
     [ HH.div [ HP.class_ (H.ClassName "card-header") ]
@@ -1345,10 +1360,13 @@ renderProjectCard state idx project =
               [ HH.text s ]
         , renderCardBlogPill project.blogStatus
         ]
-    , case project.description of
-        Nothing -> HH.text ""
-        Just desc -> HH.p [ HP.class_ (H.ClassName "card-description") ]
-          [ HH.text (truncate 120 desc) ]
+    , case editorial of
+        Just hs -> HH.div [ HP.class_ (H.ClassName "card-human-summary") ]
+          [ HH.p_ [ HH.text hs ] ]
+        Nothing -> case project.description of
+          Nothing -> HH.text ""
+          Just desc -> HH.p [ HP.class_ (H.ClassName "card-description") ]
+            [ HH.text (truncate 120 desc) ]
     -- "pinned" is rendered as the star control above; filter it from the tag row.
     , let visibleTags = Array.filter (_ /= "pinned") project.tags
       in if Array.null visibleTags
