@@ -36,6 +36,26 @@ const PORT = parseInt(process.env.MARGINALIA_FRONTEND_PORT || '3101', 10);
 const API_TARGET = { host: '127.0.0.1', port: 3100 };
 const WHISPER_TARGET = { host: '127.0.0.1', port: 3200 };
 
+// Attachments backend. By default /attachments/* falls through to the static
+// root, where frontend/public/attachments is a symlink into the attachment
+// store. On hosts where this node process can't read the store directly —
+// macOS TCC blocks LaunchAgent node from removable volumes, and the consent
+// prompt never gets answered on a headless Mac — set
+// MARGINALIA_ATTACHMENTS_PROXY to a root of the narrow-grant infovore-files
+// daemon (see Marginalia #201), e.g.:
+//   MARGINALIA_ATTACHMENTS_PROXY=http://127.0.0.1:8091/marginalia-attachments
+// and /attachments/<rest> is proxied to <proxy-url>/<rest> instead.
+const ATTACHMENTS_TARGET = (() => {
+  const raw = process.env.MARGINALIA_ATTACHMENTS_PROXY;
+  if (!raw) return null;
+  const u = new URL(raw);
+  return {
+    host: u.hostname,
+    port: parseInt(u.port || '80', 10),
+    prefix: u.pathname.replace(/\/$/, ''),
+  };
+})();
+
 // MIME type map — just the ones we actually serve
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -173,6 +193,13 @@ const server = http.createServer((req, res) => {
   // Reverse-proxy whisper calls
   if (url === '/transcribe' || url.startsWith('/transcribe/')) {
     proxy(req, res, WHISPER_TARGET);
+    return;
+  }
+  // Reverse-proxy attachments to the narrow-grant file daemon when configured
+  // (TCC-restricted hosts); otherwise they fall through to the static symlink.
+  if (ATTACHMENTS_TARGET && url.startsWith('/attachments/')) {
+    req.url = ATTACHMENTS_TARGET.prefix + url.slice('/attachments'.length);
+    proxy(req, res, ATTACHMENTS_TARGET);
     return;
   }
   // Capture PWA — served under /capture/ from a separate static root.

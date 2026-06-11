@@ -16,6 +16,15 @@ export NVM_DIR="$HOME/.nvm"
 
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Optional per-clone .env file — same convention as start-api.sh. Used for
+# MARGINALIA_ATTACHMENTS_PROXY on hosts where the frontend node process can't
+# read the attachment volume directly (macOS TCC).
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  # shellcheck disable=SC1091
+  set -a; . "$PROJECT_ROOT/.env"; set +a
+fi
+
 start=$(date +%s)
 # Custom static-files-plus-reverse-proxy server (Node built-ins only).
 # Replaces http-server so the frontend can expose /api/* and /transcribe
