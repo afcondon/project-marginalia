@@ -78,14 +78,32 @@ const parseFile = (filePath) => {
     fm[key] = val;
   }
   const body = m[2];
-  // Description = everything before the "## Notes" section (or the whole body
-  // if there is none), trimmed.
+  // Description = everything before the first structured section ("## Notes"
+  // or "## Attachments"), or the whole body if there is none, trimmed.
   let desc = body;
-  const notesIdx = body.search(/^##\s+Notes/m);
-  if (notesIdx !== -1) desc = body.slice(0, notesIdx);
+  const sectionIdx = body.search(/^##\s+(Notes|Attachments)\b/m);
+  if (sectionIdx !== -1) desc = body.slice(0, sectionIdx);
   desc = desc.trim();
   return { fm, body, description: desc };
 };
+
+// Extract the body of a "## <name>" section: everything after the heading up
+// to the next "## " heading (or EOF). Null if the section is absent.
+const section = (body, name) => {
+  const re = new RegExp('^##\\s+' + name + '\\s*\\n([\\s\\S]*?)(?=^##\\s|$(?![\\s\\S]))', 'm');
+  const m = body.match(re);
+  return m ? m[1] : null;
+};
+
+// Minimal extension→MIME map for attachment entries (images dominate; the
+// frontend uses mimeType to decide thumbnail vs link tile).
+const MIME_BY_EXT = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic',
+  '.pdf': 'application/pdf', '.md': 'text/markdown', '.txt': 'text/plain',
+};
+const mimeFor = (p) =>
+  MIME_BY_EXT[path.extname(p).toLowerCase()] || 'application/octet-stream';
 
 // Map one parsed file to a project card in buildProjectListJson shape, plus an
 // internal _filePath / _body for the detail builder (stripped before emit).
@@ -268,10 +286,10 @@ export const detailJson_ = (pid) => () => {
   if (!card) return null;
 
   const notes = [];
-  const m = card._body.match(/^##\s+Notes\s*\n([\s\S]*)$/m);
-  if (m) {
+  const notesBody = section(card._body, 'Notes');
+  if (notesBody) {
     let nid = 1;
-    for (const line of m[1].split('\n')) {
+    for (const line of notesBody.split('\n')) {
       const t = line.trim();
       if (t.startsWith('- ')) {
         notes.push({
@@ -281,6 +299,30 @@ export const detailJson_ = (pid) => () => {
           createdAt: card.updatedAt,
         });
       }
+    }
+  }
+
+  // "## Attachments" — one per "- " bullet: `- <abs path> | <description>`
+  // (description optional). Same URL mapping as DB attachments, so anything
+  // under the attachment store renders via /attachments/*.
+  const attachments = [];
+  const attBody = section(card._body, 'Attachments');
+  if (attBody) {
+    let aid = 1;
+    for (const line of attBody.split('\n')) {
+      const t = line.trim();
+      if (!t.startsWith('- ')) continue;
+      const [rawPath, ...rest] = t.slice(2).split(' | ');
+      const filePath = rawPath.trim();
+      if (!filePath) continue;
+      attachments.push({
+        id: aid++,
+        filename: path.basename(filePath),
+        mimeType: mimeFor(filePath),
+        url: filePathToAttachmentUrl(filePath),
+        description: rest.length ? rest.join(' | ').trim() || null : null,
+        createdAt: card.updatedAt,
+      });
     }
   }
 
@@ -306,6 +348,6 @@ export const detailJson_ = (pid) => () => {
     updatedAt: card.updatedAt,
     notes,
     dependencies: { blocking: [], blockedBy: [] },
-    attachments: [],
+    attachments,
   });
 };
