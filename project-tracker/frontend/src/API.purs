@@ -14,7 +14,10 @@ module API
   , updateProject
   , renameProject
   , addNote
+  , addNoteAs
+  , deleteNote
   , addTag
+  , removeTag
   , openBlogInVSCode
   , openInApp
   , fetchSubscriptions
@@ -26,6 +29,7 @@ module API
   , uploadBlogAsset
   , fetchBlogAssets
   , BlogAssetRecord
+  , fetchActivity
   ) where
 
 import Prelude
@@ -41,7 +45,7 @@ import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Foreign.Object (lookup) as FO
-import Types (Project, ProjectDetail, ProjectInput, Server, Stats, decodeProjectList, decodeProjectDetail, decodeServerArray, decodeServerList, decodeStats)
+import Types (ActivityRow, Project, ProjectDetail, ProjectInput, Server, Stats, decodeActivityList, decodeProjectList, decodeProjectDetail, decodeServerArray, decodeServerList, decodeStats)
 
 -- =============================================================================
 -- Configuration
@@ -253,12 +257,35 @@ addNote projectId content = do
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
   pure unit
 
+-- | Add a note with a custom author. Used by the Weather section to file
+-- | `author = "quick-win"` marker notes so /what-next can surface them.
+addNoteAs :: String -> Int -> String -> Aff Unit
+addNoteAs author projectId content = do
+  let url = baseUrl <> "/api/agent/projects/" <> show projectId <> "/notes"
+  let body = buildNoteBodyAs author content
+  _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  pure unit
+
+-- | Delete a note by id. Idempotent server-side.
+deleteNote :: Int -> Aff Unit
+deleteNote noteId = do
+  let url = baseUrl <> "/api/notes/" <> show noteId
+  _ <- AX.delete ResponseFormat.string url
+  pure unit
+
 -- | Add a tag to a project. Tag is created if it doesn't already exist.
 addTag :: Int -> String -> Aff Unit
 addTag projectId tag = do
   let url = baseUrl <> "/api/projects/" <> show projectId <> "/tags"
   let body = buildTagBody tag
   _ <- AX.post ResponseFormat.string url (Just (RequestBody.string body))
+  pure unit
+
+-- | Remove a tag from a project. Idempotent server-side — always ok.
+removeTag :: Int -> String -> Aff Unit
+removeTag projectId tag = do
+  let url = baseUrl <> "/api/projects/" <> show projectId <> "/tags?name=" <> tag
+  _ <- AX.delete ResponseFormat.string url
   pure unit
 
 -- | Result of a rename attempt — used to surface warnings/errors to the UI.
@@ -343,6 +370,7 @@ createChild parentId name domain = do
 foreign import buildCreateBody :: ProjectInput -> String
 foreign import buildUpdateBody :: ProjectInput -> String
 foreign import buildNoteBody :: String -> String
+foreign import buildNoteBodyAs :: String -> String -> String
 foreign import buildTagBody :: String -> String
 foreign import buildChildBody :: Int -> String -> String -> String
 foreign import buildRenameBody :: String -> Boolean -> String
@@ -452,3 +480,24 @@ fetchBlogAssets projectId = do
   case result of
     Left _ -> pure []
     Right response -> pure (parseBlogAssetsResponse_ response.body)
+
+-- | Fetch ranked project activity from the server. `limit` defaults server-side;
+-- | we ask for 100 here so the page has enough rows for scrolling without an
+-- | extra round-trip.
+fetchActivity :: Aff (Array ActivityRow)
+fetchActivity = do
+  let url = baseUrl <> "/api/activity?limit=100"
+  result <- AX.get ResponseFormat.string url
+  case result of
+    Left err -> do
+      liftEffect $ log $ "fetchActivity error: " <> AX.printError err
+      pure []
+    Right response -> case jsonParser response.body of
+      Left _ -> do
+        liftEffect $ log "fetchActivity: failed to parse JSON"
+        pure []
+      Right json -> case decodeActivityList json of
+        Left decErr -> do
+          liftEffect $ log $ "fetchActivity: decode error: " <> show decErr
+          pure []
+        Right rows -> pure rows

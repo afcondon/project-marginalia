@@ -42,18 +42,27 @@ html, body {
   min-height: 100vh;
   min-height: 100dvh;
   overscroll-behavior: none;
+  overflow-x: hidden;
 }
 
 /* Safe-area insets for iPhone notch / Dynamic Island */
 .capture-app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow-x: hidden;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+}
+
+/* Dossier takes full app with its own internal scroll */
+.capture-app-dossier {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 /* =============================================================================
@@ -520,4 +529,342 @@ html, body {
   color: var(--accent);
   text-align: center;
   padding: 8px 14px;
+}
+
+/* =============================================================================
+   Tab bar — Capture | Browse
+   ============================================================================= */
+
+.tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  flex-shrink: 0;
+  z-index: 11;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 0 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* overlap the bar's bottom rule */
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-light);
+  cursor: pointer;
+  -webkit-appearance: none;
+}
+
+.tab:active {
+  background: rgba(26, 22, 18, 0.04);
+}
+
+.tab-active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* =============================================================================
+   Swipe pane — horizontal track holding Capture + Browse side-by-side
+   ============================================================================= */
+
+.swipe-pane {
+  display: flex;
+  width: 200vw;
+  flex: 1;
+  min-height: 0;
+  will-change: transform;
+  touch-action: pan-y; /* allow vertical scroll; we handle horizontal */
+}
+
+.swipe-pane-animating {
+  transition: transform 220ms ease-out;
+}
+
+.screen {
+  width: 100vw;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* =============================================================================
+   Browse screen — activity-sorted mini-card grid
+   ============================================================================= */
+
+.browse-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.browse-title {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.browse-subtitle {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+}
+
+.browse-loading {
+  padding: 40px 14px;
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ink-light);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.browse-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 8px;
+}
+
+.mini-card {
+  aspect-ratio: 1 / 1;
+  padding: 8px 8px 6px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-left-width: 3px;
+  border-left-color: var(--ink-muted);
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mini-card:active {
+  background: rgba(26, 22, 18, 0.04);
+}
+
+.mini-card.domain-programming    { border-left-color: var(--color-programming); }
+.mini-card.domain-music          { border-left-color: var(--color-music); }
+.mini-card.domain-house          { border-left-color: var(--color-house); }
+.mini-card.domain-woodworking    { border-left-color: var(--color-woodworking); }
+.mini-card.domain-garden         { border-left-color: var(--color-garden); }
+.mini-card.domain-infrastructure { border-left-color: var(--color-infrastructure); }
+
+/* Dim non-active projects a touch so active ones visually rise. */
+.mini-card.status-idea,
+.mini-card.status-someday   { opacity: 0.85; }
+.mini-card.status-dormant,
+.mini-card.status-done,
+.mini-card.status-defunct,
+.mini-card.status-evolved   { opacity: 0.6; }
+
+.mini-card-name {
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.mini-card-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.mini-card-domain {
+  font-family: var(--sans);
+  font-size: 8px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.mini-card-score {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-light);
+  flex-shrink: 0;
+}
+
+/* Slightly tighter on very narrow phones */
+@media (max-width: 360px) {
+  .browse-grid { gap: 5px; padding: 6px; }
+  .mini-card { padding: 6px 6px 5px; }
+  .mini-card-name { font-size: 10.5px; -webkit-line-clamp: 4; }
+}
+
+/* Two columns when space allows (larger phones in landscape, small tablets) */
+@media (min-width: 560px) {
+  .browse-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* =============================================================================
+   Dossier — read-only project detail for mobile
+   ============================================================================= */
+
+.capture-app-dossier {
+  background: var(--paper);
+}
+
+.dossier-mobile {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.dossier-back {
+  align-self: flex-start;
+  padding: 10px 14px;
+  background: var(--paper);
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+  cursor: pointer;
+  -webkit-appearance: none;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.dossier-back:active {
+  color: var(--ink);
+}
+
+.dossier-head {
+  padding: 4px 14px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.dossier-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.dossier-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.dossier-domain {
+  color: var(--ink-muted);
+}
+
+.dossier-status {
+  color: var(--ink-light);
+  padding-left: 6px;
+  border-left: 1px solid var(--rule);
+}
+
+.dossier-description {
+  padding: 12px 14px;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+}
+
+.dossier-notes {
+  padding: 10px 14px 20px;
+}
+
+.dossier-notes-label {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-light);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.dossier-note {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(212, 206, 196, 0.4);
+}
+
+.dossier-note:last-child {
+  border-bottom: none;
+}
+
+.dossier-note-meta {
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-light);
+  margin-bottom: 3px;
+}
+
+.dossier-note-content {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dossier-loading {
+  padding: 40px 14px;
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ink-light);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }

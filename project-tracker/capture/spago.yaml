@@ -21,8 +21,10 @@ package:
     - foreign-object
     - halogen
     - maybe
+    - numbers
     - prelude
     - strings
     - tuples
     - web-dom
     - web-html
+    - web-touchevents

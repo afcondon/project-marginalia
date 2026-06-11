@@ -19,6 +19,33 @@ export const copyToClipboard = (s) => () => {
 export const getHash_ = () => window.location.hash.slice(1);
 export const setHash_ = (hash) => () => { window.location.hash = hash; };
 
+// Weather (Raker UI) cutoff: when the user last marked their digest reviewed.
+// Stored in localStorage as an ISO string for now; will move to a server
+// endpoint once the CLI surface is retired so both clients share state.
+const WEATHER_CUTOFF_KEY = "marginalia.weather.cutoff";
+
+// Returns the current cutoff or "" if unset. PureScript treats "" as Nothing
+// via Data.String.null in the Halogen layer.
+export const getWeatherCutoff_ = () => {
+  try {
+    return localStorage.getItem(WEATHER_CUTOFF_KEY) || "";
+  } catch (e) {
+    return "";
+  }
+};
+
+export const setWeatherCutoff_ = (iso) => () => {
+  try {
+    localStorage.setItem(WEATHER_CUTOFF_KEY, iso);
+  } catch (e) {
+    // SecurityError, QuotaExceededError, etc — silent. The next scan
+    // will re-show the same digest, which is the safe failure mode.
+  }
+};
+
+// Current ISO timestamp in true UTC. Used when the user advances the cutoff.
+export const nowIso_ = () => new Date().toISOString();
+
 // Subscribe to hashchange events. Calls the callback with the new hash.
 // Returns an unsubscribe effect.
 export const onHashChange_ = (callback) => () => {

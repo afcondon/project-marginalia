@@ -45,6 +45,11 @@ export const buildCreateBody = (input) => {
 export const buildNoteBody = (content) =>
   JSON.stringify({ content, author: "human" });
 
+// Variant of buildNoteBody that lets the caller pick the author.
+// Used by the Weather section to file `author: "quick-win"` marker notes.
+export const buildNoteBodyAs = (author) => (content) =>
+  JSON.stringify({ content, author });
+
 // Build JSON body for POST /api/projects/:id/tags
 export const buildTagBody = (tag) =>
   JSON.stringify({ tag });
