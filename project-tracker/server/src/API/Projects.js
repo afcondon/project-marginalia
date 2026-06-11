@@ -49,7 +49,8 @@ export const buildProjectListJson = (rows) => {
     updatedAt: row.updated_at || null,
     tags: row.tags ? row.tags.split(', ').filter(t => t.trim()) : [],
     coverUrl: filePathToAttachmentUrl(row.cover_path),
-    blogStatus: row.blog_status || null
+    blogStatus: row.blog_status || null,
+    humanSummary: row.human_summary || null
   }));
   return JSON.stringify({ projects, count: projects.length });
 };
@@ -134,6 +135,7 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
     preferredView: project.preferred_view || null,
     blogStatus: project.blog_status || null,
     blogContent: project.blog_content || null,
+    humanSummary: project.human_summary || null,
     tags: project.tags ? project.tags.split(', ').filter(t => t.trim()) : [],
     createdAt: project.created_at,
     updatedAt: project.updated_at,

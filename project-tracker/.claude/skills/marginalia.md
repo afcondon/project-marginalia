@@ -156,6 +156,13 @@ Body: same shape as POST, partial — only include fields you want to change.
 #                                    "Blog posts" section below)
 #   "blogContent":       "# ..."   (markdown body; only meaningful when
 #                                    blogStatus is "drafted" or "published")
+#   "humanSummary":      "..."     (the owner's editorial summary, shown on
+#                                    P1/P2 aggregate cards on the front page.
+#                                    HUMAN-AUTHORED ONLY: Claude must never
+#                                    write or update this field — it is the
+#                                    owner's voice, strictly additional to
+#                                    `description` (the Claude-maintained
+#                                    agent-bootstrap summary + Raker flow))
 
 POST /api/projects/:id/servers
 Body: { "role":          "api",

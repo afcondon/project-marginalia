@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS projects (
     cover_attachment_id INTEGER,          -- id of the attachment to use as the project's hero image on the Register
     blog_status    TEXT,                  -- NULL = unclassified | 'not_needed' | 'wanted' | 'drafted' | 'published'
     blog_content   TEXT,                  -- markdown body, populated when blog_status in ('drafted', 'published')
+    human_summary TEXT,                   -- the owner's editorial summary, human-authored only; shown on P1/P2 aggregate cards. Distinct from description (the Claude-maintained agent-bootstrap summary)
     created_at    TIMESTAMP DEFAULT current_timestamp,
     updated_at    TIMESTAMP DEFAULT current_timestamp
 );
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS projects (
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_status TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS human_summary TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);

@@ -115,6 +115,9 @@ const fileToCard = (domainName, filePath) => {
     tags: [],
     coverUrl: null,
     blogStatus: null,
+    // Single-line frontmatter only (the minimal parser is line-based); life
+    // projects are written in the owner's voice anyway, so this is optional.
+    humanSummary: fm.human_summary || null,
     _filePath: filePath,
     _body: parsed.body,
   };
@@ -154,10 +157,20 @@ const dbRowToCard = (row) => ({
   tags: row.tags ? row.tags.split(', ').filter(t => t.trim()) : [],
   coverUrl: filePathToAttachmentUrl(row.cover_path),
   blogStatus: row.blog_status || null,
+  humanSummary: row.human_summary || null,
 });
 
-// updatedAt DESC, NULLS LAST — matches listProjects' SQL ORDER BY.
+// Editorial order for the Register: living projects above terminal ones
+// (done / evolved / defunct), updatedAt DESC within each class, NULLS LAST.
+// The first card renders as the front-page Lead, so without the class split
+// a bulk curation pass (status transitions bump updated_at) puts tombstones
+// above the fold. Status-filtered views are single-class, hence unaffected.
+const isTerminal = (s) => s === 'done' || s === 'evolved' || s === 'defunct';
+
 const byUpdatedDesc = (a, b) => {
+  const ta = isTerminal(a.status) ? 1 : 0;
+  const tb = isTerminal(b.status) ? 1 : 0;
+  if (ta !== tb) return ta - tb;
   if (!a.updatedAt && !b.updatedAt) return 0;
   if (!a.updatedAt) return 1;
   if (!b.updatedAt) return -1;
@@ -287,6 +300,7 @@ export const detailJson_ = (pid) => () => {
     preferredView: null,
     blogStatus: null,
     blogContent: null,
+    humanSummary: card.humanSummary,
     tags: [],
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,

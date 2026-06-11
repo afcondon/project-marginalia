@@ -181,6 +181,7 @@ main = launchAff_ do
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER"
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_status TEXT"
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT"
+  DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS human_summary TEXT"
   liftEffect $ log "Schema migrations applied"
 
   -- One-time hoist of existing DB blog_content values into <slug>.md
