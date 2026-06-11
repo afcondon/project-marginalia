@@ -347,7 +347,7 @@ export const detailJson_ = (pid) => () => {
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     notes,
-    dependencies: { blocking: [], blockedBy: [] },
+    dependencies: { blocking: [], blockedBy: [], related: [] },
     attachments,
   });
 };

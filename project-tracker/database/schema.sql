@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_repo ON projects(repo);
 CREATE TABLE IF NOT EXISTS dependencies (
     blocker_id      INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
     blocked_id      INTEGER NOT NULL /* REFERENCES projects(id) -- disabled: DuckDB FK prevents UPDATE on referenced rows */,
-    dependency_type TEXT DEFAULT 'blocks',  -- blocks | informs | feeds_into
+    dependency_type TEXT DEFAULT 'blocks',  -- blocks | informs | feeds_into | related (symmetric "see also" — cross-tree curation links)
     PRIMARY KEY (blocker_id, blocked_id)
 );
 

@@ -62,8 +62,11 @@ getIntField key obj = case FO.lookup key obj of
     Nothing -> Nothing
     Just n -> Int.fromNumber n
 
+-- | "related" is the symmetric, non-directional edge: a cross-tree "see also"
+-- | (e.g. Polyglot exhibiting purerl-tidal). The tree stays single-parented;
+-- | curation surfaces link sideways instead of multi-parenting.
 isValidDepType :: String -> Boolean
-isValidDepType t = t == "blocks" || t == "informs" || t == "feeds_into"
+isValidDepType t = t == "blocks" || t == "informs" || t == "feeds_into" || t == "related"
 
 -- =============================================================================
 -- GET /api/dependencies
@@ -99,7 +102,7 @@ createDependency db bodyStr = case parseBody bodyStr of
               Just t -> t
               Nothing -> "blocks"
         if not (isValidDepType depType)
-          then badRequest' jsonHeaders """{"error": "type must be one of: blocks, informs, feeds_into"}"""
+          then badRequest' jsonHeaders """{"error": "type must be one of: blocks, informs, feeds_into, related"}"""
           else do
             blockerRows <- queryAllParams db "SELECT id FROM projects WHERE id = ?" [ unsafeToForeign blockerId ]
             blockedRows <- queryAllParams db "SELECT id FROM projects WHERE id = ?" [ unsafeToForeign blockedId ]

@@ -101,22 +101,18 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
 
   const blocking = [];
   const blockedBy = [];
+  const related = [];
   for (const d of (deps || [])) {
-    if (Number(d.blocker_id) === projectId) {
-      blocking.push({
-        projectId: Number(d.blocked_id),
-        projectName: d.blocked_name,
-        projectStatus: d.blocked_status,
-        dependencyType: d.dependency_type
-      });
-    } else {
-      blockedBy.push({
-        projectId: Number(d.blocker_id),
-        projectName: d.blocker_name,
-        projectStatus: d.blocker_status,
-        dependencyType: d.dependency_type
-      });
-    }
+    const iAmBlocker = Number(d.blocker_id) === projectId;
+    const other = iAmBlocker
+      ? { projectId: Number(d.blocked_id), projectName: d.blocked_name,
+          projectStatus: d.blocked_status, dependencyType: d.dependency_type }
+      : { projectId: Number(d.blocker_id), projectName: d.blocker_name,
+          projectStatus: d.blocker_status, dependencyType: d.dependency_type };
+    // "related" is symmetric — same bucket whichever side this project is on.
+    if (d.dependency_type === 'related') related.push(other);
+    else if (iAmBlocker) blocking.push(other);
+    else blockedBy.push(other);
   }
 
   return JSON.stringify({
@@ -147,7 +143,8 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
     })),
     dependencies: {
       blocking,
-      blockedBy
+      blockedBy,
+      related
     },
     attachments: (attachments || []).map(a => ({
       id: Number(a.id),

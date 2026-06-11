@@ -206,6 +206,17 @@ POST /api/agent/projects/:id/status
 Body: { "status": "active", "reason": "optional explanation" }
 # Lifecycle-validated status change. Returns 400 with the valid
 # next-statuses in the error message if the transition is illegal.
+
+POST /api/dependencies
+Body: { "blockerId": 134, "blockedId": 90, "type": "related" }
+# type ∈ blocks (default) | informs | feeds_into | related.
+# "related" is the SYMMETRIC cross-tree "see also" edge — use it when a
+# curation-surface project (e.g. Polyglot) wants to exhibit/link a project
+# that lives in another family, instead of multi-parenting. It appears in
+# both projects' detail under dependencies.related and renders as a
+# "see also" rail in the dossier. The parent tree stays single-parented.
+
+DELETE /api/dependencies/:blockerId/:blockedId
 ```
 
 ### Status lifecycle

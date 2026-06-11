@@ -2351,32 +2351,34 @@ renderDependenciesBlock :: forall m. ProjectDetail -> H.ComponentHTML Action () 
 renderDependenciesBlock detail =
   let blocking = detail.dependencies.blocking
       blockedBy = detail.dependencies.blockedBy
-  in if Array.null blocking && Array.null blockedBy
+      related = detail.dependencies.related
+      depList rows = HH.ul_
+        (map (\d -> HH.li_
+          [ HH.span
+              [ HP.class_ (H.ClassName "dep-link")
+              , HE.onClick \_ -> SelectProject d.projectId
+              ]
+              [ HH.text d.projectName ]
+          ]) rows)
+  in if Array.null blocking && Array.null blockedBy && Array.null related
     then HH.span [ HP.class_ (H.ClassName "marginalia-muted") ] [ HH.text "(none)" ]
     else HH.div [ HP.class_ (H.ClassName "deps-block") ]
       [ if Array.null blockedBy then HH.text ""
         else HH.div_
           [ HH.span [ HP.class_ (H.ClassName "deps-sublabel") ] [ HH.text "blocked by" ]
-          , HH.ul_
-            (map (\d -> HH.li_
-              [ HH.span
-                  [ HP.class_ (H.ClassName "dep-link")
-                  , HE.onClick \_ -> SelectProject d.projectId
-                  ]
-                  [ HH.text d.projectName ]
-              ]) blockedBy)
+          , depList blockedBy
           ]
       , if Array.null blocking then HH.text ""
         else HH.div_
           [ HH.span [ HP.class_ (H.ClassName "deps-sublabel") ] [ HH.text "blocking" ]
-          , HH.ul_
-            (map (\d -> HH.li_
-              [ HH.span
-                  [ HP.class_ (H.ClassName "dep-link")
-                  , HE.onClick \_ -> SelectProject d.projectId
-                  ]
-                  [ HH.text d.projectName ]
-              ]) blocking)
+          , depList blocking
+          ]
+      -- Symmetric cross-tree curation links ("related" dependency type) —
+      -- e.g. Polyglot exhibiting purerl-tidal from another project family.
+      , if Array.null related then HH.text ""
+        else HH.div_
+          [ HH.span [ HP.class_ (H.ClassName "deps-sublabel") ] [ HH.text "see also" ]
+          , depList related
           ]
       ]
 

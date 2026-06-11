@@ -224,6 +224,7 @@ type DepRef =
 type Dependencies =
   { blocking :: Array DepRef
   , blockedBy :: Array DepRef
+  , related :: Array DepRef   -- symmetric "see also" cross-tree links
   }
 
 type Attachment =
@@ -563,7 +564,8 @@ decodeDependencies json = case toObject json of
   Just obj -> ado
     blocking <- decodeArrayField "blocking" decodeDepRef obj
     blockedBy <- decodeArrayField "blockedBy" decodeDepRef obj
-    in { blocking, blockedBy }
+    related <- decodeArrayField "related" decodeDepRef obj
+    in { blocking, blockedBy, related }
 
 decodeProjectDetail :: Json -> Either JsonDecodeError ProjectDetail
 decodeProjectDetail json = case toObject json of
@@ -575,7 +577,7 @@ decodeProjectDetail json = case toObject json of
     status <- reqStatus "status" obj
     notes <- decodeArrayField "notes" decodeNote obj
     dependencies <- case getField "dependencies" obj of
-      Nothing -> Right { blocking: [], blockedBy: [] }
+      Nothing -> Right { blocking: [], blockedBy: [], related: [] }
       Just depsJson -> decodeDependencies depsJson
     attachments <- decodeArrayField "attachments" decodeAttachment obj
     in { id
