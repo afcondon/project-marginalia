@@ -12,6 +12,7 @@
 -- | JSON marshalling. This module just adapts `Maybe`/`Effect` to it.
 module API.Infovore
   ( federatedListJson
+  , federatedStatsJson
   , detailJson
   ) where
 
@@ -31,6 +32,16 @@ foreign import federatedListJson_
   -> Effect String
 
 foreign import detailJson_ :: Int -> Effect (Nullable String)
+
+-- | Build the GET /api/stats payload: the DB aggregates plus the markdown
+-- | life-projects folded into totals / domains / byDomain. Takes the DB's
+-- | project-id rows for the same dedupe-by-id bridge the list endpoint uses.
+foreign import federatedStatsJson
+  :: Rows  -- domain_status_counts rows
+  -> Rows  -- totals row
+  -> Rows  -- distinct-domain rows
+  -> Rows  -- SELECT id FROM projects (dedupe)
+  -> Effect String
 
 -- | Build the GET /api/projects payload, merging the already-filtered DB rows
 -- | with the markdown life-projects (same filters re-applied, deduped by id).

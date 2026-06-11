@@ -195,6 +195,56 @@ export const federatedListJson_ =
     return JSON.stringify({ projects, count: projects.length });
   };
 
+// GET /api/stats, federated. Takes the three DB result sets Stats.purs already
+// queries, plus the full project-id list for dedupe, and folds the markdown
+// life-projects into totals / domains / byDomain so the nav pills agree with
+// the federated Register (masthead). Same dedupe-by-id bridge as the list:
+// a card whose tracker_id still exists as a DB row is not double-counted.
+// No Maybe args, so no PureScript-side wrapper — exported under the foreign
+// import's own name, unlike the underscore-suffixed pairs above.
+// Curried + thunked: (dsRows)(totalsRows)(domainRows)(idRows)() : String  [Effect].
+export const federatedStatsJson =
+  (domainStatusRows) => (totalsRows) => (domainRows) => (idRows) => () => {
+    const totals = totalsRows && totalsRows.length > 0 ? totalsRows[0] : {};
+    let totalProjects = Number(totals.total_projects) || 0;
+
+    const byDomain = {};
+    for (const row of (domainStatusRows || [])) {
+      const domain = row.domain;
+      if (!byDomain[domain]) {
+        byDomain[domain] = { domain, statuses: {}, total: 0 };
+      }
+      const count = Number(row.project_count) || 0;
+      byDomain[domain].statuses[row.status] = count;
+      byDomain[domain].total += count;
+    }
+
+    const dbIds = new Set((idRows || []).map(r => Number(r.id)));
+    const domainSet = new Set((domainRows || []).map(r => r.domain));
+    for (const card of readAllCards()) {
+      if (dbIds.has(card.id)) continue;
+      domainSet.add(card.domain);
+      if (!byDomain[card.domain]) {
+        byDomain[card.domain] = { domain: card.domain, statuses: {}, total: 0 };
+      }
+      const d = byDomain[card.domain];
+      d.statuses[card.status] = (d.statuses[card.status] || 0) + 1;
+      d.total += 1;
+      totalProjects += 1;
+    }
+
+    return JSON.stringify({
+      totals: {
+        projects: totalProjects,
+        tags: Number(totals.total_tags) || 0,
+        dependencies: Number(totals.total_dependencies) || 0,
+        notes: Number(totals.total_notes) || 0
+      },
+      domains: Array.from(domainSet).sort(),
+      byDomain: Object.values(byDomain)
+    });
+  };
+
 // GET /api/projects/:id fallback. Returns a detail-shaped JSON string for the
 // life-project carrying that id, or null if none. Notes come from the
 // "## Notes" section (one note per "- " bullet); deps/attachments are empty —
