@@ -12,15 +12,21 @@ It's authoritative, fast, and structured.
 
 ## Where it runs
 
-- **API base URL**: `http://localhost:3100` (MBP), or `http://andrews-mac-mini:3100` over Tailscale once project #203 lands. Override with the `MARGINALIA_API` env var when running outside the canonical machine.
-- **Frontend**: same host, port `3101`.
-- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb` on whichever machine is canonical.
+The **MacMini is the canonical host** (since project #203 landed,
+2026-05): launchd-managed, on all the time.
 
-If the API isn't responding, the tracker isn't running. Start it with:
+- **API base URL**: `http://andrews-mac-mini:3100` — use this from
+  every machine on the tailnet, including the MBP. `localhost:3100`
+  is correct only in a shell ON the mini itself. Override with the
+  `MARGINALIA_API` env var for unusual setups.
+- **Frontend**: `http://andrews-mac-mini:3101`.
+- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb` **on the mini** (login `andrew`).
 
-```
-cd ~/work/afc-work/agent-teams/project-tracker && node server/run.js
-```
+If the API isn't responding: check Tailscale is up, then check the
+launchd agents on the mini (`ssh andrew@andrews-mac-mini`, see
+`tools/launchd/`; note launchd backoff can make a restarting service
+look dead for ~40s). Do NOT start a local tracker on the MBP — a
+second instance against a stale DB copy is worse than a brief outage.
 
 ### Multi-host topology (project #202)
 
@@ -93,7 +99,7 @@ sorted by port. Each entry has:
 - `projectId`, `projectName`, `projectSlug` — who owns it
 - `role` — `api`, `frontend`, `websocket`, `worker`, `whisper`, etc.
 - `port` — the TCP port (may be null for workers without a port)
-- `url` — canonical URL (e.g. `http://localhost:3100` for mbp-local; `http://andrews-mac-mini:8090` for a service intended to be reached via Tailscale)
+- `url` — canonical URL (e.g. `http://localhost:3050` for an mbp-local dev service; `http://andrews-mac-mini:8090` for a service intended to be reached via Tailscale; port 3100 itself is the tracker API on the mini)
 - `startCommand` — **polymorphic start instruction** (see below). NULL when the service is managed by another launcher (e.g. DeepStar #191) — registry rows with NULL startCommand are documentation/collision-avoidance only, not actionable by SDI.
 - `description` — human-readable note
 - `host` — `mbp` | `macmini` | `cloudflare` | `andrew-only` | NULL. **Set this on every new entry** — SDI uses it to decide spawn vs. redirect.
@@ -166,8 +172,8 @@ Body: same shape as POST, partial — only include fields you want to change.
 
 POST /api/projects/:id/servers
 Body: { "role":          "api",
-        "port":          3100,
-        "url":           "http://localhost:3100",
+        "port":          3050,
+        "url":           "http://localhost:3050",
         "startCommand":  "cd /absolute/path && node server/run.js",
         "description":   "...",
         "host":          "mbp",                   # required-in-spirit; SDI keys on this
@@ -301,11 +307,11 @@ e.g. mark all programming-domain projects as `wanted` in one pass:
 
 ```python
 import json, urllib.request
-for p in json.load(urllib.request.urlopen('http://localhost:3100/api/projects'))['projects']:
+for p in json.load(urllib.request.urlopen('http://andrews-mac-mini:3100/api/projects'))['projects']:
     if p['domain'] != 'programming': continue
     body = json.dumps({'blogStatus': 'wanted'}).encode()
     req = urllib.request.Request(
-        f'http://localhost:3100/api/projects/{p["id"]}',
+        f'http://andrews-mac-mini:3100/api/projects/{p["id"]}',
         data=body,
         headers={'Content-Type': 'application/json'},
         method='PUT',
@@ -503,13 +509,13 @@ When the user asks you to get a project (or set of projects) running:
 
 1. **Resolve**: find the project(s) by name, slug, or search
    ```
-   curl -s http://localhost:3100/api/projects?search=<name> | jq
+   curl -s http://andrews-mac-mini:3100/api/projects?search=<name> | jq
    ```
 2. **Enumerate servers**: get the full detail or the servers endpoint
    ```
-   curl -s http://localhost:3100/api/projects/<id>/servers | jq
+   curl -s http://andrews-mac-mini:3100/api/projects/<id>/servers | jq
    ```
-3. **Check for collisions**: `curl -s http://localhost:3100/api/ports | jq .collisions`
+3. **Check for collisions**: `curl -s http://andrews-mac-mini:3100/api/ports | jq .collisions`
 4. **For each server**, read the `startCommand` and act on it according to
    the table above. Run in the background. Redirect stdout/stderr to a log
    file under `/tmp/marginalia-<slug>-<role>.log`.
@@ -541,9 +547,9 @@ asks you to figure it out:
    redirect decision keys on it.
 5. **If it works**, POST it to marginalia:
    ```
-   curl -s -X POST http://localhost:3100/api/projects/<id>/servers \
+   curl -s -X POST http://andrews-mac-mini:3100/api/projects/<id>/servers \
      -H 'Content-Type: application/json' \
-     -d '{"role":"api","port":3100,"url":"http://localhost:3100",
+     -d '{"role":"api","port":3050,"url":"http://localhost:3050",
           "startCommand":"cd /abs/path && node server/run.js",
           "description":"HTTPurple API",
           "host":"mbp",

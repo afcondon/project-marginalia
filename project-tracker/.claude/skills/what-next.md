@@ -46,8 +46,8 @@ all heuristic axes below.
 ```
 # All quick-win marker notes across the workspace, with their source project.
 # Iterates active projects only — quick-wins on dormant/done projects are rare.
-curl -s 'http://localhost:3100/api/projects?status=active' | jq -r '.projects[].id' | while read id; do
-  curl -s "http://localhost:3100/api/projects/$id" | jq -r --arg pid "$id" '
+curl -s 'http://andrews-mac-mini:3100/api/projects?status=active' | jq -r '.projects[].id' | while read id; do
+  curl -s "http://andrews-mac-mini:3100/api/projects/$id" | jq -r --arg pid "$id" '
     (.name as $name | .slug as $slug
      | .notes // []
      | map(select(.author == "quick-win"))
@@ -79,7 +79,7 @@ likely data-hygiene targets: the status is probably stale and doesn't
 reflect reality.
 
 ```
-curl -s 'http://localhost:3100/api/projects?status=active' | jq '
+curl -s 'http://andrews-mac-mini:3100/api/projects?status=active' | jq '
   .projects | map(select(.updatedAt != null))
   | map(select((now - (.updatedAt | fromdate)) > (30 * 86400)))
   | sort_by(.updatedAt) | .[0:5]'
@@ -94,8 +94,8 @@ freeform dictated thoughts. If the user has been dictating, there may be
 notes waiting to be processed into per-project edits.
 
 ```
-curl -s http://localhost:3100/api/projects/123 | jq '.notes | length'
-curl -s http://localhost:3100/api/projects/123 | jq '.notes[0:5]'
+curl -s http://andrews-mac-mini:3100/api/projects/123 | jq '.notes | length'
+curl -s http://andrews-mac-mini:3100/api/projects/123 | jq '.notes[0:5]'
 ```
 
 Action: **"Process the inbox — read each note, identify the projects it
@@ -109,8 +109,8 @@ patterns like `TODO`, `should`, `need to`, `- [ ]`, "remember to", etc.
 
 ```
 # Fetch all projects with recent updates, pull notes from each
-curl -s 'http://localhost:3100/api/projects' | jq -r '.projects[].id' | while read id; do
-  curl -s "http://localhost:3100/api/projects/$id" | jq -r \
+curl -s 'http://andrews-mac-mini:3100/api/projects' | jq -r '.projects[].id' | while read id; do
+  curl -s "http://andrews-mac-mini:3100/api/projects/$id" | jq -r \
     '"\(.name): " + (.notes // [] | map(.content) | join(" | "))'
 done | grep -iE 'TODO|should|need to|- \[ \]|remember' | head -20
 ```
@@ -123,7 +123,7 @@ Any project with `description IS NULL` or a very short description.
 These are usually imports that never got cleaned up.
 
 ```
-curl -s 'http://localhost:3100/api/projects' | jq '
+curl -s 'http://andrews-mac-mini:3100/api/projects' | jq '
   .projects | map(select(.description == null or (.description | length) < 30))
   | .[0:5]'
 ```
@@ -137,7 +137,7 @@ Non-programming domains (house, garden, woodworking, music) with
 
 ```
 for domain in house garden woodworking music; do
-  curl -s "http://localhost:3100/api/projects?domain=$domain&status=someday" \
+  curl -s "http://andrews-mac-mini:3100/api/projects?domain=$domain&status=someday" \
     | jq ".projects[0:3] | .[] | \"$domain: \(.name) (updated: \(.updatedAt // \"never\"))\""
 done
 ```
@@ -154,8 +154,8 @@ with `status=done` or `status=defunct` that isn't tagged `blogged` is a
 candidate. Short posts about defunct projects are fine — often better.
 
 ```
-curl -s 'http://localhost:3100/api/projects?status=done' | jq '.projects[0:5]'
-curl -s 'http://localhost:3100/api/projects?status=defunct' | jq '.projects[0:5]'
+curl -s 'http://andrews-mac-mini:3100/api/projects?status=done' | jq '.projects[0:5]'
+curl -s 'http://andrews-mac-mini:3100/api/projects?status=defunct' | jq '.projects[0:5]'
 ```
 
 Action: **"Write a blog post about this on blog.hylograph.net (#142).
@@ -184,7 +184,7 @@ recent activity on the owning project? If a service is running but the
 project hasn't been touched in weeks, either use it or turn it off.
 
 ```
-curl -s http://localhost:3100/api/ports | jq '.servers[] | {projectName, role, port}'
+curl -s http://andrews-mac-mini:3100/api/ports | jq '.servers[] | {projectName, role, port}'
 ```
 
 Action: **"Revisit project X or stop its launchd agent."**
