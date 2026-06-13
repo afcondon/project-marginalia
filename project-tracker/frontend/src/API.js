@@ -145,6 +145,7 @@ export const buildUpdateBody = (input) => {
   if (input.statusReason) body.statusReason = input.statusReason;
   if (input.preferredView) body.preferredView = input.preferredView;
   if (input.blogStatus) body.blogStatus = input.blogStatus;
+  if (input.humanSummary) body.humanSummary = input.humanSummary;
   // blogContent is no longer sent from the UI: drafts live on disk and
   // VS Code writes them directly. See BlogDrafts.purs on the server.
   return JSON.stringify(body);

@@ -169,6 +169,7 @@ pickTier idx project =
 -- | Everything else goes through the generic DossierStartEdit/CommitEdit path.
 data EditableField
   = FDescription
+  | FHumanSummary
   | FSubdomain
   | FRepo
   | FSourceUrl
@@ -179,6 +180,7 @@ derive instance Eq EditableField
 fieldLabel :: EditableField -> String
 fieldLabel = case _ of
   FDescription -> "description"
+  FHumanSummary -> "human summary"
   FSubdomain -> "subdomain"
   FRepo -> "repo"
   FSourceUrl -> "source url"
@@ -1546,6 +1548,7 @@ renderDossier state detail =
             , renderDossierTitle state detail
             , HH.div [ HP.class_ (H.ClassName "dossier-rule") ] []
             , renderDossierDescription state detail
+            , renderDossierHumanSummary state detail
             , renderDossierNotes state detail
             ]
         , HH.aside [ HP.class_ (H.ClassName "dossier-marginalia") ]
@@ -1708,6 +1711,42 @@ renderDossierDescription state detail =
             then HH.p [ HP.class_ (H.ClassName "dossier-description-empty") ]
               [ HH.text "No description. Click to write one." ]
             else HH.p_ [ HH.text currentDesc ]
+        ]
+
+-- | Click-to-edit human summary — the owner's editorial voice, distinct from
+-- | the Claude-maintained description. This is what the public "Currently"
+-- | page on andrewcondon.com pulls from. Same edit mechanics as the
+-- | description block; commits on blur.
+renderDossierHumanSummary :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierHumanSummary state detail =
+  case state.dossierEditField of
+    Just FHumanSummary ->
+      HH.div [ HP.class_ (H.ClassName "dossier-human-summary-edit") ]
+        [ HH.textarea
+            [ HP.class_ (H.ClassName "dossier-human-summary-input")
+            , HP.value state.dossierEditValue
+            , HP.autofocus true
+            , HP.rows 8
+            , HP.placeholder "Your words — what this is, in your own voice."
+            , HE.onValueInput DossierSetEditValue
+            , HE.onBlur \_ -> DossierCommitEdit
+            ]
+        , HH.div [ HP.class_ (H.ClassName "dossier-edit-hint") ]
+            [ HH.text "Blur to save · Esc to cancel" ]
+        ]
+    _ ->
+      let currentSummary = fromMaybe "" detail.humanSummary
+      in HH.div
+        [ HP.class_ (H.ClassName "dossier-human-summary editable")
+        , HE.onClick \_ -> DossierStartEdit FHumanSummary currentSummary
+        , HP.title "Click to edit human summary (your editorial voice)"
+        ]
+        [ HH.div [ HP.class_ (H.ClassName "dossier-field-label") ]
+            [ HH.text "Human summary" ]
+        , if String.null currentSummary
+            then HH.p [ HP.class_ (H.ClassName "dossier-human-summary-empty") ]
+              [ HH.text "No human summary. Click to write one — this is what the public Currently page shows." ]
+            else HH.p_ [ HH.text currentSummary ]
         ]
 
 -- | Note stream: numbered list of existing notes, plus an append-only
@@ -3330,6 +3369,7 @@ buildInput state =
   , statusReason: ""
   , preferredView: ""
   , blogStatus: ""
+  , humanSummary: ""
   }
 
 -- =============================================================================
@@ -3455,6 +3495,7 @@ emptyProjectInput =
   , statusReason: ""
   , preferredView: ""
   , blogStatus: ""
+  , humanSummary: ""
   }
 
 -- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
@@ -3473,6 +3514,7 @@ detailToInput d =
   , statusReason: ""
   , preferredView: ""   -- blank means "don't update" (see buildUpdateBody)
   , blogStatus: ""      -- blank means "don't update"
+  , humanSummary: ""    -- blank means "don't update"; set only via FHumanSummary edit
   }
 
 -- | Copy a detail into a ProjectInput with a single field overridden.
@@ -3481,7 +3523,8 @@ detailToInputWith :: EditableField -> String -> ProjectDetail -> ProjectInput
 detailToInputWith field value d =
   let base = detailToInput d
   in case field of
-    FDescription -> base { description = value }
+    FDescription  -> base { description = value }
+    FHumanSummary -> base { humanSummary = value }
     FSubdomain   -> base { subdomain = value }
     FRepo        -> base { repo = value }
     FSourceUrl   -> base { sourceUrl = value }

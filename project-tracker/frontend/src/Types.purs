@@ -264,6 +264,7 @@ type ProjectDetail =
   , status :: Status
   , evolvedInto :: Maybe Int
   , description :: Maybe String
+  , humanSummary :: Maybe String   -- owner's editorial voice (Currently page source)
   , sourceUrl :: Maybe String
   , sourcePath :: Maybe String
   , repo :: Maybe String
@@ -315,6 +316,7 @@ type ProjectInput =
   , statusReason :: String
   , preferredView :: String   -- empty string means "don't update"
   , blogStatus :: String      -- empty string means "don't update"
+  , humanSummary :: String    -- the owner's editorial voice; empty = "don't update"
   -- blogContent is no longer part of ProjectInput: drafts live on disk
   -- as files under $MARGINALIA_BLOG_DRAFTS and are written by VS Code
   -- directly. The browser only reads them via GET /api/projects/:id.
@@ -589,6 +591,7 @@ decodeProjectDetail json = case toObject json of
        , status
        , evolvedInto: optInt "evolvedInto" obj
        , description: optString "description" obj
+       , humanSummary: optString "humanSummary" obj
        , sourceUrl: optString "sourceUrl" obj
        , sourcePath: optString "sourcePath" obj
        , repo: optString "repo" obj
