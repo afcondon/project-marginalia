@@ -2484,6 +2484,11 @@ body {
 
 /* ----- Minard map (newspaper) view ----------------------------------- */
 
+.map-icon-btn.active {
+  background: var(--ink, #16140f);
+  color: var(--paper, #fff);
+}
+
 .map-view { width: 100%; }
 
 .map-frame {

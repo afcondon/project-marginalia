@@ -380,6 +380,7 @@ data Action
   | LoadActivity
   -- Minard map (newspaper) view
   | ShowMap
+  | ToggleMap          -- header button: into the map, or back out to the list
   -- Manual pin/unpin. Toggles the `pinned` tag on the project; the activity
   -- endpoint gives that tag a 3× score multiplier. MouseEvent argument lets
   -- us stopPropagation so clicking the pin inside a clickable row/card
@@ -596,7 +597,7 @@ renderHeader state =
             , HH.input
                 [ HP.class_ (H.ClassName "header-search")
                 , HP.type_ HP.InputText
-                , HP.placeholder "Search..."
+                , HP.placeholder "Search\x2026 or a project number"
                 , HP.value state.searchText
                 , HE.onValueInput SetSearchText
                 ]
@@ -615,9 +616,9 @@ renderHeader state =
                     ]
                     [ HH.text "\x223F" ]
                 , HH.button
-                    [ HP.class_ (H.ClassName "btn btn-icon map-icon-btn")
-                    , HP.title "Map"
-                    , HE.onClick \_ -> ShowMap
+                    [ HP.class_ (H.ClassName ("btn btn-icon map-icon-btn" <> if state.view == MapView then " active" else ""))
+                    , HP.title (if state.view == MapView then "Close map" else "Map")
+                    , HE.onClick \_ -> ToggleMap
                     ]
                     [ HH.text "\x25A6" ]
                 , HH.button
@@ -3130,6 +3131,14 @@ handleAction = case _ of
     liftEffect $ setHash_ "map"
     H.modify_ \s -> s { view = MapView }
 
+  ToggleMap -> do
+    state <- H.get
+    case state.view of
+      MapView -> do
+        liftEffect $ setHash_ ""
+        H.modify_ \s -> s { view = ListView, selectedProject = Nothing }
+      _ -> handleAction ShowMap
+
   TogglePin projectId currentlyPinned mouseEvent -> do
     liftEffect $ stopPropagation_ (toEvent mouseEvent)
     if currentlyPinned
@@ -3677,13 +3686,20 @@ handleListViewKey ke state = case ke.key of
   "h" -> moveFocus (-1) state
   "ArrowLeft" -> moveFocus (-1) state
 
-  -- Enter: if search is focused, blur to card nav; otherwise open focused card
+  -- Enter: a purely-numeric search that matches a project id jumps straight to
+  -- that project (search-by-id); otherwise blur to card nav; outside the search
+  -- input, open the focused card.
   "Enter" ->
-    if ke.isInput then do
-      liftEffect blurActive_
-      -- Focus first card if none focused
-      when (state.focusIndex < 0) do
-        H.modify_ \s -> s { focusIndex = 0 }
+    if ke.isInput then
+      case Int.fromString state.searchText of
+        Just pid | Array.any (\p -> p.id == pid) state.allProjects -> do
+          liftEffect blurActive_
+          handleAction (SelectProject pid)
+        _ -> do
+          liftEffect blurActive_
+          -- Focus first card if none focused
+          when (state.focusIndex < 0) do
+            H.modify_ \s -> s { focusIndex = 0 }
     else case focusedProject state of
       Nothing -> pure unit
       Just p -> handleAction (SelectProject p.id)
