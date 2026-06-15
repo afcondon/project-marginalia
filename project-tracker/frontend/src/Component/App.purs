@@ -79,6 +79,7 @@ data View
   | DetailView Int
   | CreateView
   | ActivityView
+  | MapView          -- the Minard "newspaper" treemap (embedded standalone bundle)
 
 derive instance Eq View
 
@@ -170,6 +171,7 @@ pickTier idx project =
 data EditableField
   = FDescription
   | FHumanSummary
+  | FTagline
   | FSubdomain
   | FRepo
   | FSourceUrl
@@ -181,6 +183,7 @@ fieldLabel :: EditableField -> String
 fieldLabel = case _ of
   FDescription -> "description"
   FHumanSummary -> "human summary"
+  FTagline -> "tagline"
   FSubdomain -> "subdomain"
   FRepo -> "repo"
   FSourceUrl -> "source url"
@@ -348,6 +351,7 @@ data Action
   | DossierCommitEdit
   | DossierCancelEdit
   | DossierSetView DetailViewKind   -- switch between Dossier and Magazine
+  | DossierSetVisibility String      -- public/private toggle (Minard map exclusion)
   | DossierOpenDomain
   | DossierPickDomain String
   | DossierOpenNote
@@ -374,6 +378,8 @@ data Action
   -- Activity view
   | ShowActivity
   | LoadActivity
+  -- Minard map (newspaper) view
+  | ShowMap
   -- Manual pin/unpin. Toggles the `pinned` tag on the project; the activity
   -- endpoint gives that tag a 3× score multiplier. MouseEvent argument lets
   -- us stopPropagation so clicking the pin inside a clickable row/card
@@ -489,6 +495,7 @@ render state =
                 DossierView  -> renderDossier state detail
                 MagazineView -> renderMagazine state detail
             ActivityView -> renderActivityPage state
+            MapView -> renderTreemapView state
             ListView -> case state.section of
               Just "finance" -> renderFinanceSection state
               Just "letters" -> renderLettersSection state
@@ -607,6 +614,12 @@ renderHeader state =
                     , HE.onClick \_ -> ShowActivity
                     ]
                     [ HH.text "\x223F" ]
+                , HH.button
+                    [ HP.class_ (H.ClassName "btn btn-icon map-icon-btn")
+                    , HP.title "Map"
+                    , HE.onClick \_ -> ShowMap
+                    ]
+                    [ HH.text "\x25A6" ]
                 , HH.button
                     [ HP.class_ (H.ClassName "btn btn-primary")
                     , HE.onClick \_ -> ShowCreateForm
@@ -1215,6 +1228,21 @@ renderMultiParagraph s =
 -- | staging ground for a richer visualization later (likely in Gazetteer,
 -- | with heuristic toggles).
 
+-- | The Minard "newspaper" map: a full-bleed iframe onto the standalone treemap
+-- | bundle served at /map/ (same origin). That page runs the same bundle.js as the
+-- | public showcase but in tracker-mode (MM_CONFIG links:"tracker", live /api/tree),
+-- | so Cmd/Ctrl-click a project opens its dossier here. Kept as an iframe so the two
+-- | Halogen apps don't share a DOM/router.
+renderTreemapView :: forall m. State -> H.ComponentHTML Action () m
+renderTreemapView _ =
+  HH.div [ HP.class_ (H.ClassName "map-view") ]
+    [ HH.iframe
+        [ HP.src "/map/"
+        , HP.class_ (H.ClassName "map-frame")
+        , HP.title "Project map"
+        ]
+    ]
+
 renderActivityPage :: forall m. State -> H.ComponentHTML Action () m
 renderActivityPage state =
   HH.div [ HP.class_ (H.ClassName "activity-page") ]
@@ -1547,8 +1575,10 @@ renderDossier state detail =
             [ renderDossierBreadcrumb state detail
             , renderDossierTitle state detail
             , HH.div [ HP.class_ (H.ClassName "dossier-rule") ] []
+            , renderDossierTagline state detail
             , renderDossierDescription state detail
             , renderDossierHumanSummary state detail
+            , renderDossierVisibility state detail
             , renderDossierNotes state detail
             ]
         , HH.aside [ HP.class_ (H.ClassName "dossier-marginalia") ]
@@ -1748,6 +1778,59 @@ renderDossierHumanSummary state detail =
               [ HH.text "No human summary. Click to write one — this is what the public Currently page shows." ]
             else HH.p_ [ HH.text currentSummary ]
         ]
+
+-- | Tagline: the one-line "kicker" definition that drives the Minard map cell
+-- | label. Intrinsic and tight — shorter than description. Same click-to-edit
+-- | mechanics as the human-summary block; commits on blur.
+renderDossierTagline :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierTagline state detail =
+  case state.dossierEditField of
+    Just FTagline ->
+      HH.div [ HP.class_ (H.ClassName "dossier-tagline-edit") ]
+        [ HH.input
+            [ HP.class_ (H.ClassName "dossier-tagline-input")
+            , HP.value state.dossierEditValue
+            , HP.autofocus true
+            , HP.placeholder "One-line definition — the kicker (e.g. \"code cartography\")."
+            , HE.onValueInput DossierSetEditValue
+            , HE.onBlur \_ -> DossierCommitEdit
+            ]
+        , HH.div [ HP.class_ (H.ClassName "dossier-edit-hint") ]
+            [ HH.text "Blur to save · Esc to cancel" ]
+        ]
+    _ ->
+      let currentTagline = fromMaybe "" detail.tagline
+      in HH.div
+        [ HP.class_ (H.ClassName "dossier-tagline editable")
+        , HE.onClick \_ -> DossierStartEdit FTagline currentTagline
+        , HP.title "Click to edit tagline (the Minard map kicker)"
+        ]
+        [ HH.div [ HP.class_ (H.ClassName "dossier-field-label") ]
+            [ HH.text "Tagline" ]
+        , if String.null currentTagline
+            then HH.p [ HP.class_ (H.ClassName "dossier-tagline-empty") ]
+              [ HH.text "No tagline. Click to write the one-line kicker." ]
+            else HH.p_ [ HH.text currentTagline ]
+        ]
+
+-- | Visibility toggle: public/private, the Minard map's public-showcase exclusion.
+-- | A two-state pill (not free text) so it can't be typo'd; each click persists
+-- | immediately via DossierSetVisibility. Defaults to public when unset.
+renderDossierVisibility :: forall m. State -> ProjectDetail -> H.ComponentHTML Action () m
+renderDossierVisibility _ detail =
+  let current = fromMaybe "public" detail.visibility
+      pill value label =
+        HH.button
+          [ HP.class_ (H.ClassName ("dossier-visibility-pill" <> if current == value then " active" else ""))
+          , HE.onClick \_ -> DossierSetVisibility value
+          ]
+          [ HH.text label ]
+  in HH.div [ HP.class_ (H.ClassName "dossier-visibility") ]
+       [ HH.div [ HP.class_ (H.ClassName "dossier-field-label") ]
+           [ HH.text "Visibility" ]
+       , HH.div [ HP.class_ (H.ClassName "dossier-visibility-pills") ]
+           [ pill "public" "Public", pill "private" "Private" ]
+       ]
 
 -- | Note stream: numbered list of existing notes, plus an append-only
 -- | inline composer at the bottom. Notes are immutable once saved.
@@ -2857,6 +2940,19 @@ handleAction = case _ of
         _ <- liftAff $ API.updateProject detail.id input
         pure unit
 
+  DossierSetVisibility vis -> do
+    state <- H.get
+    case state.selectedProject of
+      Nothing -> pure unit
+      Just detail -> do
+        -- Optimistic local update so the toggle feels instant
+        let updated = detail { visibility = Just vis }
+        H.modify_ \s -> s { selectedProject = Just updated }
+        -- Persist via PUT (only the visibility field is non-empty)
+        let input = emptyProjectInput { visibility = vis }
+        _ <- liftAff $ API.updateProject detail.id input
+        pure unit
+
   DossierOpenDomain ->
     H.modify_ \s -> s
       { dossierDomainOpen = true
@@ -3030,6 +3126,10 @@ handleAction = case _ of
     rows <- liftAff API.fetchActivity
     H.modify_ \s -> s { activityRows = rows, activityLoading = false }
 
+  ShowMap -> do
+    liftEffect $ setHash_ "map"
+    H.modify_ \s -> s { view = MapView }
+
   TogglePin projectId currentlyPinned mouseEvent -> do
     liftEffect $ stopPropagation_ (toEvent mouseEvent)
     if currentlyPinned
@@ -3045,6 +3145,7 @@ handleAction = case _ of
         mDetail <- liftAff $ API.fetchProject pid
         H.modify_ \s -> s { selectedProject = mDetail }
       CreateView -> pure unit
+      MapView -> pure unit
 
   ClearFilters -> do
     liftEffect $ setHash_ ""
@@ -3146,6 +3247,7 @@ handleAction = case _ of
           H.modify_ \s -> s { selectedProject = mDetail }
         Just CreateView -> handleAction ShowCreateForm
         Just ActivityView -> handleAction ShowActivity
+        Just MapView -> handleAction ShowMap
         Nothing -> pure unit
 
   AutoSave _ -> pure unit
@@ -3265,6 +3367,8 @@ handleAction = case _ of
         CreateView -> handleCreateViewKey ke
         -- Activity page: no bespoke shortcuts yet. Escape returns to list.
         ActivityView -> when (ke.key == "Escape") (handleAction ClearFilters)
+        -- Map view: Escape returns to list.
+        MapView -> when (ke.key == "Escape") (handleAction ClearFilters)
 
   -- =========================================================================
   -- Weather (Raker UI)
@@ -3370,6 +3474,8 @@ buildInput state =
   , preferredView: ""
   , blogStatus: ""
   , humanSummary: ""
+  , tagline: ""
+  , visibility: ""
   }
 
 -- =============================================================================
@@ -3496,6 +3602,8 @@ emptyProjectInput =
   , preferredView: ""
   , blogStatus: ""
   , humanSummary: ""
+  , tagline: ""
+  , visibility: ""
   }
 
 -- | Convert a fully-loaded ProjectDetail back into a ProjectInput so it can
@@ -3515,6 +3623,8 @@ detailToInput d =
   , preferredView: ""   -- blank means "don't update" (see buildUpdateBody)
   , blogStatus: ""      -- blank means "don't update"
   , humanSummary: ""    -- blank means "don't update"; set only via FHumanSummary edit
+  , tagline: ""         -- blank means "don't update"; set only via FTagline edit
+  , visibility: ""      -- blank means "don't update"; set only via DossierSetVisibility
   }
 
 -- | Copy a detail into a ProjectInput with a single field overridden.
@@ -3525,6 +3635,7 @@ detailToInputWith field value d =
   in case field of
     FDescription  -> base { description = value }
     FHumanSummary -> base { humanSummary = value }
+    FTagline     -> base { tagline = value }
     FSubdomain   -> base { subdomain = value }
     FRepo        -> base { repo = value }
     FSourceUrl   -> base { sourceUrl = value }
@@ -3733,12 +3844,14 @@ viewToHash = case _ of
   DetailView pid -> "project/" <> show pid
   CreateView -> "new"
   ActivityView -> "activity"
+  MapView -> "map"
 
 parseHash :: String -> Maybe View
 parseHash hash = case hash of
   "" -> Just ListView
   "new" -> Just CreateView
   "activity" -> Just ActivityView
+  "map" -> Just MapView
   _ ->
     if String.take 8 hash == "project/" then
       Int.fromString (String.drop 8 hash) <#> DetailView

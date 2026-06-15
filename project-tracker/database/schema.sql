@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS projects (
     blog_status    TEXT,                  -- NULL = unclassified | 'not_needed' | 'wanted' | 'drafted' | 'published'
     blog_content   TEXT,                  -- markdown body, populated when blog_status in ('drafted', 'published')
     human_summary TEXT,                   -- the owner's editorial summary, human-authored only; shown on P1/P2 aggregate cards. Distinct from description (the Claude-maintained agent-bootstrap summary)
+    tagline       TEXT,                   -- one-line definition (the editorial "kicker"); intrinsic, shorter than description. Drives the Minard map kicker line
+    visibility    TEXT DEFAULT 'public',  -- 'public' | 'private'; the public-showcase exclusion filter. The in-house newspaper shows everything; the website tree drops 'private'
     created_at    TIMESTAMP DEFAULT current_timestamp,
     updated_at    TIMESTAMP DEFAULT current_timestamp
 );
@@ -62,6 +64,8 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS cover_attachment_id INTEGER;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_status TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS human_summary TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS tagline TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
 
 CREATE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);

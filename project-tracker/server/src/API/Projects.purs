@@ -152,16 +152,19 @@ getProject :: Database -> Int -> Aff Response
 getProject db projectId = do
   let idParam = [unsafeToForeign projectId]
   projectRows <- queryAllParams db
-    """SELECT p.*, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags
+    """SELECT p.*, a_cover.file_path AS cover_path,
+              STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags
        FROM projects p
        LEFT JOIN project_tags pt ON pt.project_id = p.id
        LEFT JOIN tags t ON t.id = pt.tag_id
+       LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id
        WHERE p.id = ?
        GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status,
                 p.evolved_into, p.description, p.source_url, p.source_path,
                 p.repo, p.preferred_view, p.cover_attachment_id,
                 p.blog_status, p.blog_content, p.human_summary,
-                p.created_at, p.updated_at"""
+                p.tagline, p.visibility, p.created_at, p.updated_at,
+                a_cover.file_path"""
     idParam
   case firstRow projectRows of
     Nothing -> do
@@ -626,6 +629,8 @@ buildUpdateClauses obj = { clauses, params }
     , intFieldClause "coverAttachmentId" "cover_attachment_id"
     , fieldClause "blogStatus" "blog_status"
     , fieldClause "humanSummary" "human_summary"
+    , fieldClause "tagline" "tagline"
+    , fieldClause "visibility" "visibility"
     , nullableIntFieldClause "parentId" "parent_id"
     -- blogContent is no longer DB-owned: drafts live on disk as files
     -- under $MARGINALIA_BLOG_DRAFTS and VS Code writes them directly.

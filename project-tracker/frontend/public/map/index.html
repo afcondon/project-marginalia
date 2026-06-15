@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marginalia — Map</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app"></div>
+  <!-- In-house newspaper embed: same bundle.js as the public showcase, but in
+       tracker-mode (Cmd/Ctrl-click a project opens its dossier) and fed live by
+       GET /api/tree (proxied same-origin to :3100 by frontend-server.mjs).
+       group=domain = the full Cambrian-Explosion atlas (two rectangle tiers). -->
+  <script>window.MM_CONFIG = { links: "tracker", trackerBase: "", dataUrl: "/api/tree?group=domain" }</script>
+  <script type="module" src="bundle.js"></script>
+</body>
+</html>

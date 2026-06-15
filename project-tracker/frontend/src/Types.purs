@@ -265,6 +265,8 @@ type ProjectDetail =
   , evolvedInto :: Maybe Int
   , description :: Maybe String
   , humanSummary :: Maybe String   -- owner's editorial voice (Currently page source)
+  , tagline :: Maybe String        -- one-line "kicker" definition; drives the Minard map
+  , visibility :: Maybe String     -- "public" | "private"; public-showcase exclusion filter
   , sourceUrl :: Maybe String
   , sourcePath :: Maybe String
   , repo :: Maybe String
@@ -317,6 +319,8 @@ type ProjectInput =
   , preferredView :: String   -- empty string means "don't update"
   , blogStatus :: String      -- empty string means "don't update"
   , humanSummary :: String    -- the owner's editorial voice; empty = "don't update"
+  , tagline :: String         -- one-line kicker; empty = "don't update"
+  , visibility :: String      -- "public" | "private"; empty = "don't update"
   -- blogContent is no longer part of ProjectInput: drafts live on disk
   -- as files under $MARGINALIA_BLOG_DRAFTS and are written by VS Code
   -- directly. The browser only reads them via GET /api/projects/:id.
@@ -592,6 +596,8 @@ decodeProjectDetail json = case toObject json of
        , evolvedInto: optInt "evolvedInto" obj
        , description: optString "description" obj
        , humanSummary: optString "humanSummary" obj
+       , tagline: optString "tagline" obj
+       , visibility: optString "visibility" obj
        , sourceUrl: optString "sourceUrl" obj
        , sourcePath: optString "sourcePath" obj
        , repo: optString "repo" obj

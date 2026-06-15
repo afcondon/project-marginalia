@@ -12,6 +12,7 @@ import API.Deployments as Deployments
 import API.Spine as Spine
 import API.Stats as Stats
 import API.Subscriptions as Subscriptions
+import API.Tree as Tree
 import BlogDrafts as BlogDrafts
 import Opener as Opener
 import Control.Monad.Error.Class (try)
@@ -63,6 +64,8 @@ data Route
   | AgentSearch
   | Dependencies
   | DependencyById Int Int
+  -- Minard map (tree.json contract)
+  | Tree
   -- Finance section
   | Subscriptions
   | SubscriptionById Int
@@ -126,6 +129,7 @@ route = root $ sum
   , "ExerciseSummary": path "api/exercise/summary" noArgs
   , "Dependencies": path "api/dependencies" noArgs
   , "DependencyById": path "api/dependencies" (int segment `product` int segment)
+  , "Tree": path "api/tree" noArgs
   -- Engineering spine (Humboldt)
   , "ProjectDossier": path "api/projects" (suffix (int segment) "dossier")
   , "ProjectGoals": path "api/projects" (suffix (int segment) "goals")
@@ -182,6 +186,8 @@ main = launchAff_ do
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_status TEXT"
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_content TEXT"
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS human_summary TEXT"
+  DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS tagline TEXT"
+  DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public'"
   liftEffect $ log "Schema migrations applied"
 
   -- One-time hoist of existing DB blog_content values into <slug>.md
@@ -400,6 +406,16 @@ main = launchAff_ do
 
       DependencyById blockerId blockedId -> case method of
         Delete -> Dependencies.deleteDependency db blockerId blockedId
+        Options -> ok' corsHeaders ""
+        _ -> ok """{ "error": "Method not allowed" }"""
+
+      Tree -> case method of
+        Get -> do
+          let mTag = Object.lookup "tag" query
+          let mGroup = Object.lookup "group" query
+          let mRoot = Object.lookup "root" query
+          let mPublicOnly = Object.lookup "publicOnly" query
+          Tree.getTree db mTag mGroup mRoot mPublicOnly
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""
 
