@@ -15,6 +15,7 @@
 - **Record-based auto-derivation**: `yoga-json` (modern) or `simple-json` (older, still works)
 - **Low-level Argonaut**: `argonaut-codecs` + `argonaut-core` (manual encoders/decoders)
 - **Generic derivation**: `argonaut-generic` (if you must, but prefer codecs)
+- **On the Erlang backend (purerl)**: `simple-json` or `yoga-json` (both have `.erl` FFI), or `erl-jsone`. **Argonaut does NOT work on purerl** — it's JS-only. See "JSON across compiler backends" below.
 - **Don't**: Write `EncodeJson`/`DecodeJson` instances directly
 
 ### "I need a web framework"
@@ -472,10 +473,19 @@
 
 ### JSON & Serialization
 
+> **JSON across compiler backends (purerl / Erlang).** Argonaut is **JavaScript-only** and cannot be used on the Erlang backend (purerl / purs-backend-erl). This is structural, not a missing port: `argonaut-core`'s `Json` type *is* the native result of JS `JSON.parse`, and its primitives are implemented in `.js` FFI. The Erlang backend emits `.erl` and needs Erlang-native values, so `argonaut-core` (and everything on top of it — `argonaut-codecs`, `codec-argonaut`) won't link on the BEAM.
+>
+> What to use instead on purerl:
+> - **`simple-json`** / **`yoga-json`** — both ship `.erl` FFI (backed by the `jsx` Erlang library: add `{jsx, "3.1.0"}` to `rebar.config`). Because they also have `.js` FFI, **a single codec module written with these compiles on *both* backends** — the only option if you want to share wire-format codecs between a JS frontend and a purerl engine.
+> - **`erl-jsone`** — an Argonaut-API-shaped library purpose-built for purerl (modules `Erl.Data.Jsone.Encode`/`.Decode`, built on `jsone`). Purerl-only; use it when you want Argonaut-style combinator ergonomics on the BEAM.
+>
+> **Don't port Argonaut to purerl.** A faithful port would just re-skin `erl-jsone`/`simple-json` — Argonaut's whole value (zero-cost "`Json` *is* the parse result") depends on the JS representation that doesn't exist on Erlang. For a shared cross-backend boundary, standardize on `simple-json` and let only the serialized JSON string cross the wire.
+
 #### argonaut-core
 **What:** Core JSON types for the Argonaut ecosystem.
 **Key exports:** `Json`, `jsonNull`, `jsonTrue`, `jsonFalse`, `fromString`, `fromNumber`, `fromObject`, `fromArray`, `caseJson`, `caseJsonNull`, `caseJsonBoolean`, `caseJsonNumber`, `caseJsonString`, `caseJsonArray`, `caseJsonObject`, `stringify`, `stringifyWithIndent`
 **Note:** Low-level JSON AST. Most code should use `codec-argonaut` on top of this.
+**Backend:** JavaScript only — `Json` is the native JS parse result with `.js` FFI; does **not** work on purerl/Erlang (use `simple-json` or `erl-jsone` there).
 **Ecosystem role:** contrib | **Status:** active
 
 #### argonaut-codecs
@@ -536,6 +546,7 @@ userCodec = CA.object "User" $ CAR.record
 **When to use:** When you want zero-boilerplate JSON for records that match JS object shapes exactly.
 **Instead of:** Writing manual codecs when the shape matches 1:1.
 **Note:** By justinwoo. Uses `Foreign` + row types. Great for rapid prototyping. Less control than codecs.
+**Backend:** Works on **both** JS and purerl/Erlang (the latter via `jsx`) — the go-to for codec modules shared across backends.
 **Ecosystem role:** community | **Status:** active
 
 #### yoga-json
@@ -1074,4 +1085,59 @@ workspace:
 
 ### Package Sets
 PureScript uses curated package sets (like Haskell's Stackage). A package set is a consistent set of package versions known to compile together. The registry at `registry.purescript.org` publishes numbered sets (currently at 71.0.0). You pin to a set version in `spago.yaml`.
+
+### Bundling for the Browser
+
+`spago build` compiles PureScript to JS modules in `output/`. **It does not produce a browser-loadable bundle.** If the HTML loads `static/index.js` and you only ran `spago build`, you'll see stale behavior — the bundle hasn't been regenerated.
+
+`spago bundle` compiles **and** bundles via esbuild. This is the command you want after editing code for a browser app.
+
+```bash
+spago bundle -p <package-name> --outfile static/index.js
+```
+
+Three flags matter:
+
+- `-p <package-name>` — required in workspaces with more than one package. Names match the `package.name` in each `spago.yaml`.
+- `--outfile <path>` — **without it, spago writes `./index.js` in the project root**, not where the HTML expects it. Always set this explicitly.
+- `--minify` — for production builds. Omit during development.
+
+**Gotcha: `--outfile` is package-relative, not workspace-relative.** In a multi-package workspace (when using `-p <pkg>`), spago interprets `--outfile` as a path from that package's directory — not from wherever you ran the command. If your package lives at `frontend/` and you run `spago bundle -p frontend-pkg --outfile frontend/public/bundle.js` from the workspace root, spago writes to `frontend/frontend/public/bundle.js`. Either invoke from inside the package directory (then use `--outfile public/bundle.js`) or pass an absolute path (`--outfile /abs/…/public/bundle.js`).
+
+A typical project layout:
+
+```
+project/
+├── spago.yaml           # package: { name: my-app, ... }
+├── src/                 # PureScript sources
+├── output/              # spago build artifacts (JS modules)
+└── static/
+    ├── index.html       # <script src="./index.js"></script>
+    └── index.js         # spago bundle --outfile target
+```
+
+### Serving a Frontend Locally
+
+PureScript frontends are static assets — bundle once, serve the directory with any static HTTP server.
+
+```bash
+npx http-server static -p 3000 -c-1 --cors
+```
+
+- `-c-1` — disables cache (critical for dev; otherwise the browser won't see rebundled JS).
+- `--cors` — enables CORS headers if the frontend makes cross-origin requests to a local API server on a different port.
+
+Alternatives: `python3 -m http.server 3000 --bind 127.0.0.1` (no cache control, but always available), or a dev proxy like Vite if you need live reload.
+
+### Build → Bundle → Serve Quick Reference
+
+| Intent | Command |
+|---|---|
+| Type-check only | `spago build` |
+| Refresh browser bundle | `spago bundle -p <pkg> --outfile static/index.js` |
+| Clean rebuild | `rm -rf output && spago bundle -p <pkg> --outfile static/index.js` |
+| Start dev server | `npx http-server static -p <port> -c-1 --cors` |
+| Check type errors | `spago build` (or `get_diagnostics` via cclsp) |
+
+After `spago bundle`, refresh the browser. After `spago build` alone, nothing changes in the browser — the bundle is still the old one.
 
