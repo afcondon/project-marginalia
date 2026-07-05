@@ -88,6 +88,19 @@ body of the blog post, populated when blogStatus is `drafted` or `published`).
 
 ### Port registry — the key endpoint for this skill
 
+> **⚠️ SEAM UPDATE (2026-06-23, doc'd 2026-07-05).** Servers/ports/`startCommand`s
+> for anything **Bosun serves** have moved OUT of Marginalia into Bosun's
+> **chair-server** (`:3022`), which owns `registry/fleet.json` and reloads the
+> router on write. For those services **register via chair-server, not the
+> Marginalia `:3100` endpoints below** — a `POST :3022/api/projects/:id/servers`
+> assigns the id, writes the registry, and nudges `bosun serve` in one shot. The
+> full procedure is Bosun's `docs/REGISTER-A-SERVICE.md`. Marginalia still holds
+> **project identity** (the project must exist here for name/slug), and the
+> `:3100` server endpoints below still work for non-Bosun/legacy cases — but they
+> and `:3022` are **not synced**, and their `/api/ports/suggest` can disagree
+> (use `:3022` for Bosun-served services). This is MARGINALIA-SEAM step 3,
+> partially enacted.
+
 ```
 GET /api/ports
 ```
@@ -526,6 +539,15 @@ When the user asks you to get a project (or set of projects) running:
 6. **Report** success/failure per server, including the log file path.
 
 ## Common workflow: "add a new server registration"
+
+> **If the service is one that `bosun serve` runs** (a dev server / static site
+> under the lazy-spawn router), do NOT use the Marginalia POST in step 5 below.
+> Register it through Bosun's chair-server instead — one `POST
+> :3022/api/projects/:id/servers` assigns the port/id, writes `fleet.json`, and
+> reloads the router. Follow **Bosun `docs/REGISTER-A-SERVICE.md`**. The steps
+> below (derive command → test → set host) still apply; only the final POST
+> target changes (`:3022` not `:3100`, and `:3022/api/ports/suggest` for the
+> port). The Marginalia path below remains for legacy/non-Bosun rows.
 
 When a project doesn't have a start command registered yet, and the user
 asks you to figure it out:
