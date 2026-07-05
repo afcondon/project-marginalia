@@ -67,6 +67,14 @@ GET /api/projects?tag=library
 GET /api/projects?ancestor=125            # all descendants of project 125
 ```
 
+> **⚠️ The filter param is `search`, not `q`.** Unknown query params are
+> **silently ignored** — `?q=quartermaster` returns ALL projects (count 229),
+> not a filtered set. Piped through `head`/`jq '.[0:5]'` that looks exactly like
+> "a few fuzzy matches, my term not among them" and produces a confident false
+> "not tracked." This actually happened (Quartermaster #238 declared untracked
+> twice). Always use `?search=<term>` and check `count`; a `count` equal to the
+> unfiltered total means your filter did nothing.
+
 Returns an envelope with `projects` (array) and `count`. Each project has
 `id`, `slug`, `parentId`, `name`, `domain`, `subdomain`, `status`, `description`,
 `tags`, `updatedAt`, `coverUrl`, `blogStatus`. The `slug` is a NATO-callsign
