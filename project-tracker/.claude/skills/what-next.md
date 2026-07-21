@@ -184,7 +184,8 @@ recent activity on the owning project? If a service is running but the
 project hasn't been touched in weeks, either use it or turn it off.
 
 ```
-curl -s http://andrews-mac-mini:3100/api/ports | jq '.servers[] | {projectName, role, port}'
+# server rows moved to Bosun (seam, 2026-07-21); query :3022, not :3100
+curl -s http://localhost:3022/api/ports | jq '.servers[] | {projectName, role, port}'
 ```
 
 Action: **"Revisit project X or stop its launchd agent."**

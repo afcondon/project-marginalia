@@ -1,6 +1,6 @@
 ---
 name: marginalia
-description: Query the marginalia project tracker API to look up projects, ports, servers, and notes; start/stop services by reading their registered commands; add new server registrations when you have a known-good command.
+description: Query the marginalia project tracker API for project intent — look up projects, status, notes, tags, dependencies. NOTE (seam, 2026-07-21) ports/servers/startCommands now live in Bosun's chair-server (:3022 / fleet.json), NOT Marginalia; :3100 server rows were purged. For anything about ports, starting/stopping services, or registering a server, use Bosun :3022 (see the "Port registry — MOVED TO BOSUN" section and Bosun docs/REGISTER-A-SERVICE.md).
 ---
 
 # Marginalia — project tracker API skill
@@ -94,27 +94,38 @@ parent, source_path, source_url, repo, evolved_into, full status history,
 plus `coverAttachmentId`, `blogStatus`, and `blogContent` (the markdown
 body of the blog post, populated when blogStatus is `drafted` or `published`).
 
-### Port registry — the key endpoint for this skill
+### Port registry — MOVED TO BOSUN (`:3022`)
 
-> **⚠️ SEAM UPDATE (2026-06-23, doc'd 2026-07-05).** Servers/ports/`startCommand`s
-> for anything **Bosun serves** have moved OUT of Marginalia into Bosun's
-> **chair-server** (`:3022`), which owns `registry/fleet.json` and reloads the
-> router on write. For those services **register via chair-server, not the
-> Marginalia `:3100` endpoints below** — a `POST :3022/api/projects/:id/servers`
-> assigns the id, writes the registry, and nudges `bosun serve` in one shot. The
-> full procedure is Bosun's `docs/REGISTER-A-SERVICE.md`. Marginalia still holds
-> **project identity** (the project must exist here for name/slug), and the
-> `:3100` server endpoints below still work for non-Bosun/legacy cases — but they
-> and `:3022` are **not synced**, and their `/api/ports/suggest` can disagree
-> (use `:3022` for Bosun-served services). This is MARGINALIA-SEAM step 3,
-> partially enacted.
+> **⚠️ SEAM ENACTED (2026-07-21).** Marginalia no longer holds ANY server /
+> port / `startCommand` data. On 2026-07-21 all 50 legacy `:3100` server rows
+> were reconciled into Bosun's `registry/fleet.json` and **purged** — `GET
+> :3100/api/ports` now returns **empty, by design**. **Bosun's chair-server
+> (`:3022`) is the single operations registry.** Marginalia holds only *intent*
+> (identity, status, notes, tags, dependencies-as-meaning). This is
+> MARGINALIA-SEAM step 3, **done** — see Bosun `docs/MARGINALIA-SEAM.md`.
+>
+> **For anything about ports/servers/starting a service, go to Bosun `:3022`:**
+>
+> ```
+> GET    :3022/api/ports                    every server row + live collisions
+> GET    :3022/api/ports/suggest            next free port (over fleet.json)
+> GET    :3022/api/projects/:id/servers     servers for one project
+> POST   :3022/api/projects/:id/servers     register — assigns id, writes
+>                                            fleet.json, reloads `bosun serve`
+> DELETE :3022/api/servers/:id              remove a row
+> ```
+>
+> The `:3022` rows are shape-compatible with the fields documented below (same
+> `id`/`projectId`/`role`/`port`/`url`/`startCommand`/`host`/… shape); the full
+> registration procedure is Bosun's `docs/REGISTER-A-SERVICE.md`. Marginalia
+> must still hold the **project** so `:3022` can denormalise name/slug — but the
+> `:3100` server endpoints in the rest of this section are **DEPRECATED**: they
+> still exist and still respond, but they are empty and **must not be written
+> to** (writing there is exactly the drift the seam removed).
 
-```
-GET /api/ports
-```
-
-Returns the full registry of all registered servers across all projects,
-sorted by port. Each entry has:
+The field shape below describes a Bosun `:3022` row (and the legacy, now-empty
+`:3100` row). `GET :3022/api/ports` returns the full registry of all registered
+servers across all projects, sorted by port. Each entry has:
 
 - `id` — server entry id
 - `projectId`, `projectName`, `projectSlug` — who owns it
@@ -191,18 +202,23 @@ Body: same shape as POST, partial — only include fields you want to change.
 #                                    `description` (the Claude-maintained
 #                                    agent-bootstrap summary + Raker flow))
 
-POST /api/projects/:id/servers
+# ── DEPRECATED (2026-07-21): server rows moved to Bosun. Do NOT write
+# ── these against :3100 — register via chair-server :3022 instead (same
+# ── body shape). See the "Port registry — MOVED TO BOSUN" banner above and
+# ── Bosun docs/REGISTER-A-SERVICE.md. The :3100 endpoints below still exist
+# ── but Marginalia's server table is now empty by design.
+POST /api/projects/:id/servers     # DEPRECATED — use POST :3022/api/projects/:id/servers
 Body: { "role":          "api",
         "port":          3050,
         "url":           "http://localhost:3050",
         "startCommand":  "cd /absolute/path && node server/run.js",
         "description":   "...",
-        "host":          "mbp",                   # required-in-spirit; SDI keys on this
+        "host":          "mbp",                   # required-in-spirit
         "tailscaleName": "andrews-macbook-pro",   # NULL ok for cloudflare / andrew-only
         "environment":   "native"                 # optional; deployment style only
       }
 
-DELETE /api/servers/:id
+DELETE /api/servers/:id            # DEPRECATED — use DELETE :3022/api/servers/:id
 
 POST /api/agent/projects/:id/notes
 Body: { "content": "...", "author": "claude" }
@@ -528,15 +544,19 @@ the registered value is always "the thing that starts this".
 
 When the user asks you to get a project (or set of projects) running:
 
-1. **Resolve**: find the project(s) by name, slug, or search
+1. **Resolve**: find the project(s) by name, slug, or search — Marginalia
+   holds project *identity*
    ```
    curl -s http://andrews-mac-mini:3100/api/projects?search=<name> | jq
    ```
-2. **Enumerate servers**: get the full detail or the servers endpoint
+2. **Enumerate servers**: from **Bosun** (`:3022`), not Marginalia — server
+   rows moved there (seam, 2026-07-21)
    ```
-   curl -s http://andrews-mac-mini:3100/api/projects/<id>/servers | jq
+   curl -s http://localhost:3022/api/projects/<id>/servers | jq
    ```
-3. **Check for collisions**: `curl -s http://andrews-mac-mini:3100/api/ports | jq .collisions`
+   (Better still: what `bosun serve` actually routes is `:3997/state`; a
+   registered service lazy-spawns on its public port on first request.)
+3. **Check for collisions**: `curl -s http://localhost:3022/api/ports | jq .collisions`
 4. **For each server**, read the `startCommand` and act on it according to
    the table above. Run in the background. Redirect stdout/stderr to a log
    file under `/tmp/marginalia-<slug>-<role>.log`.
@@ -548,14 +568,16 @@ When the user asks you to get a project (or set of projects) running:
 
 ## Common workflow: "add a new server registration"
 
-> **If the service is one that `bosun serve` runs** (a dev server / static site
-> under the lazy-spawn router), do NOT use the Marginalia POST in step 5 below.
-> Register it through Bosun's chair-server instead — one `POST
-> :3022/api/projects/:id/servers` assigns the port/id, writes `fleet.json`, and
-> reloads the router. Follow **Bosun `docs/REGISTER-A-SERVICE.md`**. The steps
-> below (derive command → test → set host) still apply; only the final POST
-> target changes (`:3022` not `:3100`, and `:3022/api/ports/suggest` for the
-> port). The Marginalia path below remains for legacy/non-Bosun rows.
+> **Register via Bosun's chair-server (`:3022`), NOT Marginalia (seam,
+> 2026-07-21).** Ports/servers/startCommands now live in Bosun's
+> `fleet.json`; Marginalia's server table is empty by design. One `POST
+> :3022/api/projects/:id/servers` assigns the port/id, writes `fleet.json`,
+> and reloads the router. Ask Bosun for the port: `:3022/api/ports/suggest`.
+> Full procedure: **Bosun `docs/REGISTER-A-SERVICE.md`**. The steps below
+> (inspect → derive command → test → set host) still apply; only the final
+> POST target is `:3022`. Do **not** POST to `:3100` — that reintroduces the
+> drift the seam removed. (The project must already exist in Marginalia so
+> `:3022` can denormalise its name/slug.)
 
 When a project doesn't have a start command registered yet, and the user
 asks you to figure it out:
@@ -575,12 +597,14 @@ asks you to figure it out:
    static hosting; `andrew-only` for things that exist only when
    physically using the rig (rare). Always set this — SDI's spawn-vs-
    redirect decision keys on it.
-5. **If it works**, POST it to marginalia:
+5. **If it works**, POST it to **Bosun `:3022`** (writes `fleet.json` +
+   reloads the router). The `startCommand` MUST contain the literal port and
+   an absolute `cd` anchor, or `bosun serve` typed-rejects it:
    ```
-   curl -s -X POST http://andrews-mac-mini:3100/api/projects/<id>/servers \
+   curl -s -X POST http://localhost:3022/api/projects/<id>/servers \
      -H 'Content-Type: application/json' \
      -d '{"role":"api","port":3050,"url":"http://localhost:3050",
-          "startCommand":"cd /abs/path && node server/run.js",
+          "startCommand":"cd /abs/path && PORT=3050 node server/run.js",
           "description":"HTTPurple API",
           "host":"mbp",
           "tailscaleName":"andrews-macbook-pro"}'
