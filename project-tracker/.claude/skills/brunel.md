@@ -44,7 +44,7 @@ with them. You reconstruct what's happening from the trail they leave:
 
 1. **Git** — `git -C <repo> log --oneline -20` and `git -C <repo> diff` across
    the active repos: ground truth of what was actually built.
-2. **Worklogs** — `purescript-polyglot/docs/worklog/YYYY-MM-DD.md`: the
+2. **Worklogs** — `afc-work/docs/worklog/YYYY-MM-DD.md`: the
    narrated record (Accomplished / Explored / Parking Lot / Decisions).
 3. **Marginalia** — the tracker is your structured memory. Project
    `description` (timeless summary), `notes` (dated log), `status`, and the new
