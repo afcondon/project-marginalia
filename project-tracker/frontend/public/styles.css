@@ -1797,7 +1797,9 @@ body {
   grid-area: actions;
   justify-self: center;
   align-self: end;
-  margin-top: var(--space-4);
+  /* The base rule sets margin-left:auto for the old flex header; on a grid
+     item an auto margin beats justify-self and pins it to the right edge. */
+  margin: var(--space-4) 0 0;
   padding-bottom: var(--space-2);
 }
 
