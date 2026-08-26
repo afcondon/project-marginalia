@@ -20,7 +20,9 @@ package:
     - foreign
     - foreign-object
     - halogen
+    - integers
     - maybe
+    - numbers
     - prelude
     - strings
     - tuples

@@ -129,10 +129,52 @@ body {
   cursor: pointer;
 }
 
-.header-status-lights {
+/* Altitude filter — a stepped wedge, not pills. Depth is an ordinal scale, so
+   it gets an encoding that admits the ordering: one bar per tier, log-scaled by
+   population, read as a staircase from the many leaves to the single roof.
+   Cumulative — the inked steps run from the waterline upward, so how it looks
+   IS what it does. Replaced the status traffic-lights here on 2026-08-26. */
+.depth-wedge {
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+}
+
+.depth-step {
+  display: flex;
+  align-items: flex-end;
+  width: 7px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.depth-step-bar {
+  display: block;
+  width: 100%;
+  background: var(--color-border-dark);
+  transition: background-color 0.12s ease;
+}
+
+.depth-step:hover .depth-step-bar {
+  background: var(--color-text-muted);
+}
+
+/* The selected step and every step above it — the cumulative range, inked. */
+.depth-step.current .depth-step-bar,
+.depth-step.current ~ .depth-step .depth-step-bar {
+  background: var(--color-text);
+}
+
+.depth-wedge-label {
+  align-self: center;
+  margin-left: 8px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 .header-search {

@@ -11,8 +11,9 @@ import API (SubscriptionRecord, BlogDraftRecord, BlogAssetRecord) as API
 import Control.Promise (Promise, toAffE)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Int (floor, fromString) as Int
+import Data.Int (floor, fromString, toNumber) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
+import Data.Number (log)
 import Data.String as String
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -208,10 +209,16 @@ type State =
   , lettersAssets :: Array API.BlogAssetRecord  -- assets for the expanded row
   , lettersUploading :: Boolean           -- true while an upload is in flight
   , filterDomain :: Maybe String
+  -- DEAD as of 2026-08-26: the status traffic-lights were removed from the
+  -- masthead (unused in 6+ months) and nothing dispatches SetFilterStatus any
+  -- more. The field, the action and the API parameter stay wired and harmless;
+  -- restore a control that sets it and status filtering works again.
   , filterStatus :: Maybe String
   , filterTag :: Maybe String
   , filterAncestor :: Maybe { id :: Int, name :: String }
-  , filterDepth :: Maybe Int  -- 0 = leaves, 1 = parents, 2 = grandparents
+  -- Altitude floor, CUMULATIVE: Just d shows every project whose height is
+  -- >= d, i.e. a waterline on the map rather than a single course.
+  , filterDepth :: Maybe Int
   , allProjects :: Array Project  -- unfiltered cache for ancestor/depth lookups
   , servers :: Array Server        -- full port registry for lookups on cards and in detail
   , searchText :: String
@@ -593,7 +600,7 @@ renderHeader state =
                   , HP.title "Click to clear tag filter"
                   ]
                   [ HH.text ("#" <> tag) ]
-            , renderStatusFilterLights state
+            , renderDepthWedge state
             , HH.input
                 [ HP.class_ (H.ClassName "header-search")
                 , HP.type_ HP.InputText
@@ -632,31 +639,11 @@ renderHeader state =
         ]
     ]
 
--- | Status filter as traffic light dots in the header (same visual as card dots)
-renderStatusFilterLights :: forall m. State -> H.ComponentHTML Action () m
-renderStatusFilterLights state =
-  HH.div [ HP.class_ (H.ClassName "header-status-lights") ]
-    (map (renderStatusFilterLight state) allStatuses)
-
-renderStatusFilterLight :: forall m. State -> Status -> H.ComponentHTML Action () m
-renderStatusFilterLight state status =
-  let statusStr = statusToString status
-      isActive = state.filterStatus == Just statusStr
-      clickVal = if isActive then "" else statusStr
-      lightClass = "status-light status-light-" <> statusStr
-        <> (if isActive then " current" else "")
-  in HH.button
-    [ HP.class_ (H.ClassName lightClass)
-    , HP.title (statusLabel status)
-    , HE.onClick \_ -> SetFilterStatus clickVal
-    ]
-    []
-
--- | Domain pills row (second line of header) — also includes the depth (P-rank) pills.
+-- | Domain pills row (second line of header).
 renderDomainFilterBar :: forall m. State -> H.ComponentHTML Action () m
 renderDomainFilterBar state =
   HH.div [ HP.class_ (H.ClassName "header-domains") ]
-    (renderSectionPills state <> renderDomainPills state <> renderDepthPills state)
+    (renderSectionPills state <> renderDomainPills state)
 
 -- | Section pills — newspaper sections beyond the project domains.
 -- | FINANCE (subscriptions), LETTERS (blog drafts), WEATHER (Raker morning
@@ -683,34 +670,71 @@ renderSectionPill state sectionId label count =
         else HH.text ""
     ]
 
--- | Always-visible P0/P1/P2 radio buttons.
--- | P0 = leaves (no children), P1 = parents (have children but no grandchildren),
--- | P2 = grandparents (have grandchildren).
-renderDepthPills :: forall m. State -> Array (H.ComponentHTML Action () m)
-renderDepthPills state =
-  [ depthPill 0 "P0", depthPill 1 "P1", depthPill 2 "P2" ]
+-- | Altitude filter — the depth control, rendered as a stepped wedge rather
+-- | than a row of pills. Depth is an ORDINAL scale, not a set of categories:
+-- | pills would throw the ordering away, and there are now five tiers where
+-- | there were three. So it gets an encoding that admits the ordering — one
+-- | bar per tier, log-scaled by population (the tiers run ~234/20/8/3/1, so a
+-- | linear bar would be unreadable), reading as a staircase from the many
+-- | leaves down to the single roof. It doubles as a sparkline of the shape of
+-- | the portfolio, which nothing else in the UI shows.
+-- |
+-- | CUMULATIVE: selecting a tier shows that tier AND every tier above it. The
+-- | inked steps run from the waterline upward, so the control's appearance is
+-- | the semantics. Tier 0 is therefore the "everything" position.
+renderDepthWedge :: forall m. State -> H.ComponentHTML Action () m
+renderDepthWedge state =
+  HH.div
+    [ HP.class_ (H.ClassName "depth-wedge")
+    , HP.title "Altitude — click a step to show that tier and everything above it"
+    ]
+    (map step tiers <> [ readout ])
   where
-  depthPill :: Int -> String -> H.ComponentHTML Action () m
-  depthPill d label =
+  heights = map (\p -> projectHeight state.allProjects p.id) state.allProjects
+  maxTier = Array.foldr max 0 heights
+  tiers = Array.range 0 maxTier
+
+  countAt d = Array.length (Array.filter (_ == d) heights)
+  countFrom d = Array.length (Array.filter (_ >= d) heights)
+  biggest = Array.foldr max 1 (map countAt tiers)
+
+  -- Log-scaled: keeps 1 visible against 234. 4px floor so no tier disappears.
+  barPx d =
+    let n = Int.toNumber (countAt d)
+        m = Int.toNumber biggest
+    in 4 + Int.floor (16.0 * (log (n + 1.0) / log (m + 1.0)))
+
+  step d =
     let isActive = state.filterDepth == Just d
-        activeClass = if isActive then " filter-pill-active" else ""
-        count = Array.length (Array.filter (\p -> projectHeight state.allProjects p.id == d) state.allProjects)
     in HH.button
-      [ HP.class_ (H.ClassName ("filter-pill depth-pill" <> activeClass))
-      , HP.title (depthDescription d)
+      [ HP.class_ (H.ClassName ("depth-step" <> if isActive then " current" else ""))
+      , HP.title (tierLabel d <> " \x2014 " <> show (countAt d) <> " at this tier, "
+                    <> show (countFrom d) <> " here and above")
       , HE.onClick \_ -> SetFilterDepth (if isActive then Nothing else Just d)
       ]
-      [ HH.text label
-      , HH.span [ HP.class_ (H.ClassName "pill-count") ]
-          [ HH.text (" (" <> show count <> ")") ]
+      [ HH.span
+          [ HP.class_ (H.ClassName "depth-step-bar")
+          , HP.style ("height: " <> show (barPx d) <> "px")
+          ]
+          []
       ]
 
-  depthDescription :: Int -> String
-  depthDescription = case _ of
-    0 -> "Leaves: projects with no children"
-    1 -> "Parents: have children but no grandchildren"
-    2 -> "Grandparents: top-level rollups"
-    _ -> ""
+  readout = case state.filterDepth of
+    Nothing -> HH.text ""
+    Just d -> HH.span [ HP.class_ (H.ClassName "depth-wedge-label") ]
+      [ HH.text (tierLabel d <> " \x2191 " <> show (countFrom d)) ]
+
+-- | Tier names. "P4" tells a reader nothing; these do. Height is the length of
+-- | the longest path down to a leaf, so the name describes what sits AT that
+-- | altitude, not how many children it happens to have.
+tierLabel :: Int -> String
+tierLabel = case _ of
+  0 -> "Leaf"
+  1 -> "Group"
+  2 -> "Rollup"
+  3 -> "Family"
+  4 -> "Roof"
+  n -> "Tier " <> show n
 
 -- | Compute the "height" of a project: 0 if leaf, 1 if has only leaf children,
 -- | 2 if has grandchildren, etc.
@@ -2808,7 +2832,7 @@ handleAction = case _ of
     -- Apply client-side depth filter using the allProjects cache
     let projects = case state.filterDepth of
           Nothing -> rawProjects
-          Just d -> Array.filter (\p -> projectHeight state.allProjects p.id == d) rawProjects
+          Just d -> Array.filter (\p -> projectHeight state.allProjects p.id >= d) rawProjects
     H.modify_ \s -> s { projects = projects, loading = false }
 
   LoadAllProjects -> do
