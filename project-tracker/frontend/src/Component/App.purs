@@ -600,7 +600,30 @@ renderHeader state =
                   , HP.title "Click to clear tag filter"
                   ]
                   [ HH.text ("#" <> tag) ]
-            , renderDepthWedge state
+            , HH.div [ HP.class_ (H.ClassName "header-altitude") ]
+                [ renderDepthWedge state
+                , HH.div [ HP.class_ (H.ClassName "header-views") ]
+                    [ HH.button
+                        [ HP.class_ (H.ClassName "btn-view btn-view-activity")
+                        , HP.title "Activity"
+                        , HE.onClick \_ -> ShowActivity
+                        ]
+                        []
+                    , HH.button
+                        [ HP.class_ (H.ClassName ("btn-view btn-view-map" <> if state.view == MapView then " current" else ""))
+                        , HP.title (if state.view == MapView then "Close map" else "Map")
+                        , HE.onClick \_ -> ToggleMap
+                        ]
+                        []
+                    ]
+                , if hasActiveFilters state
+                    then HH.button
+                      [ HP.class_ (H.ClassName "clear-filters")
+                      , HE.onClick \_ -> ClearFilters
+                      ]
+                      [ HH.text "Clear filters" ]
+                    else HH.text ""
+                ]
             , HH.input
                 [ HP.class_ (H.ClassName "header-search")
                 , HP.type_ HP.InputText
@@ -609,26 +632,7 @@ renderHeader state =
                 , HE.onValueInput SetSearchText
                 ]
             , HH.div [ HP.class_ (H.ClassName "header-actions") ]
-                [ if hasActiveFilters state
-                    then HH.button
-                      [ HP.class_ (H.ClassName "btn btn-back")
-                      , HE.onClick \_ -> ClearFilters
-                      ]
-                      [ HH.text "Clear" ]
-                    else HH.text ""
-                , HH.button
-                    [ HP.class_ (H.ClassName "btn btn-icon activity-icon-btn")
-                    , HP.title "Activity"
-                    , HE.onClick \_ -> ShowActivity
-                    ]
-                    [ HH.text "\x223F" ]
-                , HH.button
-                    [ HP.class_ (H.ClassName ("btn btn-icon map-icon-btn" <> if state.view == MapView then " active" else ""))
-                    , HP.title (if state.view == MapView then "Close map" else "Map")
-                    , HE.onClick \_ -> ToggleMap
-                    ]
-                    [ HH.text "\x25A6" ]
-                , HH.button
+                [ HH.button
                     [ HP.class_ (H.ClassName "btn btn-primary")
                     , HE.onClick \_ -> ShowCreateForm
                     ]
@@ -688,7 +692,9 @@ renderDepthWedge state =
     [ HP.class_ (H.ClassName "depth-wedge")
     , HP.title "Altitude — click a step to show that tier and everything above it"
     ]
-    (map step tiers <> [ readout ])
+    [ HH.div [ HP.class_ (H.ClassName "depth-wedge-bars") ] (map step tiers)
+    , readout
+    ]
   where
   heights = map (\p -> projectHeight state.allProjects p.id) state.allProjects
   maxTier = Array.foldr max 0 heights
@@ -719,10 +725,12 @@ renderDepthWedge state =
           []
       ]
 
-  readout = case state.filterDepth of
-    Nothing -> HH.text ""
-    Just d -> HH.span [ HP.class_ (H.ClassName "depth-wedge-label") ]
-      [ HH.text (tierLabel d <> " \x2191 " <> show (countFrom d)) ]
+  -- Always rendered, so selecting a tier doesn't jog the masthead's height.
+  readout = HH.span [ HP.class_ (H.ClassName "depth-wedge-label") ]
+    [ HH.text case state.filterDepth of
+        Nothing -> "All"
+        Just d -> tierLabel d <> " \x2191 " <> show (countFrom d)
+    ]
 
 -- | Tier names. "P4" tells a reader nothing; these do. Height is the length of
 -- | the longest path down to a leaf, so the name describes what sits AT that

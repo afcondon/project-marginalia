@@ -133,18 +133,26 @@ body {
    it gets an encoding that admits the ordering: one bar per tier, log-scaled by
    population, read as a staircase from the many leaves to the single roof.
    Cumulative — the inked steps run from the waterline upward, so how it looks
-   IS what it does. Replaced the status traffic-lights here on 2026-08-26. */
+   IS what it does. Replaced the status traffic-lights here on 2026-08-26;
+   framed as an editorial box in the masthead section below. */
 .depth-wedge {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+
+.depth-wedge-bars {
+  display: flex;
   align-items: flex-end;
-  gap: 3px;
+  gap: 4px;
   height: 22px;
 }
 
 .depth-step {
   display: flex;
   align-items: flex-end;
-  width: 7px;
+  width: 8px;
   height: 100%;
   padding: 0;
   border: none;
@@ -170,8 +178,6 @@ body {
 }
 
 .depth-wedge-label {
-  align-self: center;
-  margin-left: 8px;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -1551,16 +1557,17 @@ body {
 /* ----- Masthead (Halogen .app-header turned into a grid) -------------
    Layout:
      ┌────────────┬──────────────────┬────────────┐
-     │  [STATUS]  │                  │  [ACTIONS] │
-     │            │    MARGINALIA    │            │
-     │            │                  │  [SEARCH]  │
+     │ [ALTITUDE] │                  │ [NEW PROJ] │
+     │  [VIEWS]   │    MARGINALIA    │            │
+     │  [CLEAR]   │                  │  [SEARCH]  │
      │            │ VOL I · 150 PROJECTS          │
      ├────────────┴──────────────────┴────────────┤
      │        ═══ 3px double rule ═══              │
      │              domain filters                 │
      └─────────────────────────────────────────────┘
-   Real interactive elements live in the corners: status-lights as the
-   status filter, search box + New Project button on the right, and the
+   Real interactive elements live in the corners: the altitude wedge plus
+   the Activity/Map toggles on the left, search + New Project on the
+   right (both corners centred in their column), and the
    h1 ("150 projects") promoted into the standfirst slot as an editorial
    dateline. Achieved with display: contents on .header-inner and
    .header-top so their children participate directly in the masthead
@@ -1639,43 +1646,128 @@ body {
   font-variant: small-caps;
 }
 
-/* STATUS FILTER block — framed with hairline rules, NYT-style editorial
-   box echoing the old slogan corner. */
-.header-status-lights {
+/* LEFT CORNER — the altitude filter, framed as an editorial box in the same
+   hairline idiom the status filter used, with the two view toggles beneath it
+   and Clear below those. Centred in its column rather than jammed against the
+   edge, with margin so it never touches the wordmark or the rules. */
+.header-altitude {
   grid-area: status;
-  justify-self: start;
+  justify-self: center;
   align-self: center;
+  margin: var(--space-4) 0;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--ink);
-  max-width: 18rem;
-  margin-left: 0;
+  gap: var(--space-4);
 }
 
-/* Full-width label pushes the 7 dot buttons onto a second row */
-.header-status-lights::before {
-  content: "Status filter";
-  flex-basis: 100%;
-  text-align: center;
+.depth-wedge {
+  padding: var(--space-3) var(--space-5) var(--space-2);
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+
+.depth-wedge::before {
+  content: "Altitude";
   font-family: var(--serif-display);
   font-style: italic;
   font-size: 0.85rem;
-  font-weight: 400;
-  letter-spacing: 0.02em;
   color: var(--ink);
-  margin-bottom: 4px;
-  text-transform: none;
+}
+
+.depth-wedge-label {
+  font-family: var(--sans-label);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* View toggles — one size, one stroke weight, one box. The glyphs (a sine
+   wave and a filled grid) were two different characters at two different
+   optical sizes; these are masked SVG so both are drawn to the same 18px
+   grid at the same weight, and take their colour from the ink. */
+.header-views {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.btn-view {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+
+.btn-view::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  background-color: var(--ink-muted);
+  transition: background-color 0.12s;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center;  mask-position: center;
+  -webkit-mask-size: 18px 18px;   mask-size: 18px 18px;
+}
+
+.btn-view:hover { border-color: var(--ink-muted); }
+.btn-view:hover::before { background-color: var(--ink); }
+
+/* Map open — inverted, the way the old .map-icon-btn.active read. */
+.btn-view.current { background: var(--ink); border-color: var(--ink); }
+.btn-view.current::before { background-color: var(--paper); }
+
+.btn-view-activity::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M1 9h3l1.6-5.4L7.9 14l1.9-7.6L11.3 11l1.2-2H17' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M1 9h3l1.6-5.4L7.9 14l1.9-7.6L11.3 11l1.2-2H17' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.btn-view-map::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.35'%3E%3Crect x='1.4' y='2.4' width='15.2' height='13.2'/%3E%3Cpath d='M10.6 2.4v13.2M10.6 8.4h6M1.4 11.4h9.2'/%3E%3C/g%3E%3C/svg%3E");
+          mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.35'%3E%3Crect x='1.4' y='2.4' width='15.2' height='13.2'/%3E%3Cpath d='M10.6 2.4v13.2M10.6 8.4h6M1.4 11.4h9.2'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.clear-filters {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--serif-display);
+  font-style: italic;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.clear-filters:hover { color: var(--accent); }
+
+/* Keyboard focus in the paper's own idiom — the browser's blue ring was
+   landing on the wedge bars and the icon boxes. */
+.btn-view:focus-visible,
+.depth-step:focus-visible,
+.clear-filters:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn-view:focus:not(:focus-visible),
+.depth-step:focus:not(:focus-visible),
+.clear-filters:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .header-search {
   grid-area: search;
-  justify-self: end;
+  justify-self: center;
   align-self: center;
+  margin: var(--space-2) 0;
   background: transparent;
   border: none;
   border-top: 1px solid var(--ink);
@@ -1703,9 +1795,10 @@ body {
 
 .header-actions {
   grid-area: actions;
-  justify-self: end;
+  justify-self: center;
   align-self: end;
-  padding-bottom: 2px;
+  margin-top: var(--space-4);
+  padding-bottom: var(--space-2);
 }
 
 .btn-primary {
@@ -2525,11 +2618,6 @@ body {
 }
 
 /* ----- Minard map (newspaper) view ----------------------------------- */
-
-.map-icon-btn.active {
-  background: var(--ink, #16140f);
-  color: var(--paper, #fff);
-}
 
 .map-view { width: 100%; }
 
@@ -4138,25 +4226,6 @@ a.attachment-marg-filename:hover {
 /* ============================================================================
    Activity page — ranked-project table
    ============================================================================ */
-
-/* Discreet icon button in the masthead actions row. Sits between Clear and
-   New Project; the single glyph is a sine-wave character signalling "signal". */
-.activity-icon-btn {
-  font-family: var(--sans-label);
-  font-size: 1.05rem;
-  line-height: 1;
-  padding: 0 var(--space-2);
-  min-width: 2rem;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 1px solid var(--rule);
-  cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
-}
-.activity-icon-btn:hover {
-  color: var(--ink);
-  border-color: var(--ink-muted);
-}
 
 .activity-page {
   max-width: 64rem;
