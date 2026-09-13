@@ -33,7 +33,8 @@ import Web.TouchEvent.TouchList as TL
 -- =============================================================================
 
 -- Audio recording (same approach as the desktop frontend)
-foreign import startRecording_ :: Effect (Promise Boolean)
+-- | Resolves "" on success, or a human-readable reason for failure.
+foreign import startRecording_ :: Effect (Promise String)
 foreign import stopAndTranscribe_ :: Effect (Promise String)
 foreign import isRecording_ :: Effect Boolean
 
@@ -622,9 +623,10 @@ handleAction = case _ of
 
   -- Dictate
   StartDictate -> do
-    started <- liftAff $ toAffE startRecording_
-    when started do
-      H.modify_ \s -> s { captureMode = Just Dictating, recording = true, error = Nothing }
+    failure <- liftAff $ toAffE startRecording_
+    H.modify_ case failure of
+      "" -> \s -> s { captureMode = Just Dictating, recording = true, error = Nothing }
+      msg -> \s -> s { captureMode = Nothing, recording = false, error = Just msg }
 
   StopDictate -> do
     result <- liftAff $ try $ toAffE stopAndTranscribe_
@@ -662,9 +664,10 @@ handleAction = case _ of
           else H.modify_ \s -> s { saving = false, error = Just "Failed to save note" }
 
   RetryDictation -> do
-    started <- liftAff $ toAffE startRecording_
-    when started do
-      H.modify_ \s -> s { captureMode = Just Dictating, recording = true, transcript = "" }
+    failure <- liftAff $ toAffE startRecording_
+    H.modify_ case failure of
+      "" -> \s -> s { captureMode = Just Dictating, recording = true, transcript = "", error = Nothing }
+      msg -> \s -> s { captureMode = Nothing, recording = false, error = Just msg }
 
   -- Write
   StartWrite ->

@@ -5,6 +5,7 @@ node_modules/
 # Build output
 output/
 frontend/public/bundle.js
+capture/public/bundle.js
 
 # Database files (live + variants: backups, cold mirrors)
 database/*.duckdb

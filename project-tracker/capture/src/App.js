@@ -6,20 +6,72 @@
 
 let _mediaRecorder = null;
 let _audioChunks = [];
+let _recordedMimeType = "audio/webm";
 
+// Safari only learned WebM/Opus recording in 18.4; older Safari and some
+// Android builds want audio/mp4. Ask rather than assume — an unsupported
+// mimeType makes the MediaRecorder constructor throw NotSupportedError.
+const CANDIDATE_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+];
+
+const pickMimeType = () => {
+  for (const t of CANDIDATE_MIME_TYPES) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return ""; // let the browser pick its own default
+};
+
+// Resolves "" on success, or a human-readable reason on failure. Never
+// rejects: the caller renders whatever comes back, so a phone with no
+// console attached still shows why nothing happened.
 export const startRecording_ = () => {
   return new Promise((resolve) => {
+    if (typeof MediaRecorder === "undefined") {
+      resolve("This browser has no MediaRecorder.");
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      resolve(
+        window.isSecureContext
+          ? "No microphone API in this browser."
+          : "Microphone needs HTTPS — open the https:// address, not the :3101 one."
+      );
+      return;
+    }
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
-        _audioChunks = [];
-        _mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-        _mediaRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0) _audioChunks.push(e.data);
-        };
-        _mediaRecorder.start();
-        resolve(true);
+        try {
+          const mimeType = pickMimeType();
+          _audioChunks = [];
+          _mediaRecorder = mimeType
+            ? new MediaRecorder(stream, { mimeType })
+            : new MediaRecorder(stream);
+          _recordedMimeType = _mediaRecorder.mimeType || mimeType || "audio/webm";
+          console.log("[capture] recording as", _recordedMimeType);
+          _mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) _audioChunks.push(e.data);
+          };
+          _mediaRecorder.start();
+          resolve("");
+        } catch (e) {
+          stream.getTracks().forEach(t => t.stop());
+          _mediaRecorder = null;
+          console.error("[capture] MediaRecorder failed:", e);
+          resolve("Recorder failed: " + (e.name || "") + " " + (e.message || ""));
+        }
       })
-      .catch(() => resolve(false));
+      .catch(e => {
+        console.error("[capture] getUserMedia failed:", e);
+        const name = e && e.name ? e.name : "Error";
+        resolve(
+          name === "NotAllowedError"
+            ? "Microphone permission denied — allow it for this site and retry."
+            : name + ": " + ((e && e.message) || "could not open the microphone")
+        );
+      });
   });
 };
 
@@ -31,8 +83,8 @@ export const stopAndTranscribe_ = () => {
       return;
     }
     _mediaRecorder.onstop = async () => {
-      const blob = new Blob(_audioChunks, { type: "audio/webm" });
-      console.log("[capture] recorded blob:", blob.size, "bytes");
+      const blob = new Blob(_audioChunks, { type: _recordedMimeType });
+      console.log("[capture] recorded blob:", blob.size, "bytes", _recordedMimeType);
       _mediaRecorder.stream.getTracks().forEach(t => t.stop());
       _mediaRecorder = null;
       _audioChunks = [];
@@ -43,7 +95,7 @@ export const stopAndTranscribe_ = () => {
         const resp = await fetch(whisperUrl, {
           method: "POST",
           body: blob,
-          headers: { "Content-Type": "audio/webm" },
+          headers: { "Content-Type": _recordedMimeType },
         });
         console.log("[capture] whisper response:", resp.status);
         const data = await resp.json();

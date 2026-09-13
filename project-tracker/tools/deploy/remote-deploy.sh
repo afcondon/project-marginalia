@@ -3,7 +3,8 @@
 #
 # Reconciles the checkout to origin/<branch>, rebuilds the host-local build
 # artifacts (node_modules incl. duckdb native binding, server output/, frontend
-# bundle.js), restarts the api + frontend LaunchAgents, and health-checks.
+# bundle.js and the capture PWA bundle), restarts the api + frontend
+# LaunchAgents, and health-checks.
 # Idempotent. Untracked host files (.env, output.bak*, etc.) are never touched.
 #
 # Invoked by tools/deploy/deploy.sh from the MBP, which scp's the latest copy
@@ -84,6 +85,8 @@ log "building server (spago -> output/)..."
 npm run build:server || die "server build failed -- services left running on previous output/"
 log "bundling frontend (-> frontend/public/bundle.js)..."
 npm run bundle:frontend || die "frontend bundle failed -- services left running on previous bundle"
+log "bundling capture PWA (-> capture/public/bundle.js)..."
+npm run bundle:capture || die "capture bundle failed -- services left running on previous bundle"
 
 # --- Restart + health-check ------------------------------------------------
 # Static files (bundle.js, styles.css) are served from disk live, so the
