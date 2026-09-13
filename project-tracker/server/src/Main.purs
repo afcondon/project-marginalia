@@ -17,6 +17,7 @@ import BlogDrafts as BlogDrafts
 import Opener as Opener
 import Control.Monad.Error.Class (try)
 import Data.Either (Either(..))
+import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
 import Database.DuckDB as DB
 import Effect (Effect)
@@ -186,7 +187,15 @@ dropSlugColumn db = do
     Left _ -> pure unit
     Right rows | DB.isEmpty rows -> pure unit
     Right _ -> do
-      outcome <- try (DB.execBatch db
+      -- One statement at a time, NOT execBatch. execBatch wraps its
+      -- statements in a single BEGIN/COMMIT, and inside one transaction
+      -- DuckDB's ALTER still sees the not-yet-committed indexes and refuses
+      -- with "Cannot drop this column: an index depends on it!" -- then rolls
+      -- the drops back too, so the migration cannot make progress on any
+      -- boot. Measured both ways against a copy of the live database: batched
+      -- fails, sequential succeeds. Testing the .sql file through the duckdb
+      -- CLI hid this, because the CLI autocommits each statement.
+      outcome <- try (traverse_ (DB.exec db)
         [ "DROP INDEX IF EXISTS idx_projects_slug"
         , "DROP INDEX IF EXISTS idx_projects_domain"
         , "DROP INDEX IF EXISTS idx_projects_status"

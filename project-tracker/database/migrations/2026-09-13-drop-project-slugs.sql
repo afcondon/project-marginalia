@@ -70,6 +70,17 @@
 -- The four ordinary indexes are in schema.sql as CREATE INDEX IF NOT EXISTS,
 -- so they come straight back; `idx_projects_slug` is not, and does not.
 --
+-- Why these six statements must not share a transaction
+-- ------------------------------------------------------
+-- Running all six inside one BEGIN/COMMIT fails exactly as a single ALTER
+-- does -- "Cannot drop this column: an index depends on it!" -- because the
+-- index drops are not committed when the ALTER's check runs, and the failure
+-- then rolls the drops back as well, so no boot can ever make progress. The
+-- duckdb CLI hides this by autocommitting each statement, which is why this
+-- file passed against a copy of the live database while the server did not.
+-- Measured both ways on copies of the real database, 2026-09-13:
+-- one transaction fails, six autocommitted statements succeed.
+--
 -- Applied automatically at server boot by `dropSlugColumn` in
 -- server/src/Main.purs, which runs this sequence BEFORE schema.sql (so the
 -- indexes are rebuilt in the same boot), guards it on the column actually
