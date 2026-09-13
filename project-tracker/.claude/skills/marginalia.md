@@ -76,9 +76,19 @@ GET /api/projects?ancestor=125            # all descendants of project 125
 > unfiltered total means your filter did nothing.
 
 Returns an envelope with `projects` (array) and `count`. Each project has
-`id`, `slug`, `parentId`, `name`, `domain`, `subdomain`, `status`, `description`,
-`tags`, `updatedAt`, `coverUrl`, `blogStatus`. The `slug` is a NATO-callsign
-four-word identifier (`oscar-romeo-delta-uniform`) that's stable across renames.
+`id`, `parentId`, `name`, `domain`, `subdomain`, `status`, `description`,
+`tags`, `updatedAt`, `coverUrl`, `blogStatus`.
+
+**`slug` is gone** (2026-09-13, project #237). It was a four-word NATO callsign
+(`oscar-romeo-delta-uniform`) meant to be a stable handle across renames, and
+was never a handle at all: no route resolved one, `/api/projects/<slug>` was a
+404, and `/api/agent/search` indexes name and description only. A slug printed
+in an old log, worklog or golden file can be translated back through
+`database/migrations/2026-09-13-drop-project-slugs.mapping.json`; nothing else
+can resolve it.
+
+**Refer to a project by `id` and `name`.** The id is short, stable, never
+reused after deletion, and it is what every route takes.
 `coverUrl` is the hero screenshot for this project (null if none set).
 `blogStatus` is the project's blog-post classification (see "Blog posts"
 section below for values); null means unclassified.
@@ -89,7 +99,7 @@ section below for values); null means unclassified.
 GET /api/projects/:id
 ```
 
-Returns name, description, tags, notes, dependencies, attachments, slug,
+Returns name, description, tags, notes, dependencies, attachments,
 parent, source_path, source_url, repo, evolved_into, full status history,
 plus `coverAttachmentId`, `blogStatus`, and `blogContent` (the markdown
 body of the blog post, populated when blogStatus is `drafted` or `published`).
@@ -118,7 +128,7 @@ body of the blog post, populated when blogStatus is `drafted` or `published`).
 > The `:3022` rows are shape-compatible with the fields documented below (same
 > `id`/`projectId`/`role`/`port`/`url`/`startCommand`/`host`/… shape); the full
 > registration procedure is Bosun's `docs/REGISTER-A-SERVICE.md`. Marginalia
-> must still hold the **project** so `:3022` can denormalise name/slug — but the
+> must still hold the **project** so `:3022` can denormalise the name — but the
 > `:3100` server endpoints in the rest of this section are **DEPRECATED**: they
 > still exist and still respond, but they are empty and **must not be written
 > to** (writing there is exactly the drift the seam removed).
@@ -128,7 +138,8 @@ The field shape below describes a Bosun `:3022` row (and the legacy, now-empty
 servers across all projects, sorted by port. Each entry has:
 
 - `id` — server entry id
-- `projectId`, `projectName`, `projectSlug` — who owns it
+- `projectId`, `projectName` — who owns it. A Bosun `ServiceId` is
+  `<projectId>:<role>`; it was `<projectSlug>:<role>` until 2026-09-13.
 - `role` — `api`, `frontend`, `websocket`, `worker`, `whisper`, etc.
 - `port` — the TCP port (may be null for workers without a port)
 - `url` — canonical URL (e.g. `http://localhost:3050` for an mbp-local dev service; `http://andrews-mac-mini:8090` for a service intended to be reached via Tailscale; port 3100 itself is the tracker API on the mini)
@@ -164,10 +175,10 @@ Body: { "name":        "project name"         (required)
       , "sourcePath":  "/absolute/path"       (optional; local filesystem)
       , "repo":        "github-repo-name"     (optional)
       }
-# Returns { "projects": [ { "id": N, "slug": "...", ... } ] } — one-element
-# array wrapping the created project. Slugs are auto-generated 4-word NATO
-# callsigns (e.g. sierra-bravo-alpha-foxtrot) and are the project's stable
-# identity; the numeric id is for convenience.
+# Returns { "projects": [ { "id": N, ... } ] } — one-element array wrapping
+# the created project. The id is the project's identity: assigned by
+# nextval('seq_projects'), monotonic, and never reused. Note it down — it is
+# what every subsequent route takes.
 #
 # Marginalia spans many domains — not just coding. If you're adding a house
 # remodel, a woodworking piece, a garden plot, a music album, or a piece
@@ -237,6 +248,30 @@ Body: { "filename":    "report.md",
 # (/Volumes/Crucial4TB/Documents/Notes Attachments/), the response url field
 # points at /attachments/... so the frontend can link it. Otherwise url=null
 # and the attachment shows as a plain pointer.
+
+POST /api/agent/projects/:id/attachments/upload?description=<caption>
+Body: the RAW FILE BYTES (not JSON). Content-Type header sets the mimeType;
+      the optional ?description= query param becomes the caption.
+# Uploads content, unlike the reference endpoint above: the bytes are written
+# into $MARGINALIA_ATTACHMENT_STORE and the attachment row is inserted in one
+# call, so no ssh/scp to the mini is needed. Recognised types: jpeg, png, gif,
+# webp, heic, heif, mp4, quicktime, pdf (anything else lands as .bin).
+#
+#   curl -X POST -H 'Content-Type: image/png' --data-binary @shot.png \
+#     'http://andrews-mac-mini:3100/api/agent/projects/179/attachments/upload?description=cover'
+#
+# ⚠ The saved filename is GENERATED — `capture-<epoch>.<ext>`, in the store
+# ROOT, no subfolder, no project name (server/src/API/Agent.js). That's right
+# for the phone-capture PWA it was built for, and wrong for any batch that
+# wants legible filenames or wants a re-run to overwrite rather than
+# accumulate. For those, scp a named file into the store yourself and use the
+# reference endpoint above instead — e.g. marginalia-covers/<projectId>.jpg
+# (it was <slug>.jpg until 2026-09-13; covers shot before then still sit under
+# their old names and their attachment rows still point there).
+#
+# ⚠ There is NO DELETE endpoint for attachments. A wrong row costs a DuckDB
+# statement on the mini to undo, so stage bulk work: produce the files, eyeball
+# them, and only then register.
 
 POST /api/projects/:id/tags
 Body: { "tag": "library" }
@@ -544,8 +579,8 @@ the registered value is always "the thing that starts this".
 
 When the user asks you to get a project (or set of projects) running:
 
-1. **Resolve**: find the project(s) by name, slug, or search — Marginalia
-   holds project *identity*
+1. **Resolve**: find the project(s) by name or search — Marginalia holds
+   project *identity*. What you want out of this step is the **id**.
    ```
    curl -s http://andrews-mac-mini:3100/api/projects?search=<name> | jq
    ```
@@ -559,7 +594,7 @@ When the user asks you to get a project (or set of projects) running:
 3. **Check for collisions**: `curl -s http://localhost:3022/api/ports | jq .collisions`
 4. **For each server**, read the `startCommand` and act on it according to
    the table above. Run in the background. Redirect stdout/stderr to a log
-   file under `/tmp/marginalia-<slug>-<role>.log`.
+   file under `/tmp/marginalia-<projectId>-<role>.log`.
 5. **Verify**: after a brief pause, check the port is actually listening
    ```
    lsof -i :<port>
@@ -577,7 +612,7 @@ When the user asks you to get a project (or set of projects) running:
 > (inspect → derive command → test → set host) still apply; only the final
 > POST target is `:3022`. Do **not** POST to `:3100` — that reintroduces the
 > drift the seam removed. (The project must already exist in Marginalia so
-> `:3022` can denormalise its name/slug.)
+> `:3022` can denormalise its name.)
 
 When a project doesn't have a start command registered yet, and the user
 asks you to figure it out:

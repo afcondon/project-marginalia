@@ -48,11 +48,11 @@ all heuristic axes below.
 # Iterates active projects only — quick-wins on dormant/done projects are rare.
 curl -s 'http://andrews-mac-mini:3100/api/projects?status=active' | jq -r '.projects[].id' | while read id; do
   curl -s "http://andrews-mac-mini:3100/api/projects/$id" | jq -r --arg pid "$id" '
-    (.name as $name | .slug as $slug
+    (.name as $name
      | .notes // []
      | map(select(.author == "quick-win"))
      | .[]
-     | "\(.id)\t\($pid)\t\($slug)\t\($name)\t\(.content)")'
+     | "\(.id)\t\($pid)\t\($name)\t\(.content)")'
 done
 ```
 
@@ -89,7 +89,7 @@ Action for each: **"Is this still active? Mark done / blocked / defunct if not."
 
 ### Axis 2 — Claude Inbox unprocessed
 
-The Claude Inbox (project id 123, slug `delta-charlie-echo-tango`) collects
+The Claude Inbox (project id 123) collects
 freeform dictated thoughts. If the user has been dictating, there may be
 notes waiting to be processed into per-project edits.
 
@@ -253,23 +253,23 @@ Claude (runs queries, applies heuristics, composes response):
 
 > Here are some candidates from marginalia (as of YYYY-MM-DD):
 >
-> 1. **[oscar-uniform-sierra-bravo]** — Claude Code PureScript skills
+> 1. **#33** — Claude Code PureScript skills
 >    Status: done. Has a clear evolution narrative — started as a
 >    planned website, became a set of Claude Code skills instead.
 >    No blog post yet.
 >    Action: Write a post on blog.hylograph.net. 200 words is plenty.
 >
-> 2. **[delta-charlie-echo-tango]** — Claude Inbox
+> 2. **#123** — Claude Inbox
 >    1 unprocessed dictated note from an earlier session.
 >    Action: Process it — identify the projects it refers to, apply
 >    the implied changes, delete the note.
 >
-> 3. **[kilo-uniform-zulu-echo]** — Kernel Separation Phase 2
+> 3. **#14** — Kernel Separation Phase 2
 >    86 days stale in `active` status. Either it's still active and
 >    needs a progress note, or it moved on.
 >    Action: Decide — mark blocked/done/defunct as appropriate.
 >
-> 4. **[<various>]** — Several woodworking "someday" projects stale
+> 4. **#<various>** — Several woodworking "someday" projects stale
 >    for 2+ years ("House idea", "Furniture clippings", etc.)
 >    These are clippings, not plans. Probably `defunct` or at
 >    least tagged as reference-only.
@@ -286,5 +286,11 @@ Claude (runs queries, applies heuristics, composes response):
 The above is a real first-run output against a real database.
 Note the mix: a blog candidate, an inbox processing task, a stale-
 active review, a life-project batch cleanup, and a meta data-hygiene
-task. Good variety, concrete actions, slugs embedded so the user
-can answer "do #2".
+task. Good variety, concrete actions, ids embedded so the user can
+answer "do #2" — and so that anything named here can be fetched.
+
+**Name a project by its id and its name.** The id is short, stable, never
+reused, and it is what every route takes. (There used to be a four-word NATO
+slug here as well, and an instruction never to use it — it could not be looked
+up, `/api/projects/<slug>` being a 404. The slugs were removed on 2026-09-13,
+so there is nothing left to avoid.)
