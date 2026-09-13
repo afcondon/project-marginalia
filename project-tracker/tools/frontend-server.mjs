@@ -33,6 +33,29 @@ const _rawBlogDrafts = process.env.MARGINALIA_BLOG_DRAFTS || _defaultBlogDrafts;
 const BLOG_DRAFTS_ROOT = _rawBlogDrafts.endsWith('/') ? _rawBlogDrafts.slice(0, -1) : _rawBlogDrafts;
 const PORT = parseInt(process.env.MARGINALIA_FRONTEND_PORT || '3101', 10);
 
+// The capture PWA needs the microphone, and browsers withhold
+// navigator.mediaDevices from insecure origins -- so /capture/ over plain HTTP
+// is a dead app with a dead Dictate button. This server never terminates TLS
+// itself; `tailscale serve` does, and forwards x-forwarded-proto: https (and
+// x-forwarded-host), neither of which is present on a direct hit to this port.
+// That asymmetry is what makes the bounce below loop-free: the redirected
+// request arrives with the header set and falls straight through.
+// Set to empty to disable the bounce.
+const PUBLIC_ORIGIN = process.env.MARGINALIA_PUBLIC_ORIGIN
+  ?? 'https://andrews-mac-mini.vaquita-paradise.ts.net';
+
+// Only /capture/ is bounced. The desktop Register is happy on plain HTTP and
+// is routinely opened as localhost:3101, so redirecting everything would be a
+// nuisance for no gain.
+function secureRedirectFor(req, url) {
+  if (!PUBLIC_ORIGIN) return null;
+  if (!(url === '/capture' || url.startsWith('/capture/'))) return null;
+  if (req.headers['x-forwarded-proto'] === 'https') return null;
+  const host = (req.headers.host || '').split(':')[0];
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return null;
+  return PUBLIC_ORIGIN + url;
+}
+
 const API_TARGET = { host: '127.0.0.1', port: 3100 };
 const WHISPER_TARGET = { host: '127.0.0.1', port: 3200 };
 
@@ -200,6 +223,12 @@ const server = http.createServer((req, res) => {
   if (ATTACHMENTS_TARGET && url.startsWith('/attachments/')) {
     req.url = ATTACHMENTS_TARGET.prefix + url.slice('/attachments'.length);
     proxy(req, res, ATTACHMENTS_TARGET);
+    return;
+  }
+  const secureTarget = secureRedirectFor(req, url);
+  if (secureTarget) {
+    res.writeHead(302, { Location: secureTarget, 'Cache-Control': 'no-store' });
+    res.end();
     return;
   }
   // Capture PWA — served under /capture/ from a separate static root.
