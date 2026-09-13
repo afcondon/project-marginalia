@@ -88,7 +88,6 @@ export const parseBlogDraftsResponse_ = (str) => {
     return {
       drafts: (d.drafts || []).map(r => ({
         id: r.id || 0,
-        slug: r.slug || '',
         name: r.name || '',
         domain: r.domain || '',
         blogStatus: r.blogStatus || '',

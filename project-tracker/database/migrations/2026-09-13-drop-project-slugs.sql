@@ -1,0 +1,86 @@
+-- Migration: drop projects.slug
+-- Date: 2026-09-13
+-- Marginalia project #237, "Slug removal (Marginalia + Bosun)"
+--
+-- Rationale
+-- ---------
+-- Every project carried a four-word NATO callsign (`india-uniform-whiskey-lima`)
+-- in a nullable, unique TEXT column with no joins and no foreign keys. The point
+-- of it was to be dictation-friendly: a token you could say out loud.
+--
+-- It never became one, because nothing could resolve it. There was no route
+-- keyed by slug — `GET /api/projects/india-uniform-whiskey-lima` is a 404 while
+-- `GET /api/projects/237` is a 200. `/api/agent/search` indexes name and
+-- description and not this. Every internal use was `SELECT slug FROM projects
+-- WHERE id = ?`, which is to say every use already had the id in hand. So a
+-- token named for a human to speak was a token neither the human nor the API
+-- could look anything up with.
+--
+-- The id it is being replaced by was always there and always better: NOT NULL,
+-- issued by `nextval('seq_projects')`, monotonic, and never reused — 272 live
+-- projects, max id 289, 17 gaps from deletions and not one of them reissued.
+-- It is also the thing already in the URL of every project the user opens.
+--
+-- What this cost elsewhere
+-- ------------------------
+-- Two things were keyed on the slug outside this column:
+--
+--   * Blog drafts, as `<slug>.md` with assets under `<slug>/`, served at
+--     `/blog-assets/<slug>/…`. Re-keyed to `<projectId>` — free, because there
+--     were 112 draft rows and ZERO files: the drafts directory did not exist on
+--     the live host. Nothing was renamed because nothing was there.
+--
+--   * Bosun's `ServiceId`, built as `<projectSlug>:<role>`, which is how the
+--     whole fleet is filed. Migrated in the same session to `<projectId>:<role>`
+--     and verified identity-preserving: the fleet's serve plan and the frozen
+--     corpus golden are line-for-line the same after translating through the
+--     mapping, and the 53-rows-to-50-services collapse is unchanged.
+--
+-- The 33 federated life-projects (infovore-larder-db/life-projects/*.md) have a
+-- `slug` of their own which is a FILENAME — `coat-rack`, `hosta-collection`,
+-- `woodworking`. Different thing, same word. Untouched by this.
+--
+-- Reversibility
+-- -------------
+-- Destructive and one-way. Once this runs, no query can produce the old values:
+-- the only surviving record of slug → id is
+-- `ShapedSteer/bosun/registry/slug-to-id.json`, captured from the live API
+-- immediately before the drop, and its copy beside this file
+-- (`2026-09-13-drop-project-slugs.mapping.json`). Any pre-2026-09-13 log line,
+-- golden file or worklog entry that names a project by slug needs one of those
+-- to be read.
+--
+-- Why this is five statements and not one
+-- ---------------------------------------
+-- `ALTER TABLE projects DROP COLUMN IF EXISTS slug` on its own does not work,
+-- and both of its refusals were measured against a copy of the real database
+-- rather than reasoned about:
+--
+--   1. "Cannot drop column slug because there is a UNIQUE constraint that
+--      depends on it." CASCADE does not help. The constraint's own index is
+--      invisible to duckdb_indexes(); what IS visible is `idx_projects_slug`,
+--      a legacy unique index that never appeared in schema.sql, and dropping
+--      that clears the constraint.
+--
+--   2. "Cannot alter entry projects because there are entries that depend on
+--      it." This reads like the four views over `projects` and is not — with
+--      every index gone the ALTER succeeds with all eight views in place.
+--      DuckDB refuses to ALTER a table while ANY index exists on it.
+--
+-- The four ordinary indexes are in schema.sql as CREATE INDEX IF NOT EXISTS,
+-- so they come straight back; `idx_projects_slug` is not, and does not.
+--
+-- Applied automatically at server boot by `dropSlugColumn` in
+-- server/src/Main.purs, which runs this sequence BEFORE schema.sql (so the
+-- indexes are rebuilt in the same boot), guards it on the column actually
+-- being present, and reports rather than throws if it fails — a column nothing
+-- reads is a smaller problem than a tracker that will not start. This file is
+-- the record of record.
+
+DROP INDEX IF EXISTS idx_projects_slug;
+DROP INDEX IF EXISTS idx_projects_domain;
+DROP INDEX IF EXISTS idx_projects_status;
+DROP INDEX IF EXISTS idx_projects_subdomain;
+DROP INDEX IF EXISTS idx_projects_repo;
+ALTER TABLE projects DROP COLUMN IF EXISTS slug;
+-- then re-run database/schema.sql, which recreates the four keepers.

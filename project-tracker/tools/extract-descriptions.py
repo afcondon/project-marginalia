@@ -203,7 +203,7 @@ def detect_tags(source_path: str, full_path: Path) -> list[str]:
 def main():
     conn = duckdb.connect(DB_PATH, read_only=True)
     rows = conn.execute("""
-        SELECT id, slug, name, repo, source_path, description
+        SELECT id, name, repo, source_path, description
         FROM projects
         WHERE domain = 'programming'
         ORDER BY id
@@ -211,7 +211,7 @@ def main():
     conn.close()
 
     proposals = []
-    for pid, slug, name, repo, source_path, current_desc in rows:
+    for pid, name, repo, source_path, current_desc in rows:
         if not source_path:
             continue
 
@@ -263,7 +263,6 @@ def main():
 
         proposals.append({
             "id": pid,
-            "slug": slug,
             "name": name,
             "current_description": current_desc,
             "proposed_description": new_desc,

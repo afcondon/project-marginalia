@@ -58,7 +58,6 @@ type ServerRow =
   { id :: Int
   , projectId :: Int
   , projectName :: String
-  , projectSlug :: Maybe String
   , role :: String
   , port :: Maybe Int
   , url :: Maybe String
@@ -77,7 +76,6 @@ decodeServerRow f = do
   id <- readProp "id" f >>= readInt
   projectId <- readProp "project_id" f >>= readInt
   projectName <- readProp "project_name" f >>= readString
-  projectSlug <- readProp "project_slug" f >>= readNullOrUndefined >>= traverse readString
   role <- readProp "role" f >>= readString
   port <- readProp "port" f >>= readNullOrUndefined >>= traverse readInt
   url <- readProp "url" f >>= readNullOrUndefined >>= traverse readString
@@ -87,7 +85,7 @@ decodeServerRow f = do
   prerequisites <- readProp "prerequisites" f >>= readNullOrUndefined >>= traverse readString
   host <- readProp "host" f >>= readNullOrUndefined >>= traverse readString
   tailscaleName <- readProp "tailscale_name" f >>= readNullOrUndefined >>= traverse readString
-  pure { id, projectId, projectName, projectSlug, role, port, url, startCommand, description, environment, prerequisites, host, tailscaleName }
+  pure { id, projectId, projectName, role, port, url, startCommand, description, environment, prerequisites, host, tailscaleName }
 
 -- | Decode a result array, dropping any rows that fail to decode.
 -- | For a stricter pipeline we'd collect and return errors; for now the
@@ -109,7 +107,6 @@ encodeServerRow r = J.fromObject $ Object.fromFoldable
   [ "id" /\ J.fromNumber (Int.toNumber r.id)
   , "projectId" /\ J.fromNumber (Int.toNumber r.projectId)
   , "projectName" /\ J.fromString r.projectName
-  , "projectSlug" /\ maybeString r.projectSlug
   , "role" /\ J.fromString r.role
   , "port" /\ maybe J.jsonNull (J.fromNumber <<< Int.toNumber) r.port
   , "url" /\ maybeString r.url
@@ -161,7 +158,7 @@ encodeCollisions rows =
 listPorts :: Database -> Aff Response
 listPorts db = do
   rows <- queryAll db
-    """SELECT s.id, s.project_id, p.name AS project_name, p.slug AS project_slug,
+    """SELECT s.id, s.project_id, p.name AS project_name,
               s.role, s.port, s.url, s.start_command, s.description,
               s.environment, s.prerequisites, s.host, s.tailscale_name
        FROM project_servers s
@@ -178,7 +175,7 @@ listPorts db = do
 listServersForProject :: Database -> Int -> Aff Response
 listServersForProject db projectId = do
   rows <- queryAllParams db
-    """SELECT s.id, s.project_id, p.name AS project_name, p.slug AS project_slug,
+    """SELECT s.id, s.project_id, p.name AS project_name,
               s.role, s.port, s.url, s.start_command, s.description,
               s.environment, s.prerequisites, s.host, s.tailscale_name
        FROM project_servers s
@@ -231,7 +228,7 @@ addServer db projectId bodyStr = case parseBody bodyStr of
 
       -- Fetch and return the newly-inserted row
       rows <- queryAll db
-        """SELECT s.id, s.project_id, p.name AS project_name, p.slug AS project_slug,
+        """SELECT s.id, s.project_id, p.name AS project_name,
                   s.role, s.port, s.url, s.start_command, s.description,
                   s.environment, s.prerequisites, s.host, s.tailscale_name
            FROM project_servers s JOIN projects p ON p.id = s.project_id

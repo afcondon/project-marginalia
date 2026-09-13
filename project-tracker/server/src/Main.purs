@@ -20,7 +20,7 @@ import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Database.DuckDB as DB
 import Effect (Effect)
-import Effect.Aff (launchAff_)
+import Effect.Aff (Aff, launchAff_)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Effect.Exception (message)
@@ -151,6 +151,56 @@ route = root $ sum
 -- Server
 -- =============================================================================
 
+-- | 2026-09-13 — drop `projects.slug`, the four-word NATO callsign (project
+-- | #237). DESTRUCTIVE and deliberate: it fires once per database, the values
+-- | do not come back, and the only remaining record of them is
+-- | `database/migrations/2026-09-13-drop-project-slugs.mapping.json`.
+-- |
+-- | This is a whole function rather than one more line in the idempotent-ALTER
+-- | block below, because the obvious spelling does not work and its failure is
+-- | an exception that would take the boot down with it. Measured against a copy
+-- | of the real database:
+-- |
+-- |   * `ALTER TABLE projects DROP COLUMN IF EXISTS slug` → *"there is a UNIQUE
+-- |     constraint that depends on it"*. `CASCADE` does not help. The
+-- |     constraint's index does not appear in `duckdb_indexes()`; what does
+-- |     appear is `idx_projects_slug`, a legacy unique index that is not in
+-- |     schema.sql, and dropping that clears the constraint.
+-- |   * Then → *"there are entries that depend on it"*, which reads like the
+-- |     views over `projects` and is not: DuckDB refuses to ALTER a table while
+-- |     ANY index exists on it, including the four ordinary ones on domain,
+-- |     status, subdomain and repo. The views can stay; the indexes cannot.
+-- |
+-- | So: drop every index on `projects`, drop the column — and run this BEFORE
+-- | `schema.sql`, whose `CREATE INDEX IF NOT EXISTS` statements put the four
+-- | keepers straight back in the same boot. Guarded on the column actually
+-- | being present, so a database already migrated (and every database created
+-- | from here on) rebuilds no index at all.
+dropSlugColumn :: DB.Database -> Aff Unit
+dropSlugColumn db = do
+  present <- try (DB.queryAll db
+    "SELECT column_name FROM duckdb_columns() WHERE table_name = 'projects' AND column_name = 'slug'")
+  case present of
+    -- No `projects` table yet (a fresh database, before schema.sql runs), or
+    -- the catalog would not answer. Either way there is nothing to drop.
+    Left _ -> pure unit
+    Right rows | DB.isEmpty rows -> pure unit
+    Right _ -> do
+      outcome <- try (DB.execBatch db
+        [ "DROP INDEX IF EXISTS idx_projects_slug"
+        , "DROP INDEX IF EXISTS idx_projects_domain"
+        , "DROP INDEX IF EXISTS idx_projects_status"
+        , "DROP INDEX IF EXISTS idx_projects_subdomain"
+        , "DROP INDEX IF EXISTS idx_projects_repo"
+        , "ALTER TABLE projects DROP COLUMN IF EXISTS slug"
+        ])
+      liftEffect $ log case outcome of
+        Right _ -> "Dropped projects.slug (migration 2026-09-13)"
+        -- Reported, never rethrown. A failed drop leaves a column nothing
+        -- reads; a failed BOOT leaves no tracker. schema.sql runs next either
+        -- way, so any index this did drop comes straight back.
+        Left err -> "Warning: could not drop projects.slug: " <> message err
+
 dbPath :: String
 dbPath = "./database/tracker.duckdb"
 
@@ -162,6 +212,8 @@ main = launchAff_ do
   db <- DB.openDB dbPath
   dbRef <- liftEffect $ Ref.new db
   liftEffect $ log $ "Connected to database: " <> dbPath
+
+  dropSlugColumn db
 
   -- Apply the full schema from database/schema.sql on every startup. It's
   -- built entirely out of CREATE TABLE IF NOT EXISTS / CREATE VIEW IF NOT
@@ -190,7 +242,7 @@ main = launchAff_ do
   DB.exec db "ALTER TABLE projects ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public'"
   liftEffect $ log "Schema migrations applied"
 
-  -- One-time hoist of existing DB blog_content values into <slug>.md
+  -- One-time hoist of existing DB blog_content values into <projectId>.md
   -- files on disk. Idempotent: after the first successful pass the
   -- blog_content column is NULLed for every migrated row, so subsequent
   -- boots find zero rows to process.

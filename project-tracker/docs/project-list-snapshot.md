@@ -5,6 +5,12 @@
 **By domain**: programming 102, woodworking 16, house 11, infrastructure 10, music 8, garden 2
 **By status**: active 102, idea 20, someday 13, defunct 6, done 4, evolved 2, blocked 2
 
+> **The callsigns below no longer exist** (noted 2026-09-13). This is a dated
+> snapshot and it is left as it was captured, but the four-word NATO slugs it
+> prints were removed from Marginalia on 2026-09-13 — a project is identified by
+> its numeric id now. Nothing will resolve a slug printed here; translate
+> through `database/migrations/2026-09-13-drop-project-slugs.mapping.json`.
+
 ## About the `what-next` skill
 
 This list exists so you can quickly see what's in marginalia without opening the app.
@@ -17,7 +23,7 @@ Ask any Claude Code session (opened in the project-tracker directory) something 
 The `what-next` skill will query the marginalia API across eight heuristic axes
 (stale actives, inbox contents, todos in notes, missing descriptions, drifting life
 projects, blog candidates, missing thumbnails, running-but-unused services) and
-return a short curated list of 3–8 candidates. Each has a slug, a reason it was
+return a short curated list of 3–8 candidates. Each has an id, a reason it was
 suggested, and a concrete action.
 
 The data will be noisy at first. That's intentional: the dismissal loop (telling

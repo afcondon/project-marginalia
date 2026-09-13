@@ -250,8 +250,11 @@ const server = http.createServer((req, res) => {
     streamFile(path.join(FINANCE_ROOT, 'index.html'), res);
     return;
   }
-  // Blog assets — serve images from $MARGINALIA_BLOG_DRAFTS/<slug>/
-  // Path: /blog-assets/<slug>/<filename>
+  // Blog assets — serve images from $MARGINALIA_BLOG_DRAFTS/<projectId>/
+  // Path: /blog-assets/<projectId>/<filename>
+  // (The handler itself is path-agnostic; it joins whatever subpath it is
+  // given and checks the result stays under the root, so the 2026-09-13
+  // slug→id re-key needed no change here beyond saying what the key is.)
   if (url.startsWith('/blog-assets/')) {
     const subPath = url.slice('/blog-assets/'.length).split('?')[0];
     const resolved = path.normalize(path.join(BLOG_DRAFTS_ROOT, subPath));

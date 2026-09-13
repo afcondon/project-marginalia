@@ -156,7 +156,6 @@ nextStatuses = case _ of
 
 type Project =
   { id :: Int
-  , slug :: Maybe String
   , parentId :: Maybe Int
   , name :: String
   , domain :: String
@@ -181,7 +180,6 @@ type Project =
 -- | client-side without changing the server.
 type ActivityRow =
   { id :: Int
-  , slug :: Maybe String
   , name :: String
   , domain :: String
   , subdomain :: Maybe String
@@ -244,7 +242,6 @@ type Server =
   { id :: Int
   , projectId :: Int
   , projectName :: String
-  , projectSlug :: Maybe String
   , role :: String
   , port :: Maybe Int
   , url :: Maybe String
@@ -256,7 +253,6 @@ type Server =
 
 type ProjectDetail =
   { id :: Int
-  , slug :: Maybe String
   , parentId :: Maybe Int
   , name :: String
   , domain :: String
@@ -396,7 +392,6 @@ decodeProject json = case toObject json of
     domain <- reqString "domain" obj
     status <- reqStatus "status" obj
     in { id
-       , slug: optString "slug" obj
        , parentId: optInt "parentId" obj
        , name
        , domain
@@ -451,7 +446,6 @@ decodeActivityRow json = case toObject json of
     status <- reqStatus "status" obj
     score <- reqNumber "score" obj
     in { id
-       , slug: optString "slug" obj
        , name
        , domain
        , subdomain: optString "subdomain" obj
@@ -529,7 +523,6 @@ decodeServer json = case toObject json of
     in { id
        , projectId
        , projectName
-       , projectSlug: optString "projectSlug" obj
        , role
        , port: optInt "port" obj
        , url: optString "url" obj
@@ -587,7 +580,6 @@ decodeProjectDetail json = case toObject json of
       Just depsJson -> decodeDependencies depsJson
     attachments <- decodeArrayField "attachments" decodeAttachment obj
     in { id
-       , slug: optString "slug" obj
        , parentId: optInt "parentId" obj
        , name
        , domain

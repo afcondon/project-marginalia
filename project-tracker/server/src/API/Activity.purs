@@ -153,7 +153,7 @@ activitySql domainClause =
     GROUP BY project_id
   )
   SELECT
-    p.id, p.slug, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
+    p.id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
     COALESCE(n.notes_7d, 0)         AS notes_7d,
     COALESCE(n.notes_30d, 0)        AS notes_30d,
     COALESCE(n.notes_90d, 0)        AS notes_90d,

@@ -35,7 +35,9 @@ CREATE SEQUENCE IF NOT EXISTS seq_servers START 1;
 -- The main entity. Covers aspirations, clippings, active work, finished things.
 CREATE TABLE IF NOT EXISTS projects (
     id            INTEGER PRIMARY KEY DEFAULT nextval('seq_projects'),
-    slug          TEXT UNIQUE,            -- dictation-friendly identifier: adjective-animal-animal or NATO callsign
+                                          -- the project's only identifier. Stable, monotonic, never reused;
+                                          -- 17 gaps from deletions have never been reissued. A `slug TEXT UNIQUE`
+                                          -- sat here until 2026-09-13 — see database/migrations/2026-09-13-drop-project-slugs.sql
     parent_id     INTEGER,                -- another project that contains this one (rank-n grouping)
     name          TEXT NOT NULL,
     domain        TEXT NOT NULL,          -- programming, house, garden, woodworking, music, infrastructure

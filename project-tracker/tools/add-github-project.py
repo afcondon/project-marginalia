@@ -156,7 +156,7 @@ def main():
     result = post_project(payload)
     project = result["projects"][0]
     print()
-    print(f"Created project #{project['id']} ({project.get('slug', '')})")
+    print(f"Created project #{project['id']} — {project.get('name', '')}")
     print(f"  {project['name']}")
 
     # Add tags via API

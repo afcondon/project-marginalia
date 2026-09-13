@@ -315,7 +315,7 @@ renameProject projectId newName renameDir = do
             Nothing -> pure { ok: true, message: mWarning }
 
 -- | Ask the server to open this project's blog draft in VS Code. The
--- | server creates `<slug>.md` with a template if it doesn't already
+-- | server creates `<projectId>.md` with a template if it doesn't already
 -- | exist, then shells out to `open -a "Visual Studio Code" <path>`.
 -- | Returns Left with an error message on failure, Right unit on success.
 openBlogInVSCode :: Int -> Aff (Either String Unit)
@@ -423,7 +423,6 @@ type BlogDraftsResponse =
 
 type BlogDraftRecord =
   { id :: Int
-  , slug :: String
   , name :: String
   , domain :: String
   , blogStatus :: String

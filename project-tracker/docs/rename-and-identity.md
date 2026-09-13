@@ -1,10 +1,21 @@
 # Project rename, project identity, and the synchronisation problem
 
-## The principle: identity is the slug
+## The principle: identity is the id
 
-Every project in Marginalia has a **slug** — a four-word NATO-callsign identifier
-like `november-echo-delta-yankee`. Slugs are generated when the project is
-created, never change, and are unique. **The slug is the project's identity.**
+Every project in Marginalia has an **id** — the integer from
+`nextval('seq_projects')`, assigned at creation, never changed, never reused.
+**The id is the project's identity.**
+
+> This section used to say the identity was the *slug*: a four-word NATO
+> callsign like `november-echo-delta-yankee`, generated at creation and unique.
+> The slugs were removed on 2026-09-13 (project #237). The argument below never
+> actually rested on them — it rests on identity not being the *name*, and on
+> every relation in the database keying on `id`, which was already true. What
+> the slug added was a second identifier that no route, index or query could
+> resolve: `GET /api/projects/november-echo-delta-yankee` was a 404 while
+> `GET /api/projects/<id>` was a 200, and every internal use of the slug began
+> by looking it up *from* the id. A voice-friendly handle that cannot be used
+> to find anything is not an identity; it is a decoration on one.
 
 Everything else is a label or a pointer:
 
@@ -35,7 +46,7 @@ For a plan-level project, `source_path` typically points at a markdown file
 it points at a directory (e.g. `purescript-hylograph-libs/purescript-hylograph-canvas`).
 
 After a rename in Marginalia, the file or directory still has the old name.
-The slug-based identity still works, but the human-meaningful pairing
+The id-based identity still works, but the human-meaningful pairing
 between tracker and disk becomes confusing.
 
 ### 3. External references (GitHub, build tools, IDE state)
@@ -85,19 +96,19 @@ do as much as possible atomically.
 
 ## Proposed mechanism
 
-A `marginalia rename <slug> <new-name> [--also-files]` command (or a
+A `marginalia rename <id> <new-name> [--also-files]` command (or a
 detail-panel UI flow that produces the same effect) that handles the entire
 chain for code projects.
 
 ### Algorithm
 
 1. **Validate**:
-   - `slug` resolves to a project
+   - `id` resolves to a project
    - `new-name` is non-empty and not used by a sibling at the same level
    - If `--also-files`, the source_path must exist on disk
 2. **Detect project type**: directory? markdown file? neither?
 3. **For directory projects**:
-   - Compute the new directory name (slugify the new name to a filesystem-safe
+   - Compute the new directory name (reduce the new name to a filesystem-safe
      form, or accept `--new-path` for an explicit override)
    - Check the directory is in a clean git state (no uncommitted changes)
    - Run `git mv old new` (relative to the repo root)
@@ -142,18 +153,20 @@ The right shape: **the tracker is the single command surface for project
 identity changes**. You rename in Marginalia, it does the right thing across
 disk + git + GitHub.
 
-## Why slugs save us
+## Why a stable identity saves us
 
-The slug-as-identity decision pays off here. Even if the rename mechanism
-fails partway through (e.g. `gh repo rename` succeeds but the local
-`git remote set-url` fails), the slug-based linkage in the marginalia DB
-still works. Drift detection can fix the local state later. Nothing
-catastrophic happens from a partial rename.
+The identity-is-not-the-name decision pays off here. Even if the rename
+mechanism fails partway through (e.g. `gh repo rename` succeeds but the local
+`git remote set-url` fails), the id-based linkage in the marginalia DB still
+works. Drift detection can fix the local state later. Nothing catastrophic
+happens from a partial rename.
 
-This is also why we should never expose slugs as user-typed identifiers in
-contexts where they might get truncated or transcribed. NATO callsigns are
-exactly the right shape: voice-friendly, copy-friendly, unambiguous, but
-not something you'd ever type by hand.
+The id is also the identifier to *expose*, which is the opposite of what was
+argued here before. The case for the NATO callsign was that it was
+voice-friendly and unambiguous to transcribe — but it was never resolvable, so
+a slug you read out correctly still got you nowhere. An id is short enough to
+say, short enough to type, appears in the URL of every project page, and is the
+only thing the API will actually answer to.
 
 ## Implementation phases
 

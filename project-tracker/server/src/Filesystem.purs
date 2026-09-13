@@ -20,7 +20,7 @@ data RenameOutcome
   | Renamed String String   -- "renamed" — newPath, method ("git mv" | "fs.rename")
   | RenameError String      -- "error"   — refuse to do anything
 
--- | Attempt to rename the directory at `sourcePath` to a slugified form of
+-- | Attempt to rename the directory at `sourcePath` to a filename-safe form of
 -- | `newName` in the same parent directory. Uses `git mv` if inside a git
 -- | repo, otherwise plain `fs.rename`. Refuses if the git working tree is
 -- | dirty or the destination exists.

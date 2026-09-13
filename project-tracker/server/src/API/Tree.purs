@@ -44,7 +44,7 @@ getTree db mTag mGroup mRoot mPublicOnly = do
   ok' jsonHeaders (buildTreeJson projectRows depRows (s mTag) (s mGroup) (s mRoot) (s mPublicOnly))
   where
   projectSql =
-    """SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.status,
+    """SELECT p.id, p.parent_id, p.name, p.domain, p.status,
               p.tagline, p.visibility, p.repo, p.source_url, p.description,
               a_cover.file_path AS cover_path,
               STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags
@@ -52,7 +52,7 @@ getTree db mTag mGroup mRoot mPublicOnly = do
        LEFT JOIN project_tags pt ON pt.project_id = p.id
        LEFT JOIN tags t ON t.id = pt.tag_id
        LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id
-       GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.status,
+       GROUP BY p.id, p.parent_id, p.name, p.domain, p.status,
                 p.tagline, p.visibility, p.repo, p.source_url, p.description,
                 a_cover.file_path"""
   depSql = "SELECT blocker_id, blocked_id, dependency_type FROM dependency_graph"

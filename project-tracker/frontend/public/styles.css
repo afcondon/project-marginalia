@@ -398,7 +398,7 @@ body {
   color: var(--color-text-light);
 }
 
-.card-slug {
+.card-id {
   font-size: var(--text-xs);
   color: var(--color-text-light);
   font-family: 'SF Mono', 'Fira Code', monospace;
@@ -641,13 +641,6 @@ body {
 
 .breadcrumb-name {
   font-weight: 500;
-}
-
-.detail-slug {
-  font-size: var(--text-xs);
-  color: var(--color-text-light);
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  margin-left: auto;
 }
 
 .detail-children {
@@ -2219,7 +2212,7 @@ body {
   color: var(--ink-muted);
 }
 
-.project-card .card-slug {
+.project-card .card-id {
   font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
   font-size: 0.75rem;
   color: var(--ink-light);
@@ -3006,19 +2999,15 @@ body {
   gap: 4px;
 }
 
-.identifier-slug {
+/* The dossier's identifier. It was a monospace slug with a small uppercase
+   "id NNN" label trailing it; the slug went on 2026-09-13 and the id inherits
+   its treatment, because the id is what the identifier now IS rather than a
+   footnote to it. */
+.identifier-id {
   font-family: "SF Mono", ui-monospace, monospace;
   font-size: 0.82rem;
   color: var(--ink);
   letter-spacing: -0.02em;
-}
-
-.identifier-id {
-  font-family: var(--sans-label);
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--ink-light);
 }
 
 .identifier-subdomain {

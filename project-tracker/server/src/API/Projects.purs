@@ -39,7 +39,6 @@ import Foreign (Foreign, unsafeToForeign)
 import Foreign.Object (Object, lookup) as FO
 import HTTPurple (Response, ok', badRequest', notFound)
 import HTTPurple.Headers (ResponseHeaders, headers)
-import Slug as Slug
 
 -- | JSON content type header with CORS
 jsonHeaders :: ResponseHeaders
@@ -95,7 +94,7 @@ getIntField key obj = case FO.lookup key obj of
 -- | List projects with optional filtering by domain, status, tag, and search text.
 listProjects :: Database -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Maybe String -> Aff Response
 listProjects db mDomain mStatus mTag mAncestor mSearch = do
-  let baseSql = "SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, p.blog_status, p.human_summary, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags, a_cover.file_path AS cover_path FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id WHERE 1=1"
+  let baseSql = "SELECT p.id, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, p.blog_status, p.human_summary, STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags, a_cover.file_path AS cover_path FROM projects p LEFT JOIN project_tags pt ON pt.project_id = p.id LEFT JOIN tags t ON t.id = pt.tag_id LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id WHERE 1=1"
   let domainClause = case mDomain of
         Just _ -> " AND p.domain = ?"
         Nothing -> ""
@@ -111,7 +110,7 @@ listProjects db mDomain mStatus mTag mAncestor mSearch = do
   let searchClause = case mSearch of
         Just _ -> " AND (LOWER(p.name) LIKE '%' || LOWER(?) || '%' OR LOWER(p.description) LIKE '%' || LOWER(?) || '%')"
         Nothing -> ""
-  let groupClause = " GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, p.blog_status, p.human_summary, a_cover.file_path"
+  let groupClause = " GROUP BY p.id, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, p.blog_status, p.human_summary, a_cover.file_path"
   let orderClause = " ORDER BY p.updated_at DESC NULLS LAST"
   let sql = baseSql <> domainClause <> statusClause <> tagClause <> ancestorClause <> searchClause <> groupClause <> orderClause
   let params = buildFilterParams mDomain mStatus mTag mAncestor mSearch
@@ -159,7 +158,7 @@ getProject db projectId = do
        LEFT JOIN tags t ON t.id = pt.tag_id
        LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id
        WHERE p.id = ?
-       GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status,
+       GROUP BY p.id, p.parent_id, p.name, p.domain, p.subdomain, p.status,
                 p.evolved_into, p.description, p.source_url, p.source_path,
                 p.repo, p.preferred_view, p.cover_attachment_id,
                 p.blog_status, p.blog_content, p.human_summary,
@@ -176,11 +175,10 @@ getProject db projectId = do
         Just json -> ok' jsonHeaders json
         Nothing -> notFound
     Just project -> do
-      -- Blog drafts are file-sourced: read <slug>.md from disk and splice
+      -- Blog drafts are file-sourced: read <id>.md from disk and splice
       -- its contents into the row so buildProjectDetailJson sees it as
       -- blog_content. The DB column is ignored for reads.
-      let slug = getRowString_ "slug" project
-      mDraft <- liftEffect $ BlogDrafts.readDraft slug
+      mDraft <- liftEffect $ BlogDrafts.readDraft projectId
       let projectWithDraft = BlogDrafts.overrideBlogContent project mDraft
       notes <- queryAllParams db
         "SELECT id, content, author, created_at FROM project_notes WHERE project_id = ? ORDER BY created_at DESC"
@@ -217,14 +215,11 @@ createProject db bodyStr = case parseBody bodyStr of
     let repo = getField "repo" obj
     let mParentId = getIntField "parentId" obj
 
-    slug <- Slug.generateUniqueSlug db
-
     case mParentId of
       Nothing ->
         run db
-          "INSERT INTO projects (slug, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-          [ unsafeToForeign slug
-          , unsafeToForeign name
+          "INSERT INTO projects (name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          [ unsafeToForeign name
           , unsafeToForeign domain
           , unsafeToForeign subdomain
           , unsafeToForeign status
@@ -235,9 +230,8 @@ createProject db bodyStr = case parseBody bodyStr of
           ]
       Just parentId ->
         run db
-          "INSERT INTO projects (slug, parent_id, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-          [ unsafeToForeign slug
-          , unsafeToForeign parentId
+          "INSERT INTO projects (parent_id, name, domain, subdomain, status, description, source_url, source_path, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          [ unsafeToForeign parentId
           , unsafeToForeign name
           , unsafeToForeign domain
           , unsafeToForeign subdomain
@@ -253,9 +247,9 @@ createProject db bodyStr = case parseBody bodyStr of
       "INSERT INTO status_history (project_id, old_status, new_status, reason, author) VALUES ((SELECT MAX(id) FROM projects), NULL, ?, 'Project created', 'api')"
       [ unsafeToForeign status ]
 
-    -- Use the same query shape as listProjects so the response includes slug + parent_id
+    -- Use the same query shape as listProjects so the response includes parent_id
     rows <- queryAllParams db
-      """SELECT p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
+      """SELECT p.id, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at,
                 p.blog_status, p.human_summary,
                 STRING_AGG(DISTINCT t.name, ', ' ORDER BY t.name) AS tags,
                 a_cover.file_path AS cover_path
@@ -264,7 +258,7 @@ createProject db bodyStr = case parseBody bodyStr of
          LEFT JOIN tags t ON t.id = pt.tag_id
          LEFT JOIN attachments a_cover ON a_cover.id = p.cover_attachment_id
          WHERE p.id = (SELECT MAX(id) FROM projects)
-         GROUP BY p.id, p.slug, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, p.blog_status, p.human_summary, a_cover.file_path"""
+         GROUP BY p.id, p.parent_id, p.name, p.domain, p.subdomain, p.status, p.description, p.updated_at, p.blog_status, p.human_summary, a_cover.file_path"""
       []
     ok' jsonHeaders (buildProjectListJson rows)
 
@@ -396,9 +390,14 @@ foreign import jsNull :: Foreign
 -- POST /api/projects/:id/blog/open — open blog draft in VS Code
 -- =============================================================================
 -- |
--- | Looks up the project's slug, ensures `<slug>.md` exists under the
--- | configured drafts dir (creating it with a template if needed), then
--- | shells out to `open -a "Visual Studio Code" <path>`.
+-- | Ensures `<id>.md` exists under the configured drafts dir (creating it
+-- | with a template if needed), then shells out to
+-- | `open -a "Visual Studio Code" <path>`.
+-- |
+-- | Keyed by the project id since 2026-09-13. It was `<slug>.md`, and the
+-- | handler could refuse with "Project has no slug" — a real failure mode,
+-- | since `slug` was nullable. An id is `NOT NULL` and is the thing the
+-- | request already names, so that refusal has no shape left to take.
 -- |
 -- | The browser UI calls this after the user clicks "Edit in VS Code";
 -- | writes happen exclusively in VS Code; the UI refetches on demand via
@@ -406,27 +405,23 @@ foreign import jsNull :: Foreign
 openBlogDraft :: Database -> Int -> Aff Response
 openBlogDraft db projectId = do
   rows <- queryAllParams db
-    "SELECT slug, name FROM projects WHERE id = ?"
+    "SELECT name FROM projects WHERE id = ?"
     [ unsafeToForeign projectId ]
   case firstRow rows of
     Nothing -> notFound
     Just row -> do
-      let slug = getRowString_ "slug" row
       let name = getRowString_ "name" row
-      if slug == ""
-        then badRequest' jsonHeaders """{"error": "Project has no slug"}"""
-        else do
-          ensured <- liftEffect $ BlogDrafts.ensureDraft slug name
-          case ensured of
-            BlogDrafts.EnsureError err ->
+      ensured <- liftEffect $ BlogDrafts.ensureDraft projectId name
+      case ensured of
+        BlogDrafts.EnsureError err ->
+          badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
+        BlogDrafts.EnsureOpened absPath -> do
+          openOutcome <- liftEffect $ BlogDrafts.openInVSCode absPath
+          case openOutcome of
+            BlogDrafts.OpenError err ->
               badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
-            BlogDrafts.EnsureOpened absPath -> do
-              openOutcome <- liftEffect $ BlogDrafts.openInVSCode absPath
-              case openOutcome of
-                BlogDrafts.OpenError err ->
-                  badRequest' jsonHeaders ("{\"error\": \"" <> err <> "\"}")
-                BlogDrafts.OpenOk p ->
-                  ok' jsonHeaders ("{\"ok\": true, \"path\": \"" <> p <> "\"}")
+            BlogDrafts.OpenOk p ->
+              ok' jsonHeaders ("{\"ok\": true, \"path\": \"" <> p <> "\"}")
 
 -- =============================================================================
 -- GET /api/blog/drafts — Letters Page: all projects with blog status
@@ -435,7 +430,7 @@ openBlogDraft db projectId = do
 listBlogDrafts :: Database -> Aff Response
 listBlogDrafts db = do
   rows <- queryAll db
-    """SELECT id, slug, name, domain, blog_status
+    """SELECT id, name, domain, blog_status
        FROM projects
        WHERE blog_status IS NOT NULL
        ORDER BY
@@ -465,18 +460,17 @@ saveBlogAsset db projectId bodyStr = case parseBody bodyStr of
   Nothing -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
   Just obj -> do
     rows <- queryAllParams db
-      "SELECT slug FROM projects WHERE id = ?"
+      "SELECT id FROM projects WHERE id = ?"
       [ unsafeToForeign projectId ]
     case firstRow rows of
       Nothing -> notFound
-      Just row -> do
-        let slug = getRowString_ "slug" row
+      Just _ ->
         case getFieldMaybe "filename" obj, getFieldMaybe "data" obj of
           Just filename, Just base64Data -> do
-            outcome <- liftEffect $ BlogDrafts.saveBlogAsset slug filename base64Data
+            outcome <- liftEffect $ BlogDrafts.saveBlogAsset projectId filename base64Data
             case outcome of
               BlogDrafts.AssetSaved info ->
-                let markdown = "![" <> info.filename <> "](" <> slug <> "/" <> info.filename <> ")"
+                let markdown = "![" <> info.filename <> "](" <> show projectId <> "/" <> info.filename <> ")"
                 in ok' jsonHeaders
                   ("{\"ok\": true, \"filename\": \"" <> info.filename <> "\", \"markdown\": \"" <> markdown <> "\"}")
               BlogDrafts.AssetError err ->
@@ -486,22 +480,21 @@ saveBlogAsset db projectId bodyStr = case parseBody bodyStr of
 listBlogAssets :: Database -> Int -> Aff Response
 listBlogAssets db projectId = do
   rows <- queryAllParams db
-    "SELECT slug FROM projects WHERE id = ?"
+    "SELECT id FROM projects WHERE id = ?"
     [ unsafeToForeign projectId ]
   case firstRow rows of
     Nothing -> notFound
-    Just row -> do
-      let slug = getRowString_ "slug" row
-      assets <- liftEffect $ BlogDrafts.listBlogAssets slug
-      ok' jsonHeaders (buildAssetsJson slug assets)
+    Just _ -> do
+      assets <- liftEffect $ BlogDrafts.listBlogAssets projectId
+      ok' jsonHeaders (buildAssetsJson projectId assets)
 
-buildAssetsJson :: String -> Array BlogDrafts.AssetInfo -> String
-buildAssetsJson slug assets =
+buildAssetsJson :: Int -> Array BlogDrafts.AssetInfo -> String
+buildAssetsJson projectId assets =
   let entries = map (\a ->
         "{\"filename\": \"" <> a.filename
         <> "\", \"size\": " <> show a.size
-        <> ", \"url\": \"/blog-assets/" <> slug <> "/" <> a.filename
-        <> "\", \"markdown\": \"![" <> a.filename <> "](" <> slug <> "/" <> a.filename <> ")\"}"
+        <> ", \"url\": \"/blog-assets/" <> show projectId <> "/" <> a.filename
+        <> "\", \"markdown\": \"![" <> a.filename <> "](" <> show projectId <> "/" <> a.filename <> ")\"}"
       ) assets
   in "{\"assets\": [" <> joinArray entries <> "], \"count\": " <> show (Array.length assets) <> "}"
 

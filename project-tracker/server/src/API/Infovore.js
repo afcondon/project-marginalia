@@ -164,7 +164,6 @@ const readAllCards = () => {
 // Map DB rows to the same card shape buildProjectListJson uses.
 const dbRowToCard = (row) => ({
   id: Number(row.id),
-  slug: row.slug || null,
   parentId: row.parent_id != null ? Number(row.parent_id) : null,
   name: row.name,
   domain: row.domain,
@@ -328,6 +327,11 @@ export const detailJson_ = (pid) => () => {
 
   return JSON.stringify({
     id: card.id,
+    // A life-project's `slug` is its markdown FILENAME (`coat-rack`,
+    // `hosta-collection`) — a different thing that happened to share a name
+    // with the tracker's NATO-callsign project slugs. Those were removed on
+    // 2026-09-13; this stayed, because it names a file that exists. A tracker
+    // project's detail JSON no longer carries the key at all.
     slug: card.slug,
     parentId: null,
     name: card.name,

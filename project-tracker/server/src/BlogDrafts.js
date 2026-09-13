@@ -1,6 +1,6 @@
 // FFI for BlogDrafts.purs
 //
-// Blog drafts live as <slug>.md files on disk in $MARGINALIA_BLOG_DRAFTS
+// Blog drafts live as <projectId>.md files on disk in $MARGINALIA_BLOG_DRAFTS
 // (default ~/Documents/marginalia-blog-drafts). The file is source of
 // truth. The browser UI shows a read-only preview; writes happen in VS
 // Code, which we shell out to via `open -a "Visual Studio Code" <path>`.
@@ -22,40 +22,41 @@ const BLOG_DRAFTS_DIR = _rawDrafts.endsWith('/')
   ? _rawDrafts.slice(0, -1)
   : _rawDrafts;
 
-// Defensive slug validation. Slug.purs generates NATO-callsign strings
-// joined by hyphens — all [a-z][a-z0-9-]*. This regex is the last line
-// of defence before a filesystem operation, belt-and-braces in case the
-// slug generator changes or the DB gets hand-edited.
-const SLUG_RE = /^[a-z][a-z0-9-]*$/;
-const isSafeSlug = (s) =>
-  typeof s === 'string' && s.length > 0 && s.length <= 200 && SLUG_RE.test(s);
+// Defensive key validation, the last line of defence before a filesystem
+// operation. It used to guard a slug against a NATO-callsign regex; the key
+// is now the project id, so the guard is that it is a positive whole number
+// and nothing else. `-1` and `0` are refused too, not because the filesystem
+// would mind but because Tree.js hands those out to the synthetic root and
+// domain nodes, which are not projects and have no drafts.
+const isSafeKey = (n) => Number.isSafeInteger(n) && n > 0;
+const keyOf = (n) => String(n);
 
-const draftPath = (slug) => path.join(BLOG_DRAFTS_DIR, slug + '.md');
+const draftPath = (projectId) => path.join(BLOG_DRAFTS_DIR, keyOf(projectId) + '.md');
 
-// Read the draft file for a given slug. Returns null if missing, invalid,
+// Read the draft file for a given project. Returns null if missing, invalid,
 // or unreadable — never throws, so a missing file can't break GET requests.
-export const readDraft_ = (slug) => () => {
-  if (!isSafeSlug(slug)) return null;
+export const readDraft_ = (projectId) => () => {
+  if (!isSafeKey(projectId)) return null;
   try {
-    return fs.readFileSync(draftPath(slug), 'utf-8');
+    return fs.readFileSync(draftPath(projectId), 'utf-8');
   } catch (e) {
     return null;
   }
 };
 
-// Ensure the drafts directory and the <slug>.md file exist. If the file
+// Ensure the drafts directory and the <projectId>.md file exist. If the file
 // is already there, leave it alone. Returns a tagged record consumed in
 // PureScript — same shape as Filesystem.renameProjectDirectory_'s result.
-export const ensureDraft_ = (slug) => (projectName) => () => {
-  if (!isSafeSlug(slug)) {
-    return { kind: 'error', absPath: '', error: 'invalid slug: ' + String(slug) };
+export const ensureDraft_ = (projectId) => (projectName) => () => {
+  if (!isSafeKey(projectId)) {
+    return { kind: 'error', absPath: '', error: 'invalid project id: ' + String(projectId) };
   }
-  const absPath = draftPath(slug);
+  const absPath = draftPath(projectId);
   try {
     fs.mkdirSync(BLOG_DRAFTS_DIR, { recursive: true });
     if (!fs.existsSync(absPath)) {
       const safeName = projectName && projectName.length > 0 ? projectName : 'Untitled';
-      const template = '# ' + safeName + '\n\n*Project: ' + slug + '*\n\n';
+      const template = '# ' + safeName + '\n\n*Project: #' + keyOf(projectId) + '*\n\n';
       // flag 'wx' fails if the file exists — atomic race safety.
       fs.writeFileSync(absPath, template, { flag: 'wx' });
     }
@@ -73,11 +74,11 @@ export const ensureDraft_ = (slug) => (projectName) => () => {
 // Write a draft file with the given body only if it does not already
 // exist. Used by the one-time startup migration that hoists pre-existing
 // DB blog_content values onto disk.
-export const writeDraftIfMissing_ = (slug) => (body) => () => {
-  if (!isSafeSlug(slug)) {
-    return { kind: 'error', absPath: '', error: 'invalid slug: ' + String(slug) };
+export const writeDraftIfMissing_ = (projectId) => (body) => () => {
+  if (!isSafeKey(projectId)) {
+    return { kind: 'error', absPath: '', error: 'invalid project id: ' + String(projectId) };
   }
-  const absPath = draftPath(slug);
+  const absPath = draftPath(projectId);
   try {
     fs.mkdirSync(BLOG_DRAFTS_DIR, { recursive: true });
     if (fs.existsSync(absPath)) {
@@ -119,10 +120,10 @@ export const openInVSCode_ = (absPath) => () => {
 };
 
 // =============================================================================
-// Blog assets — images saved to $BLOG_DRAFTS/<slug>/ for embedding in drafts
+// Blog assets — images saved to $BLOG_DRAFTS/<projectId>/ for embedding in drafts
 // =============================================================================
 
-const assetDir = (slug) => path.join(BLOG_DRAFTS_DIR, slug);
+const assetDir = (projectId) => path.join(BLOG_DRAFTS_DIR, keyOf(projectId));
 
 // Safe filename: timestamp + optional suffix. Only allow [a-z0-9_-.]
 const SAFE_FN_RE = /^[a-z0-9_.-]+$/i;
@@ -130,16 +131,16 @@ const isSafeFilename = (s) =>
   typeof s === 'string' && s.length > 0 && s.length <= 200
   && SAFE_FN_RE.test(s) && !s.includes('..');
 
-// Save base64-encoded image data to <slug>/<filename>. Creates the
+// Save base64-encoded image data to <projectId>/<filename>. Creates the
 // directory if needed. Returns { kind, filename, absPath, error }.
-export const saveBlogAsset_ = (slug) => (filename) => (base64Data) => () => {
-  if (!isSafeSlug(slug)) {
-    return { kind: 'error', filename: '', absPath: '', error: 'invalid slug' };
+export const saveBlogAsset_ = (projectId) => (filename) => (base64Data) => () => {
+  if (!isSafeKey(projectId)) {
+    return { kind: 'error', filename: '', absPath: '', error: 'invalid project id' };
   }
   if (!isSafeFilename(filename)) {
     return { kind: 'error', filename: '', absPath: '', error: 'invalid filename' };
   }
-  const dir = assetDir(slug);
+  const dir = assetDir(projectId);
   const absPath = path.join(dir, filename);
   // Belt-and-braces: ensure resolved path is inside the drafts dir.
   const resolved = path.resolve(absPath);
@@ -156,11 +157,11 @@ export const saveBlogAsset_ = (slug) => (filename) => (base64Data) => () => {
   }
 };
 
-// List image files in <slug>/ directory. Returns an array of
+// List image files in <projectId>/ directory. Returns an array of
 // { filename, size } objects, or an empty array if the dir is missing.
-export const listBlogAssets_ = (slug) => () => {
-  if (!isSafeSlug(slug)) return [];
-  const dir = assetDir(slug);
+export const listBlogAssets_ = (projectId) => () => {
+  if (!isSafeKey(projectId)) return [];
+  const dir = assetDir(projectId);
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     return entries
@@ -192,4 +193,13 @@ export const getRowString_ = (key) => (row) => {
   if (row == null) return '';
   const v = row[key];
   return v == null ? '' : String(v);
+};
+
+// Same, for the numeric key the draft files are named by. Returns 0 for a
+// missing or unparseable value, which `isSafeKey` then refuses — so a row
+// with no usable id is skipped rather than writing to a file called "NaN.md".
+export const getRowInt_ = (key) => (row) => {
+  if (row == null) return 0;
+  const n = Number(row[key]);
+  return Number.isSafeInteger(n) ? n : 0;
 };

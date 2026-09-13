@@ -17,7 +17,6 @@ const toIso = (v) => {
 export const buildActivityJson = (rows) => (halflife) => (windowDays) => (limit) => {
   const projects = (rows || []).map(row => ({
     id: Number(row.id),
-    slug: row.slug || null,
     name: row.name,
     domain: row.domain,
     subdomain: row.subdomain || null,

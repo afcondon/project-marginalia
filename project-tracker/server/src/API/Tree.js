@@ -44,7 +44,6 @@ export const buildTreeJson = (projectRows) => (depRows) => (tag) => (group) => (
 
   let all = (projectRows || []).map((row) => ({
     id: Number(row.id),
-    slug: row.slug || null,
     name: row.name,
     domain: row.domain || null,
     status: row.status || null,
@@ -77,7 +76,7 @@ export const buildTreeJson = (projectRows) => (depRows) => (tag) => (group) => (
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
     const value = kids.length ? kids.reduce((s, k) => s + k.value, 0) : 1;
     const node = {
-      id: p.id, slug: p.slug, name: p.name,
+      id: p.id, name: p.name,
       domain: p.domain, status: p.status,
       tags: p.tags, value, children: kids,
     };
@@ -87,6 +86,20 @@ export const buildTreeJson = (projectRows) => (depRows) => (tag) => (group) => (
     if (p.repoUrl) node.repoUrl = p.repoUrl;
     return node;
   }
+
+  // The two kinds of node in this tree that are NOT projects, and what they
+  // carry for identity now that the slugs are gone (2026-09-13).
+  //
+  // Neither has a project id, because neither is a project — the root is the
+  // whole tracker and a domain node is a heading. They keep the ids they
+  // always had, and those ids are already the discriminator: 0 for the root,
+  // and negative for the domain super-nodes, both outside the range
+  // `seq_projects` can ever issue. A consumer that wants "is this a real
+  // project" asks `id > 0`, which it could not have asked of a slug.
+  const syntheticRoot = {
+    id: 0, name: 'Marginalia',
+    domain: null, status: null, tags: [],
+  };
 
   function collectIds(node, into) {
     into.add(node.id);
@@ -101,12 +114,7 @@ export const buildTreeJson = (projectRows) => (depRows) => (tag) => (group) => (
       .filter((p) => p.tags.includes(TAG))
       .map(buildNode)
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
-    tree = {
-      id: 0, slug: 'marginalia', name: 'Marginalia',
-      domain: null, status: null, tags: [],
-      value: kids.reduce((s, k) => s + k.value, 0),
-      children: kids,
-    };
+    tree = { ...syntheticRoot, value: kids.reduce((s, k) => s + k.value, 0), children: kids };
   } else if (ROOT_ID != null && byId.has(ROOT_ID)) {
     tree = buildNode(byId.get(ROOT_ID));
   } else {
@@ -127,16 +135,11 @@ export const buildTreeJson = (projectRows) => (depRows) => (tag) => (group) => (
       children = [...byDomain.entries()]
         .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
         .map(([d, kids], i) => ({
-          id: -(i + 1), slug: `domain-${d}`, name: d, domain: d, status: null,
+          id: -(i + 1), name: d, domain: d, status: null,
           tags: [], value: kids.reduce((s, k) => s + k.value, 0), children: kids,
         }));
     }
-    tree = {
-      id: 0, slug: 'marginalia', name: 'Marginalia',
-      domain: null, status: null, tags: [],
-      value: children.reduce((s, k) => s + k.value, 0),
-      children,
-    };
+    tree = { ...syntheticRoot, value: children.reduce((s, k) => s + k.value, 0), children };
   }
 
   // Keep only edges whose endpoints are both present in the emitted subtree.

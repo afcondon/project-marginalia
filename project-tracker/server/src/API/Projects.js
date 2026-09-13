@@ -39,7 +39,6 @@ const filePathToAttachmentUrl = (filePath) => {
 export const buildProjectListJson = (rows) => {
   const projects = (rows || []).map(row => ({
     id: Number(row.id),
-    slug: row.slug || null,
     parentId: row.parent_id != null ? Number(row.parent_id) : null,
     name: row.name,
     domain: row.domain,
@@ -65,16 +64,16 @@ const _rawDraftsDir = process.env.MARGINALIA_BLOG_DRAFTS || _defaultDraftsDir;
 const BLOG_DRAFTS_DIR = _rawDraftsDir.endsWith('/') ? _rawDraftsDir.slice(0, -1) : _rawDraftsDir;
 
 // Build JSON for the Letters Page (GET /api/blog/drafts). Reads each
-// project's <slug>.md from disk for word count and filename.
+// project's <projectId>.md from disk for word count and filename.
 export const buildBlogDraftsJson_ = (rows) => () => {
   const drafts = (rows || []).map(row => {
-    const slug = row.slug || '';
-    const filename = slug ? slug + '.md' : null;
+    const id = Number(row.id);
+    const filename = Number.isSafeInteger(id) && id > 0 ? id + '.md' : null;
     let wordCount = 0;
     let hasFile = false;
-    if (slug) {
+    if (filename) {
       try {
-        const content = fs.readFileSync(path.join(BLOG_DRAFTS_DIR, slug + '.md'), 'utf-8');
+        const content = fs.readFileSync(path.join(BLOG_DRAFTS_DIR, filename), 'utf-8');
         hasFile = true;
         // Word count: split on whitespace, ignore empty tokens and markdown
         // frontmatter/headings (rough but good enough for a summary).
@@ -82,8 +81,7 @@ export const buildBlogDraftsJson_ = (rows) => () => {
       } catch { /* file doesn't exist yet */ }
     }
     return {
-      id: Number(row.id),
-      slug,
+      id,
       name: row.name || '',
       domain: row.domain || '',
       blogStatus: row.blog_status || null,
@@ -117,7 +115,6 @@ export const buildProjectDetailJson = (project) => (notes) => (deps) => (attachm
 
   return JSON.stringify({
     id: projectId,
-    slug: project.slug || null,
     parentId: project.parent_id != null ? Number(project.parent_id) : null,
     name: project.name,
     domain: project.domain,

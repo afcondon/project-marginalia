@@ -276,7 +276,6 @@ type State =
 type PendingSummary =
   { projectId :: Int
   , projectName :: String
-  , projectSlug :: Maybe String
   , status :: Status
   , newSummary :: String
   , oldSummary :: String
@@ -286,7 +285,6 @@ type PendingSummary =
 type WeatherNotesGroup =
   { projectId :: Int
   , projectName :: String
-  , projectSlug :: Maybe String
   , notes :: Array
       { id :: Int
       , content :: String
@@ -377,7 +375,7 @@ data Action
   | CopyImageMarkdown String   -- markdown string to copy, e.g. "![alt](url)"
   -- Letters Page: inline blog status changes (promote/demote)
   | LettersSetStatus Int String  -- project id, new blog_status string
-  | LettersToggleExpand Int String  -- project id, slug — expand/collapse row
+  | LettersToggleExpand Int        -- project id — expand/collapse row
   | LettersPasteImage { filename :: String, base64 :: String }  -- clipboard paste
   | LettersCopyMarkdown String  -- copy asset markdown to clipboard
   -- Open project in an external app via the /api/projects/:id/open endpoint
@@ -940,7 +938,7 @@ renderLettersRowWithExpand state groupStatus draft =
       expandClass = if isExpanded then " letters-row-expanded" else ""
       dataRow = HH.tr
         [ HP.class_ (H.ClassName ("letters-row" <> (if draft.hasFile then "" else " letters-row-nofile") <> expandClass))
-        , HE.onClick \_ -> LettersToggleExpand draft.id draft.slug
+        , HE.onClick \_ -> LettersToggleExpand draft.id
         ]
         [ HH.td [ HP.class_ (H.ClassName "letters-name") ]
             [ HH.text draft.name ]
@@ -1417,10 +1415,13 @@ renderProjectCard state idx project =
             Just sub -> HH.span [ HP.class_ (H.ClassName "card-subdomain") ]
               [ HH.text sub ]
         , renderCardPortBadges state project.id
-        , case project.slug of
-            Nothing -> HH.text ""
-            Just s -> HH.span [ HP.class_ (H.ClassName "card-slug") ]
-              [ HH.text s ]
+        -- The card showed the slug and no id. With the slug gone a card would
+        -- have been identified by `name` alone, which is `TEXT NOT NULL` with
+        -- no unique constraint — unique across today's 272 by luck, not by
+        -- rule, and the thing you need when two are alike is exactly an
+        -- identifier. So the id takes the slug's place, in the slug's slot.
+        , HH.span [ HP.class_ (H.ClassName "card-id") ]
+            [ HH.text ("#" <> show project.id) ]
         , renderCardBlogPill project.blogStatus
         ]
     , case editorial of
@@ -2211,16 +2212,15 @@ allDomains :: Array String
 allDomains =
   [ "programming", "music", "house", "woodworking", "garden", "infrastructure" ]
 
--- | Identifier block: slug (monospace, immutable) + id.
+-- | Identifier block: the id, and the subdomain if there is one.
+-- |
+-- | This used to lead with the slug and follow with the id, the slug in the
+-- | monospace "immutable" style. The id was the immutable one all along.
 renderIdentifierBlock :: forall m. ProjectDetail -> H.ComponentHTML Action () m
 renderIdentifierBlock detail =
   HH.div [ HP.class_ (H.ClassName "identifier-block") ]
-    [ case detail.slug of
-        Just s -> HH.span [ HP.class_ (H.ClassName "identifier-slug") ]
-          [ HH.text s ]
-        Nothing -> HH.text ""
-    , HH.span [ HP.class_ (H.ClassName "identifier-id") ]
-        [ HH.text ("id " <> show detail.id) ]
+    [ HH.span [ HP.class_ (H.ClassName "identifier-id") ]
+        [ HH.text ("#" <> show detail.id) ]
     , case detail.subdomain of
         Just sd | not (String.null sd) -> HH.span
           [ HP.class_ (H.ClassName "identifier-subdomain editable")
@@ -3121,7 +3121,7 @@ handleAction = case _ of
     -- Refresh the letters table
     handleAction LoadBlogDrafts
 
-  LettersToggleExpand projectId _slug -> do
+  LettersToggleExpand projectId -> do
     st <- H.get
     if st.lettersExpanded == Just projectId
       then H.modify_ \s -> s { lettersExpanded = Nothing, lettersAssets = [] }
@@ -3564,7 +3564,6 @@ pendingFromProject p = case p.description of
     Just { newSummary, oldSummary } -> Just
       { projectId: p.id
       , projectName: p.name
-      , projectSlug: p.slug
       , status: p.status
       , newSummary: newSummary
       , oldSummary: oldSummary
@@ -3589,7 +3588,6 @@ notesGroupFromDetail cutoff d =
        else Just
          { projectId: d.id
          , projectName: d.name
-         , projectSlug: d.slug
          , notes: recent
          }
 
