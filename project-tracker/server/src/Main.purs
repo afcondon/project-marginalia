@@ -280,6 +280,7 @@ main = launchAff_ do
     log "  GET    /api/agent/projects/:id           - Full project detail"
     log "  POST   /api/agent/projects/:id/status      - Update status (validated)"
     log "  POST   /api/agent/projects/:id/notes       - Add a note"
+    log "  PUT    /api/notes/:id                      - Amend a note in place (keeps id + created_at)"
     log "  DELETE /api/notes/:id                      - Delete a note"
     log "  DELETE /api/projects/:id/tags?name=<tag>   - Remove a tag from a project"
     log "  POST   /api/agent/projects/:id/attachments - Register an attachment reference"
@@ -385,6 +386,9 @@ main = launchAff_ do
         _ -> ok """{ "error": "Method not allowed" }"""
 
       NoteById noteId -> case method of
+        Put -> do
+          bodyStr <- toString body
+          Agent.agentUpdateNote db noteId bodyStr
         Delete -> Agent.agentDeleteNote db noteId
         Options -> ok' corsHeaders ""
         _ -> ok """{ "error": "Method not allowed" }"""

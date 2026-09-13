@@ -11,6 +11,7 @@ module API.Agent
   , agentGetProject
   , agentUpdateStatus
   , agentAddNote
+  , agentUpdateNote
   , agentDeleteNote
   , agentAddAttachment
   , agentUploadAttachment
@@ -322,6 +323,46 @@ agentAddNote db projectId bodyStr = case parseBody bodyStr of
         case firstRow noteRows of
           Nothing   -> ok' jsonHeaders "{}"
           Just note -> ok' jsonHeaders (buildAgentNoteJson note)
+
+-- =============================================================================
+-- PUT /api/notes/:id
+-- =============================================================================
+
+-- | Amend a note's content in place, keeping its id, its project and its
+-- | `created_at`. The alternative — DELETE then POST — is what this exists to
+-- | stop: it renumbers the note and re-dates it, so a corrected note sorts to
+-- | the top of the project's history as if the correction were the event. The
+-- | note is a dated record; correcting a sentence in it is not a new record.
+-- |
+-- | NOT idempotent-on-missing, unlike `agentDeleteNote`: a PUT that names a
+-- | note id that does not exist is a caller error worth hearing about, because
+-- | the whole value of this endpoint is that the id is the thing being kept.
+-- | An empty or absent `content` is a 400 for the same reason — silently
+-- | blanking a note is the one outcome worse than refusing.
+agentUpdateNote :: Database -> Int -> String -> Aff Response
+agentUpdateNote db noteId bodyStr = case parseBody bodyStr of
+  Nothing  -> badRequest' jsonHeaders """{"error": "Invalid JSON body"}"""
+  Just obj -> case getFieldMaybe "content" obj of
+    Nothing      -> badRequest' jsonHeaders """{"error": "Missing or empty 'content'"}"""
+    Just content -> do
+      let idParam = [ unsafeToForeign noteId ]
+      existing <- queryAllParams db
+        "SELECT id FROM project_notes WHERE id = ?"
+        idParam
+      case firstRow existing of
+        Nothing -> notFound
+        Just _  -> do
+          run db
+            "UPDATE project_notes SET content = ? WHERE id = ?"
+            [ unsafeToForeign content
+            , unsafeToForeign noteId
+            ]
+          updated <- queryAllParams db
+            "SELECT * FROM project_notes WHERE id = ?"
+            idParam
+          case firstRow updated of
+            Nothing   -> ok' jsonHeaders "{}"
+            Just note -> ok' jsonHeaders (buildAgentNoteJson note)
 
 -- =============================================================================
 -- DELETE /api/notes/:id
