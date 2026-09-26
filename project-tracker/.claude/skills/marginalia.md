@@ -20,7 +20,7 @@ The **MacMini is the canonical host** (since project #203 landed,
   is correct only in a shell ON the mini itself. Override with the
   `MARGINALIA_API` env var for unusual setups.
 - **Frontend**: `http://andrews-mac-mini:3101`.
-- **DB**: DuckDB at `~/work/afc-work/agent-teams/project-tracker/database/tracker.duckdb` **on the mini** (login `andrew`).
+- **DB**: DuckDB at `~/work/marginalia-demo/project-tracker/database/tracker.duckdb` **on the mini** (login `andrew`). The Mini runs Marginalia from `~/work/marginalia-demo`, outside the `afc-work` layout; the path under `agent-teams/` exists only on the MBP, as a cold mirror.
 
 If the API isn't responding: check Tailscale is up, then check the
 launchd agents on the mini (`ssh andrew@andrews-mac-mini`, see
